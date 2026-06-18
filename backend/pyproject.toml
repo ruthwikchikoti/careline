@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 authors = [{ name = "CareLine Team" }]
 dependencies = [
     "pydantic>=2.6",
+    "pydantic-settings>=2.2",
 ]
 
 [project.optional-dependencies]
