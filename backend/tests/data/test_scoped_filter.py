@@ -8,6 +8,7 @@ dict assertions (no DB needed).
 from datetime import datetime, timezone
 
 from careline.adapters.mongo.filters import (
+    caller_filter,
     history_filter,
     scoped_filter,
     valid_slice_filter,
@@ -44,3 +45,8 @@ def test_valid_slice_filter_encodes_half_open_and_approval():
 def test_history_filter_is_the_complement():
     f = history_filter(doctor_id="dr-X", patient_id="patient-A", now=NOW)
     assert f["superseded_at"] == {"$ne": None, "$lte": NOW}  # already retired
+
+
+def test_caller_filter_is_tenant_scoped():
+    f = caller_filter(doctor_id="dr-X", caller_id="+919876543210")
+    assert f == {"doctor_id": "dr-X", "caller_id": "+919876543210"}
