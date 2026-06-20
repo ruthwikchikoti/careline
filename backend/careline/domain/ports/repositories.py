@@ -31,7 +31,7 @@ from datetime import datetime
 
 from careline.domain.model.consultation import Consultation
 from careline.domain.model.fact import Fact
-from careline.domain.model.patient import Patient, ValidSlice
+from careline.domain.model.patient import Patient, PatientIdentity, ValidSlice
 
 
 class PatientRepository(ABC):
@@ -97,6 +97,22 @@ class PatientRepository(ABC):
     @abstractmethod
     async def soft_delete(self, *, doctor_id: str, patient_id: str) -> int:
         """DPDP erasure: null the clinical text but keep the skeleton; return count."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def find_by_caller(
+        self, *, doctor_id: str, caller_id: str
+    ) -> PatientIdentity | None:
+        """Lookup by caller-id under one doctor.
+
+        ``None`` when the caller is unknown to this doctor — never another tenant's
+        patient.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def upsert_identity(self, *, identity: PatientIdentity) -> None:
+        """Register or update caller-id/pin_hmac for a patient (doctor-scoped)."""
         raise NotImplementedError
 
 
