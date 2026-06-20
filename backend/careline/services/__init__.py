@@ -6,6 +6,7 @@ from careline.services.approval_service import (
     ApprovalService,
     NoFactsError,
 )
+from careline.services.auth_service import AuthService
 from careline.services.consultation_service import (
     ConsentViolation,
     ConsultationNotFound,
@@ -16,11 +17,16 @@ from careline.services.extraction_service import (
     ExtractionService,
     NoTranscriptError,
 )
+from careline.services.patient_lookup_service import (
+    PatientLookupService,
+    PatientNotFound,
+)
 
 __all__ = [
     "AlreadyApprovedError",
     "ApprovalResult",
     "ApprovalService",
+    "AuthService",
     "ConsentViolation",
     "ConsultationNotFound",
     "ConsultationService",
@@ -28,4 +34,6 @@ __all__ = [
     "ExtractionService",
     "NoFactsError",
     "NoTranscriptError",
+    "PatientLookupService",
+    "PatientNotFound",
 ]
