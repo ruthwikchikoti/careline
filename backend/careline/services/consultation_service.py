@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from careline.domain.model.consent import Consent
 from careline.domain.model.consultation import Consultation
+from careline.domain.model.fact import Fact
 from careline.domain.ports.repositories import ConsultationRepository
 from careline.services.audit_service import AuditEventKind, AuditService
 
@@ -138,6 +139,27 @@ class ConsultationService:
             raise ConsentViolation(str(exc)) from exc
         await self._repo.save(approved)
         return approved
+
+    async def attach_facts(
+        self,
+        *,
+        doctor_id: str,
+        consultation_id: str,
+        facts: tuple[Fact, ...],
+        now: datetime | None = None,
+    ) -> Consultation:
+        """Attach drafted facts to a consented consultation (not yet approved)."""
+        now = now or datetime.now(timezone.utc)
+        consultation = await self._get_or_raise(
+            doctor_id=doctor_id, consultation_id=consultation_id
+        )
+        if not consultation.is_processable:
+            raise ConsentViolation(
+                "cannot attach facts to a consultation without active consent"
+            )
+        updated = consultation.with_facts(facts)
+        await self._repo.save(updated)
+        return updated
 
     async def get(
         self, *, doctor_id: str, consultation_id: str
