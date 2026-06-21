@@ -35,3 +35,8 @@ def test_error_responses_do_not_leak_tracebacks(client: TestClient):
     body = response.text
     assert "Traceback" not in body
     assert "File \"" not in body
+
+
+def test_lifespan_wires_langgraph(client: TestClient):
+    assert client.app.state.graph is not None
+    assert client.app.state.graph.compiled is not None

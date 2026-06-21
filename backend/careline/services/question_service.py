@@ -1,14 +1,12 @@
 """QuestionService — the brain endpoint use-case (VI-6).
 
-Orchestrates one patient question through the safety spine:
-
-    triage rails → valid slice → reasoner → verifier → gate chain → delivery
+Thin application wrapper around the safety spine: delegates the verdict to
+Ruthwik's compiled LangGraph when injected, otherwise falls back to the inline
+pipeline (offline tests / eval harness).
 
 Manages per-call ``CallSession`` state (clarify-turn budget) and hands
-ESCALATE verdicts to the telephony port.  When Ruthwik's ``Brain`` lands
-(RU-3), this service becomes its thin application wrapper; until then it
-implements the pipeline directly so Naresh's ``/internal/run-question`` router
-has something to call.
+ESCALATE verdicts to the telephony port. Naresh's ``/internal/run-question``
+router calls this service.
 
 Owner: Vinay (scope ``safety``).
 """
@@ -16,6 +14,7 @@ Owner: Vinay (scope ``safety``).
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from careline.adapters.llm.tracing import trace_span
 from careline.adapters.telephony.stub import EscalationPayload, TelephonyPort, TelephonyStub
@@ -29,6 +28,9 @@ from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 from careline.services.audit_service import AuditEventKind, AuditService
 
+if TYPE_CHECKING:
+    from careline.adapters.orchestration.graph import CompiledBrainGraph
+
 
 class QuestionService:
     """Run one question through the safety spine for a single patient call."""
@@ -36,14 +38,23 @@ class QuestionService:
     def __init__(
         self,
         *,
-        reasoner: Reasoner,
-        verifier: Verifier,
+        reasoner: Reasoner | None = None,
+        verifier: Verifier | None = None,
+        graph: CompiledBrainGraph | None = None,
         telephony: TelephonyPort | None = None,
         thresholds: Thresholds | None = None,
         audit: AuditService | None = None,
     ) -> None:
-        self._reasoner = reasoner
-        self._verifier = verifier
+        if graph is not None:
+            self._graph = graph
+            self._reasoner = None
+            self._verifier = None
+        elif reasoner is not None and verifier is not None:
+            self._graph = None
+            self._reasoner = reasoner
+            self._verifier = verifier
+        else:
+            raise ValueError("QuestionService requires graph or (reasoner, verifier)")
         self._telephony = telephony or TelephonyStub()
         self._thresholds = thresholds or DEFAULT_THRESHOLDS
         self._audit = audit
@@ -120,6 +131,15 @@ class QuestionService:
         now: datetime,
         trace: ReasoningTrace,
     ) -> Decision:
+        if self._graph is not None:
+            return self._graph.run_question(
+                question=question,
+                patient=patient,
+                now=now,
+                session=session,
+                trace=trace,
+            )
+
         # -- Pre-LLM triage: red-flag rail ------------------------------------
         matched = check_red_flag(question)
         if matched:
