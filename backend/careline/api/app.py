@@ -17,6 +17,7 @@ from careline.adapters.mongo.supersession import plan_supersession
 from careline.api.errors import register_exception_handlers
 from careline.api.routers import (
     auth_router,
+    brain_router,
     consultations_router,
     patients_router,
 )
@@ -207,6 +208,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(patients_router)
     app.include_router(consultations_router)
+    app.include_router(brain_router)
     if settings is not None:
         app.state.settings = settings
     return app
