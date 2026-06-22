@@ -7,13 +7,43 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from careline.adapters.auth.principals import DoctorPrincipal
 from careline.api.deps import get_current_doctor
-from careline.api.dto.patients import ErasureOut, PatientOut
+from careline.api.dto.patients import ErasureOut, PatientOut, PatientRegisterIn
+from careline.domain.model.patient import PatientIdentity
+from careline.services.patient_lookup_service import hash_pin
 
 router = APIRouter(prefix="/patients", tags=["patients"])
+
+
+@router.post("", response_model=PatientOut, status_code=status.HTTP_201_CREATED)
+async def register_patient(
+    body: PatientRegisterIn,
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> PatientOut:
+    """Register caller-id + PIN for a patient under the authenticated doctor."""
+    settings = request.app.state.settings
+    pin_hmac = hash_pin(pin=body.pin, secret=settings.pin_hmac_secret)
+    identity = PatientIdentity(
+        patient_id=body.patient_id,
+        doctor_id=principal.doctor_id,
+        caller_id=body.caller_id,
+        pin_hmac=pin_hmac,
+    )
+    await request.app.state.patient_repo.upsert_identity(identity=identity)
+    patient = await request.app.state.patient_repo.get(
+        doctor_id=principal.doctor_id,
+        patient_id=body.patient_id,
+    )
+    fact_count = len(patient.facts) if patient is not None else 0
+    return PatientOut(
+        patient_id=body.patient_id,
+        doctor_id=principal.doctor_id,
+        fact_count=fact_count,
+    )
 
 
 @router.get("/{patient_id}", response_model=PatientOut)

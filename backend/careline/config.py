@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     pin_hmac_secret: str = Field(
         default=_DEFAULT_PIN_HMAC_SECRET, min_length=_MIN_SECRET_BYTES
     )
+    mongo_uri: str | None = Field(
+        default=None,
+        description="MongoDB connection URI; when unset the API uses in-memory stores.",
+    )
 
     @property
     def is_production(self) -> bool:

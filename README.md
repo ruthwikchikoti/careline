@@ -48,4 +48,18 @@ implementation plan, and each member's contribution notes. Working agreements fo
 repo are in [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CLAUDE.md`](CLAUDE.md).
 
 ## Status
-Current: **M0 scaffold + domain enums / Decision trace** (Ruthwik, RU-1/RU-2).
+**Backend:** full safety spine (Brain + LangGraph parity), Track A HITL pipeline, REST API
+with JWT/internal auth, DPDP erasure, optional Mongo via `CARELINE_MONGO_URI`, and
+`POST /patients` registration.
+**Web:** Live Agent Console demo (Ruthwik) — dashboard + trace stepper.
+
+```bash
+# Main API (authenticated Track A + brain)
+cd backend && uvicorn careline.api.app:create_app --factory --reload
+
+# Demo console API (zero-setup)
+cd backend && uvicorn careline.demo_server:app --reload
+
+# Web
+cd web && npm install && npm run dev
+```

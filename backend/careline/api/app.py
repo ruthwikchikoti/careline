@@ -164,9 +164,27 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.assert_prod_safe()
 
     audit = AuditService()
-    memory = LocalMemoryProvider()
-    patient_repo = _InMemoryPatientRepository()
-    consultation_repo = _InMemoryConsultationRepository()
+    mongo_client = None
+
+    if settings.mongo_uri:
+        from careline.adapters.mongo import (
+            MongoConsultationRepository,
+            MongoMemoryProvider,
+            MongoPatientRepository,
+            create_client,
+            ensure_indexes,
+        )
+
+        mongo_client = create_client(settings.mongo_uri)
+        database = mongo_client["careline"]
+        await ensure_indexes(database)
+        patient_repo = MongoPatientRepository(database)
+        consultation_repo = MongoConsultationRepository(database)
+        memory = MongoMemoryProvider(database)
+    else:
+        patient_repo = _InMemoryPatientRepository()
+        consultation_repo = _InMemoryConsultationRepository()
+        memory = LocalMemoryProvider()
 
     consultation_svc = ConsultationService(repo=consultation_repo, audit=audit)
     auth_svc = AuthService(settings=settings)
@@ -196,8 +214,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.graph = graph
     app.state.question_svc = question_svc
     app.state.dpdp_svc = dpdp_svc
+    app.state.mongo_client = mongo_client
 
     yield
+
+    if mongo_client is not None:
+        mongo_client.close()
 
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:

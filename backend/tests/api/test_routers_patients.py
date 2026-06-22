@@ -39,3 +39,51 @@ def test_get_patient_happy_path(client: TestClient, dr_x_headers: dict[str, str]
     assert payload["doctor_id"] == "dr-X"
     assert payload["fact_count"] > 0
     assert "pin_hmac" not in payload
+
+
+def test_register_patient_happy_path(client: TestClient, authed_headers: dict[str, str]):
+    response = client.post(
+        "/patients",
+        headers=authed_headers,
+        json={
+            "patient_id": "patient-new",
+            "caller_id": "+919876543210",
+            "pin": "1234",
+        },
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["patient_id"] == "patient-new"
+    assert payload["doctor_id"] == "dr-A"
+    assert payload["fact_count"] == 0
+    assert "pin_hmac" not in payload
+
+
+def test_register_patient_rejects_doctor_id_in_body(
+    client: TestClient,
+    authed_headers: dict[str, str],
+):
+    response = client.post(
+        "/patients",
+        headers=authed_headers,
+        json={
+            "patient_id": "patient-new",
+            "caller_id": "+919876543210",
+            "pin": "1234",
+            "doctor_id": "dr-evil",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_register_patient_without_auth_returns_401(client: TestClient):
+    response = client.post(
+        "/patients",
+        json={
+            "patient_id": "patient-new",
+            "caller_id": "+919876543210",
+            "pin": "1234",
+        },
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "unauthorized"}

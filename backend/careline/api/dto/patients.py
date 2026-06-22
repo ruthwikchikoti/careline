@@ -5,7 +5,17 @@ Owner: Naresh (scope ``api``).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class PatientRegisterIn(BaseModel):
+    """Register a patient identity — plain PIN is hashed server-side, never stored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    patient_id: str
+    caller_id: str
+    pin: str = Field(min_length=4, max_length=12)
 
 
 class PatientOut(BaseModel):
