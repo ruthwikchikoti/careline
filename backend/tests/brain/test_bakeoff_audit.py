@@ -77,3 +77,37 @@ class TestDigestService:
         digest = DigestService(audit).build_daily_digest("dr-1", date(2026, 6, 21))
         assert "dr-1" in digest
         assert "call-1" in digest
+
+
+class TestAuditRedaction:
+    def test_redact_patient_nulls_clinical_text_keeps_skeleton(self):
+        audit = AuditService()
+        audit.log_call(call_id="call-1", patient_id="p-1", doctor_id="dr-1", started_at=_NOW)
+        audit.log_turn(
+            call_id="call-1",
+            patient_id="p-1",
+            doctor_id="dr-1",
+            question="paracetamol dose?",
+            decision=Decision.answer("Paracetamol 500mg.", confidence=0.9),
+            logged_at=_NOW,
+        )
+        count = audit.redact_patient("p-1")
+        assert count >= 1
+        turn = audit.turns_for_patient("p-1")[0]
+        assert turn.redacted
+        assert turn.question is None
+        assert turn.answer_text is None
+        assert turn.verdict is Verdict.ANSWER
+        assert turn.turn_id  # skeleton retained
+
+        digest = DigestService(audit).build_call_digest("call-1")
+        assert "redacted" in digest.lower()
+
+
+class TestEvalRerun:
+    def test_offline_eval_rerun_all_pass(self):
+        from careline.services.eval_rerun import rerun_offline_eval
+
+        results, digest = rerun_offline_eval()
+        assert all(ok for _, _, ok in results)
+        assert "4/4" in digest
