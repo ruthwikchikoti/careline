@@ -15,7 +15,6 @@ from careline.services.consultation_service import (
 from careline.services.extraction_service import (
     ExtractedRecord,
     ExtractionService,
-    NoTranscriptError,
 )
 from careline.services.patient_lookup_service import (
     PatientLookupService,
@@ -33,7 +32,6 @@ __all__ = [
     "ExtractedRecord",
     "ExtractionService",
     "NoFactsError",
-    "NoTranscriptError",
     "PatientLookupService",
     "PatientNotFound",
 ]

@@ -36,10 +36,6 @@ from careline.services.consultation_service import (
 )
 
 
-class NoTranscriptError(ValueError):
-    """Raised when extraction is requested on a consultation without a transcript."""
-
-
 class ExtractedFactDTO(BaseModel):
     """Flat wire shape for one extracted fact before domain materialisation."""
 
@@ -326,21 +322,21 @@ class ExtractionService:
             raise ConsultationNotFound(
                 f"consultation {consultation_id!r} not found for doctor {doctor_id!r}"
             )
-        if consultation.transcript is None or not consultation.transcript.strip():
-            raise NoTranscriptError(
-                "cannot extract from a consultation without a transcript"
-            )
         if not consultation.is_processable:
             raise ConsentViolation(
                 "cannot extract from a consultation without active consent"
             )
 
-        record = self._extractor.extract(
-            transcript=consultation.transcript,
-            consultation_id=consultation_id,
-            now=now,
-        )
-        facts = record.to_facts(now=now)
+        if consultation.transcript is None or not consultation.transcript.strip():
+            facts: tuple[Fact, ...] = ()
+        else:
+            record = self._extractor.extract(
+                transcript=consultation.transcript,
+                consultation_id=consultation_id,
+                now=now,
+            )
+            facts = record.to_facts(now=now)
+
         updated = await self._consultation_svc.attach_facts(
             doctor_id=doctor_id,
             consultation_id=consultation_id,
@@ -363,5 +359,4 @@ __all__ = [
     "ExtractedRecord",
     "ExtractionService",
     "HeuristicExtractor",
-    "NoTranscriptError",
 ]
