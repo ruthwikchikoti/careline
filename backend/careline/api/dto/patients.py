@@ -16,3 +16,14 @@ class PatientOut(BaseModel):
     patient_id: str
     doctor_id: str
     fact_count: int
+
+
+class ErasureOut(BaseModel):
+    """Outcome of DPDP right-to-erasure — no clinical payloads."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    patient_id: str
+    layer1_nulled: int
+    layer2_dropped: bool
+    audit_redacted: int

@@ -19,6 +19,7 @@ from careline.domain.ports.reasoning import ReasonerUnavailable
 from careline.services.approval_service import AlreadyApprovedError, NoFactsError
 from careline.services.consultation_service import ConsentViolation, ConsultationNotFound
 from careline.services.extraction_service import NoTranscriptError
+from careline.services.dpdp_service import ErasedNothing
 from careline.services.patient_lookup_service import PatientNotFound
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(PatientNotFound)
     @app.exception_handler(ConsultationNotFound)
+    @app.exception_handler(ErasedNothing)
     async def _not_found(_request: Request, _exc: Exception) -> JSONResponse:
         return _json(404, "not found")
 
