@@ -173,13 +173,13 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
         )
         return {"decision": run_gate_chain(ctx)}
 
-    def answer(state: GraphState) -> dict:
+    def answer(_state: GraphState) -> dict:
         return {"route": "answer"}
 
-    def clarify(state: GraphState) -> dict:
+    def clarify(_state: GraphState) -> dict:
         return {"route": "clarify"}
 
-    def escalate(state: GraphState) -> dict:
+    def escalate(_state: GraphState) -> dict:
         return {"route": "escalate"}
 
     # -- routing helpers ------------------------------------------------------
@@ -295,10 +295,30 @@ def build_question_graph(
     )
 
 
+def build_default_graph(config=None, *, thresholds: Thresholds | None = None) -> CompiledBrainGraph:
+    """Assemble the graph from the adapter factory — the composition entry point (RU-6).
+
+    Keyless/offline by default (heuristic twins); honours ``CARELINE_LLM_BACKEND``
+    for the live Anthropic/OpenAI backends. This is what the API lifespan wires into
+    ``app.state`` so one call builds a ready-to-run graph from configuration alone.
+    The factory import is local so selecting an LLM backend never imports a vendor
+    SDK at module load.
+    """
+    from careline.adapters.factory import LLMConfig, build_reasoner, build_verifier
+
+    config = config or LLMConfig.from_env()
+    return build_question_graph(
+        reasoner=build_reasoner(config),
+        verifier=build_verifier(config),
+        thresholds=thresholds,
+    )
+
+
 __all__ = [
     "GraphState",
     "CompiledBrainGraph",
     "build_question_graph",
+    "build_default_graph",
     "AGENT_NODES",
     "TERMINAL_NODES",
 ]
