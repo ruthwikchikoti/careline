@@ -62,7 +62,7 @@ class DigestService:
         ]
         for name, verdict, ok in results:
             status = "PASS" if ok else "FAIL"
-            lines.append(f"  [{status}] {name} → {verdict.value}")
+            lines.append(f"  [{status}] {name} -> {verdict.value}")
         return "\n".join(lines)
 
     def _format_turn(self, index: int, turn: AuditTurnRecord) -> str:
@@ -70,7 +70,7 @@ class DigestService:
         if turn.redacted:
             return f"{prefix} (clinical text redacted)"
         if turn.verdict is Verdict.ANSWER and turn.answer_text:
-            return f"{prefix} — Q: {turn.question!r} → A: {turn.answer_text!r}"
+            return f"{prefix} — Q: {turn.question!r} -> A: {turn.answer_text!r}"
         if turn.verdict is Verdict.ESCALATE and turn.escalation_reason:
             return f"{prefix} — Q: {turn.question!r} — {turn.escalation_reason}"
         if turn.verdict is Verdict.CLARIFY and turn.answer_text:
