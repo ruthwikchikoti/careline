@@ -37,7 +37,7 @@ api = [
 dev = [
     "pytest>=8.0",
     "PyJWT>=2.8",
-    "httpx>=0.27",
+    "httpx2>=2.4",
     "fastapi>=0.111",
 ]
 
