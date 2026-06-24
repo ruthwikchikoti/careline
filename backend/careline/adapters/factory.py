@@ -28,6 +28,7 @@ from enum import Enum
 
 from careline.adapters.llm.anthropic_backend import AnthropicReasoner, AnthropicVerifier
 from careline.adapters.llm.heuristic import HeuristicReasoner, HeuristicVerifier
+from careline.domain.ports.extraction import Extractor
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
 
 _PROD_ENVS = frozenset({"prod", "production"})
@@ -115,4 +116,32 @@ def build_verifier(config: LLMConfig | None = None) -> Verifier:
     raise ReasonerUnavailable(f"no verifier for backend {config.backend!r}")
 
 
-__all__ = ["LLMBackend", "LLMConfig", "build_reasoner", "build_verifier"]
+def build_extractor(config: LLMConfig | None = None) -> Extractor:
+    """Build the :class:`Extractor` for ``config``.
+
+    Unlike the reasoner, the extractor only drafts facts for a doctor to approve
+    (a human-in-the-loop gate), so the regex ``HeuristicExtractor`` is a legitimate
+    keyless fallback — no production guard. When an OpenAI backend is configured the
+    LLM-backed extractor handles any phrasing; otherwise we fall back to heuristic.
+    """
+    config = config or LLMConfig()
+    if config.backend is LLMBackend.OPENAI:
+        from careline.adapters.llm.extraction_backend import OpenAIExtractor  # lazy
+
+        kwargs: dict = {"effort": config.effort, "api_key": config.api_key}
+        if config.model:
+            kwargs["model"] = config.model
+        return OpenAIExtractor(**kwargs)
+    # Heuristic offline fallback (also used for the anthropic/heuristic backends).
+    from careline.services.extraction_service import HeuristicExtractor  # lazy
+
+    return HeuristicExtractor()
+
+
+__all__ = [
+    "LLMBackend",
+    "LLMConfig",
+    "build_reasoner",
+    "build_verifier",
+    "build_extractor",
+]

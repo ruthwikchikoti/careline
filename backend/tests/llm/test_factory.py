@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from careline.adapters.factory import LLMBackend, LLMConfig, build_reasoner, build_verifier
+from careline.adapters.factory import (
+    LLMBackend,
+    LLMConfig,
+    build_extractor,
+    build_reasoner,
+    build_verifier,
+)
 from careline.adapters.llm.anthropic_backend import AnthropicReasoner
+from careline.adapters.llm.extraction_backend import OpenAIExtractor
 from careline.adapters.llm.heuristic import HeuristicReasoner, HeuristicVerifier
+from careline.services.extraction_service import HeuristicExtractor
 
 
 def test_default_is_keyless_heuristic():
@@ -30,6 +38,20 @@ def test_production_guard_rejects_heuristic_stub():
 def test_real_backend_allowed_in_production():
     config = LLMConfig(backend=LLMBackend.ANTHROPIC, environment="production", api_key="sk")
     assert isinstance(build_reasoner(config), AnthropicReasoner)
+
+
+class TestBuildExtractor:
+    def test_default_is_heuristic_fallback(self):
+        assert isinstance(build_extractor(), HeuristicExtractor)
+
+    def test_openai_backend_selects_llm_extractor(self):
+        config = LLMConfig(backend=LLMBackend.OPENAI, api_key="sk-test")
+        assert isinstance(build_extractor(config), OpenAIExtractor)
+
+    def test_anthropic_backend_falls_back_to_heuristic_extractor(self):
+        # Only an OpenAI extractor exists; other backends use the regex fallback.
+        config = LLMConfig(backend=LLMBackend.ANTHROPIC, api_key="sk")
+        assert isinstance(build_extractor(config), HeuristicExtractor)
 
 
 class TestFromEnv:
