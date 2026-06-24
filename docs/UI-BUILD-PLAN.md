@@ -153,6 +153,10 @@ parentheses. **Ruthwik scaffolds the project + design system first (everyone dep
 > tokens; use Naresh's `lib/api` client (never `fetch` raw). Coordinate on shared files
 > (`app/layout.tsx`, nav config) like the backend.
 
+> **Live status of who's built what — and everything left to submit — is tracked in the
+> single team doc [`REMAINING-WORK.md`](REMAINING-WORK.md), not here.** This file is
+> the UI **design reference** only.
+
 ## 6. Screen specs (purpose · key components · API)
 
 | Screen | Owner | Purpose | API call(s) |
