@@ -25,7 +25,7 @@ const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, ready: true, owner: "Ruthwik" },
   { href: "/console", label: "Live Console", icon: MessageSquareText, ready: true, owner: "Ruthwik" },
   { href: "/patients/new", label: "Register patient", icon: UserPlus, ready: true, owner: "Naresh" },
-  { href: "/patients", label: "Patients", icon: Users, ready: false, owner: "Naga" },
+  { href: "/patients", label: "Patients", icon: Users, ready: true, owner: "Naga" },
   { href: "/consultations", label: "Consultations", icon: ClipboardList, ready: true, owner: "Naresh" },
   { href: "/escalations", label: "Escalations", icon: ShieldAlert, ready: true, owner: "Vinay" },
   { href: "/audit", label: "Audit", icon: Activity, ready: true, owner: "Vinay" },
