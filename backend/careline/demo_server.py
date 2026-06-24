@@ -17,6 +17,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+# Load backend/.env (OPENAI_API_KEY, etc.) before anything reads os.environ.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:  # python-dotenv is optional (in the `llm` extra)
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
