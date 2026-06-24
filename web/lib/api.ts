@@ -220,3 +220,66 @@ export function erasePatientData(patientId: string): Promise<ErasureOut> {
     method: "DELETE",
   });
 }
+
+// --- Observability: audit / escalations / eval (Vinay / eval) ---
+
+export interface AuditTurn {
+  turn_id: string;
+  call_id: string;
+  patient_id: string;
+  logged_at: string;
+  verdict: Verdict;
+  question: string | null;
+  answer_text: string | null;
+  escalation_reason: string | null;
+  confidence: number;
+  risk: number;
+  trace_steps: TraceStep[];
+  redacted: boolean;
+}
+
+export interface AuditCall {
+  call_id: string;
+  patient_id: string;
+  started_at: string;
+  ended_at: string | null;
+  turn_count: number;
+  final_verdict: Verdict | null;
+  escalated: boolean;
+  redacted: boolean;
+}
+
+export interface AuditLog {
+  calls: AuditCall[];
+  turns: AuditTurn[];
+}
+
+export interface EscalationsQueue {
+  waiting: number;
+  escalations: AuditTurn[];
+}
+
+export interface EvalScenarioResult {
+  name: string;
+  verdict: Verdict;
+  passed: boolean;
+}
+
+export interface EvalRun {
+  passed: number;
+  total: number;
+  digest: string;
+  scenarios: EvalScenarioResult[];
+}
+
+export function getAuditLog(): Promise<AuditLog> {
+  return authFetch<AuditLog>("/audit");
+}
+
+export function getEscalations(): Promise<EscalationsQueue> {
+  return authFetch<EscalationsQueue>("/escalations");
+}
+
+export function runEval(): Promise<EvalRun> {
+  return authFetch<EvalRun>("/eval");
+}
