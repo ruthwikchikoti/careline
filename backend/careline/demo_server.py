@@ -202,4 +202,4 @@ def demo_ask(body: AskIn, request: Request) -> dict:
     }
 
 
-__all__ = ["app"]
+__all__ = ["AskIn", "_NOW", "_demo_patient", "app", "demo_ask", "demo_patient"]
