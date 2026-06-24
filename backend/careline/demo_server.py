@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from careline.adapters.orchestration.graph import build_default_graph
+from careline.adapters.orchestration.graph import build_default_graph, resolve_llm_config
 from careline.domain.enums import FactKind
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.fact import Instruction, Medication
@@ -84,8 +84,11 @@ def _demo_patient() -> Patient:
     )
 
 
-# Build the graph once (keyless heuristic twins by default).
+# Build the graph once. Prefers a live LLM (OpenAI when OPENAI_API_KEY is set),
+# falling back to the keyless heuristic twins offline.
+_BACKEND = resolve_llm_config().backend.value
 _graph = build_default_graph()
+print(f"[careline.demo] reasoning backend: {_BACKEND}")
 
 
 class AskIn(BaseModel):
@@ -109,6 +112,7 @@ def demo_patient() -> dict:
     return {
         "patient_id": patient.patient_id,
         "doctor_id": patient.doctor_id,
+        "backend": _BACKEND,
         "current_facts": [
             {"id": f.id, "kind": f.kind.value, "summary": f.summary} for f in valid.facts
         ],

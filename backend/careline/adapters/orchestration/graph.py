@@ -29,6 +29,7 @@ Owner: Ruthwik (scope ``graph``).
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import TypedDict
 
@@ -295,18 +296,61 @@ def build_question_graph(
     )
 
 
+def resolve_llm_config(config=None):
+    """Pick the reasoning backend — **a real LLM is the primary path** (RU-6).
+
+    Resolution order:
+      1. An explicit ``config`` argument, if given.
+      2. ``CARELINE_LLM_BACKEND`` env (the team's documented override).
+      3. ``OPENAI_API_KEY`` present → OpenAI (``gpt-5.5``, Responses API).
+      4. ``ANTHROPIC_API_KEY`` present → Anthropic (``claude-opus-4-8``).
+      5. Otherwise → the keyless heuristic twins, as an offline **fallback** only
+         (so CI / the test suite still run with no key).
+
+    A live LLM is preferred whenever a key is available; the heuristic is a
+    stand-in, never the intended production reasoner.
+    """
+    from careline.adapters.factory import LLMConfig, LLMBackend
+
+    if config is not None:
+        return config
+    if os.environ.get("CARELINE_LLM_BACKEND"):
+        return LLMConfig.from_env()
+
+    environment = os.environ.get("CARELINE_ENV", "dev").lower()
+    model = os.environ.get("CARELINE_LLM_MODEL") or None
+    effort = os.environ.get("CARELINE_LLM_EFFORT", "high")
+
+    if os.environ.get("OPENAI_API_KEY"):
+        return LLMConfig(
+            backend=LLMBackend.OPENAI,
+            environment=environment,
+            model=model,
+            effort=effort,
+            api_key=os.environ["OPENAI_API_KEY"],
+        )
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return LLMConfig(
+            backend=LLMBackend.ANTHROPIC,
+            environment=environment,
+            model=model,
+            effort=effort,
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+        )
+    return LLMConfig()  # heuristic fallback (keyless, offline)
+
+
 def build_default_graph(config=None, *, thresholds: Thresholds | None = None) -> CompiledBrainGraph:
     """Assemble the graph from the adapter factory — the composition entry point (RU-6).
 
-    Keyless/offline by default (heuristic twins); honours ``CARELINE_LLM_BACKEND``
-    for the live Anthropic/OpenAI backends. This is what the API lifespan wires into
-    ``app.state`` so one call builds a ready-to-run graph from configuration alone.
-    The factory import is local so selecting an LLM backend never imports a vendor
-    SDK at module load.
+    Prefers a live LLM backend (OpenAI/Anthropic) when a key is present and falls
+    back to the keyless heuristic twins offline — see :func:`resolve_llm_config`.
+    This is what the API lifespan wires into ``app.state``. The factory import is
+    local so selecting an LLM backend never imports a vendor SDK at module load.
     """
-    from careline.adapters.factory import LLMConfig, build_reasoner, build_verifier
+    from careline.adapters.factory import build_reasoner, build_verifier
 
-    config = config or LLMConfig.from_env()
+    config = resolve_llm_config(config)
     return build_question_graph(
         reasoner=build_reasoner(config),
         verifier=build_verifier(config),
@@ -319,6 +363,7 @@ __all__ = [
     "CompiledBrainGraph",
     "build_question_graph",
     "build_default_graph",
+    "resolve_llm_config",
     "AGENT_NODES",
     "TERMINAL_NODES",
 ]

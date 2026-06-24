@@ -33,6 +33,7 @@ export interface DemoFact {
 export interface DemoPatient {
   patient_id: string;
   doctor_id: string;
+  backend: string;
   current_facts: DemoFact[];
 }
 

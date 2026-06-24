@@ -21,6 +21,13 @@ dependencies = [
 auth = [
     "PyJWT>=2.8",
 ]
+# Live reasoning backends (optional). The default spine runs on the keyless
+# heuristic twins; install this extra + set OPENAI_API_KEY (or ANTHROPIC_API_KEY)
+# to run on a real LLM.
+llm = [
+    "openai>=1.40",
+    "anthropic>=0.40",
+]
 api = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
