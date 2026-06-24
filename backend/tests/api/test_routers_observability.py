@@ -67,6 +67,30 @@ def test_escalations_filters_to_escalate_verdict(
     assert payload["escalations"][0]["verdict"] == "escalate"
 
 
+def test_audit_events_requires_auth(client: TestClient):
+    assert client.get("/audit/events").status_code == 401
+
+
+def test_audit_events_are_doctor_scoped(
+    client: TestClient,
+    authed_headers: dict[str, str],
+):
+    from careline.services.audit_service import AuditEventKind
+
+    audit = client.app.state.audit
+    audit.log_event(AuditEventKind.CONSENT, doctor_id="dr-A", detail="dr-A consent")
+    audit.log_event(AuditEventKind.CONSENT, doctor_id="dr-B", detail="dr-B consent")
+    audit.log_event(AuditEventKind.SYSTEM, detail="global system event")
+
+    response = client.get("/audit/events", headers=authed_headers)
+    assert response.status_code == 200
+    details = {event["detail"] for event in response.json()}
+    # dr-A sees its own event + the unattributed system event, never dr-B's.
+    assert "dr-A consent" in details
+    assert "global system event" in details
+    assert "dr-B consent" not in details
+
+
 def test_eval_runs_live_and_reports_results(
     client: TestClient,
     authed_headers: dict[str, str],

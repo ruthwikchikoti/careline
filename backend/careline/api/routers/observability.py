@@ -19,6 +19,7 @@ from careline.adapters.auth.principals import DoctorPrincipal
 from careline.api.deps import get_current_doctor
 from careline.api.dto.observability import (
     AuditCallOut,
+    AuditEventOut,
     AuditLogOut,
     AuditTurnOut,
     EscalationsOut,
@@ -82,6 +83,36 @@ async def get_audit(
         calls=[_call_out(c) for c in calls],
         turns=[_turn_out(t) for t in turns],
     )
+
+
+@router.get("/audit/events", response_model=list[AuditEventOut])
+async def get_audit_events(
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> list[AuditEventOut]:
+    """Doctor-scoped audit events (consent, erasure, eval, system), newest first.
+
+    System events with no doctor attribution (``doctor_id is None``) are visible
+    to every doctor; doctor-stamped events are tenant-scoped.
+    """
+    audit: AuditService = request.app.state.audit
+    events = [
+        e
+        for e in audit.events
+        if e.doctor_id is None or e.doctor_id == principal.doctor_id
+    ]
+    events.sort(key=lambda e: e.logged_at, reverse=True)
+    return [
+        AuditEventOut(
+            event_id=e.event_id,
+            kind=e.kind.value,
+            logged_at=e.logged_at,
+            patient_id=e.patient_id,
+            detail=e.detail,
+            metadata=e.metadata,
+        )
+        for e in events
+    ]
 
 
 @router.get("/escalations", response_model=EscalationsOut)

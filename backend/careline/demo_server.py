@@ -25,13 +25,14 @@ try:
 except ImportError:  # python-dotenv is optional (in the `llm` extra)
     pass
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from careline.adapters.orchestration.graph import build_default_graph, resolve_llm_config
 from careline.domain.enums import FactKind
 from careline.domain.model.call_session import CallSession
+from careline.domain.model.decision import Decision
 from careline.domain.model.fact import Instruction, Medication
 from careline.domain.model.patient import Patient
 from careline.domain.model.temporal import Validity
@@ -127,8 +128,50 @@ def demo_patient() -> dict:
     }
 
 
+def _viewing_doctor_id(request: Request) -> str:
+    """Attribute a demo turn to the signed-in doctor when a token is present.
+
+    The console is auth-free, but in combined mode the doctor is usually logged
+    in. Attributing the turn to *their* ``doctor_id`` (verified via the shared
+    ``auth_svc``) is what makes it surface in *their* audit + escalations queue —
+    and keeps tenant isolation intact, since each doctor only ever sees the turns
+    logged under their own id. Falls back to ``demo-doctor`` when unauthenticated.
+    """
+    auth_svc = getattr(request.app.state, "auth_svc", None)
+    header = request.headers.get("Authorization", "")
+    if auth_svc is not None and header.startswith("Bearer "):
+        token = header.removeprefix("Bearer ").strip()
+        try:
+            return auth_svc.authenticate_doctor(token).doctor_id
+        except Exception:  # noqa: BLE001 — any auth failure → anonymous demo turn
+            pass
+    return "demo-doctor"
+
+
+def _record_demo_turn(request: Request, question: str, decision: Decision) -> None:
+    """Log the console turn to the shared audit sink, if one is mounted.
+
+    Standalone ``demo_server:app`` has no ``app.state.audit`` and simply skips
+    logging; the combined app wires the real :class:`AuditService` so console
+    turns show up in the audit and escalations pages.
+    """
+    audit = getattr(request.app.state, "audit", None)
+    if audit is None:
+        return
+    doctor_id = _viewing_doctor_id(request)
+    call_id = f"web-demo:{doctor_id}"
+    audit.log_call(call_id=call_id, patient_id="demo-patient", doctor_id=doctor_id)
+    audit.log_turn(
+        call_id=call_id,
+        patient_id="demo-patient",
+        doctor_id=doctor_id,
+        question=question,
+        decision=decision,
+    )
+
+
 @app.post("/demo/ask")
-def demo_ask(body: AskIn) -> dict:
+def demo_ask(body: AskIn, request: Request) -> dict:
     """Run one question through the real graph and return verdict + trace."""
     session = CallSession(
         call_id="web-demo",
@@ -139,6 +182,7 @@ def demo_ask(body: AskIn) -> dict:
     decision = _graph.run_question(
         question=body.question, patient=_demo_patient(), now=_NOW, session=session
     )
+    _record_demo_turn(request, body.question, decision)
     return {
         "verdict": decision.verdict.value,
         "answer_text": decision.answer_text,

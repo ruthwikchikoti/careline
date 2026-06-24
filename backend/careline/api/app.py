@@ -17,7 +17,6 @@ from careline.adapters.memory.local import LocalMemoryProvider
 from careline.adapters.mongo.supersession import plan_supersession
 from careline.api.errors import register_exception_handlers
 from careline.api.routers import (
-    audit_router,
     auth_router,
     brain_router,
     consultations_router,
@@ -235,7 +234,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.graph = graph
     app.state.question_svc = question_svc
     app.state.dpdp_svc = dpdp_svc
-    app.state.audit = audit
     app.state.mongo_client = mongo_client
 
     yield
@@ -257,7 +255,6 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(patients_router)
     app.include_router(consultations_router)
-    app.include_router(audit_router)
     app.include_router(brain_router)
     app.include_router(observability_router)
     if settings is not None:
