@@ -1,7 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { getConsultation, listConsultations } from "@/lib/api";
+import { getConsultation, getPatientRecord, listConsultations } from "@/lib/api";
+
+export function usePatientRecord(id: string) {
+  return useQuery({
+    queryKey: ["patient-record", id],
+    queryFn: () => getPatientRecord(id),
+    enabled: Boolean(id),
+  });
+}
 
 export function useConsultation(id: string) {
   return useQuery({
