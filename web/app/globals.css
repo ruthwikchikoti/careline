@@ -3,10 +3,25 @@
 @tailwind utilities;
 
 @layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+
   body {
-    @apply bg-canvas text-ink font-sans;
+    @apply min-h-screen bg-canvas font-sans text-ink antialiased;
+    margin: 0;
+  }
+
+  input,
+  textarea,
+  button {
+    font: inherit;
   }
 }

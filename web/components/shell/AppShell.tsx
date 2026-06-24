@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   ClipboardList,
@@ -9,24 +9,41 @@ import {
   MessageSquareText,
   ShieldAlert,
   ShieldCheck,
+  UserPlus,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
+import { clearToken, isAuthenticated } from "@/lib/auth";
+import { Button } from "@/components/ui/Button";
 
 // Nav reflects the full product + which member owns each screen (UI-BUILD-PLAN §5).
 // Only items with `ready` are built in this foundation slice.
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, ready: true, owner: "Ruthwik" },
   { href: "/console", label: "Live Console", icon: MessageSquareText, ready: true, owner: "Ruthwik" },
+  { href: "/patients/new", label: "Register patient", icon: UserPlus, ready: true, owner: "Naresh" },
   { href: "/patients", label: "Patients", icon: Users, ready: false, owner: "Naga" },
-  { href: "/consultations", label: "Consultations", icon: ClipboardList, ready: false, owner: "Naresh" },
+  { href: "/consultations", label: "Consultations", icon: ClipboardList, ready: true, owner: "Naresh" },
   { href: "/escalations", label: "Escalations", icon: ShieldAlert, ready: false, owner: "Vinay" },
   { href: "/audit", label: "Audit", icon: Activity, ready: false, owner: "Vinay" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    setAuthed(isAuthenticated());
+  }, []);
+
+  function handleLogout() {
+    clearToken();
+    router.push("/login");
+  }
+
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
@@ -38,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="flex flex-col gap-1">
           {NAV.map(({ href, label, icon: Icon, ready, owner }) => {
-            const active = pathname === href;
+            const active = pathname === href || (href !== "/" && pathname.startsWith(href));
             const content = (
               <span
                 className={cn(
@@ -71,12 +88,23 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b border-border bg-surface px-6">
           <span className="text-sm text-muted">Doctor workspace</span>
-          <span className="flex items-center gap-2 text-sm font-medium text-ink">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-muted text-xs text-primary">
-              AR
+          <div className="flex items-center gap-4">
+            <span className="flex items-center gap-2 text-sm font-medium text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-muted text-xs text-primary">
+                AR
+              </span>
+              Dr. Asha Rao
             </span>
-            Dr. Asha Rao
-          </span>
+            {authed ? (
+              <Button variant="ghost" onClick={handleLogout} className="px-2 py-1 text-xs">
+                Sign out
+              </Button>
+            ) : (
+              <Link href="/login" className="text-xs text-primary hover:underline">
+                Sign in
+              </Link>
+            )}
+          </div>
         </header>
         <main className="flex-1 p-6">{children}</main>
       </div>

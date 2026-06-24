@@ -1,20 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { ArrowRight, Pill, ScrollText, ShieldCheck } from "lucide-react";
+import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import { ConsultationRow } from "@/components/approval/ConsultationRow";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { getDemoPatient, type DemoPatient } from "@/lib/api";
+import { useConsultations } from "@/lib/api-hooks";
+import { useRequireAuth } from "@/lib/use-require-auth";
 
 export default function DashboardPage() {
-  const [patient, setPatient] = useState<DemoPatient | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getDemoPatient().then(setPatient).catch((e) => setError(String(e)));
-  }, []);
+  useRequireAuth();
+  const { data: consultations, isLoading, error } = useConsultations();
+  const recent = consultations?.slice(0, 3) ?? [];
 
   return (
     <AppShell>
@@ -29,40 +26,50 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader
-            title="Demo patient"
-            subtitle={
-              patient
-                ? `${patient.patient_id} · under ${patient.doctor_id} · reasoning: ${patient.backend}`
-                : "Loading…"
-            }
+            title="Recent activity"
+            subtitle="Consultations under your doctor account"
             action={
-              <Link href="/console">
-                <Button>
-                  Start a call <ArrowRight className="h-4 w-4" />
-                </Button>
+              <Link
+                href="/consultations"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-fg transition-colors hover:bg-primary/90"
+              >
+                New consultation <ArrowRight className="h-4 w-4" />
               </Link>
             }
           />
           <CardBody>
-            {error ? (
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading recent consultations…
+              </div>
+            ) : error ? (
               <p className="text-sm text-escalate">
-                Couldn&apos;t reach the demo API. Start it with{" "}
-                <code className="rounded bg-canvas px-1">uvicorn careline.demo_server:app</code>.
+                {error instanceof Error ? error.message : "Failed to load consultations"}
               </p>
+            ) : recent.length > 0 ? (
+              <div className="space-y-4">
+                <ul className="space-y-2">
+                  {recent.map((c) => (
+                    <li key={c.consultation_id}>
+                      <ConsultationRow consultation={c} />
+                    </li>
+                  ))}
+                </ul>
+                {(consultations?.length ?? 0) > 3 ? (
+                  <Link href="/consultations" className="text-sm text-primary hover:underline">
+                    View all consultations →
+                  </Link>
+                ) : null}
+              </div>
             ) : (
-              <ul className="grid gap-3 sm:grid-cols-2">
-                {patient?.current_facts.map((f) => (
-                  <li key={f.id} className="flex items-start gap-3 rounded-xl border border-border p-3">
-                    <span className="mt-0.5 text-primary">
-                      {f.kind === "medication" ? <Pill className="h-4 w-4" /> : <ScrollText className="h-4 w-4" />}
-                    </span>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted">{f.kind}</p>
-                      <p className="text-sm text-ink">{f.summary}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <p className="text-sm text-muted">
+                No consultations yet.{" "}
+                <Link href="/consultations" className="text-primary hover:underline">
+                  Create your first consultation
+                </Link>
+                .
+              </p>
             )}
           </CardBody>
         </Card>
