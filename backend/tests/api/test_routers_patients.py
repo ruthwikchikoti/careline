@@ -87,3 +87,24 @@ def test_register_patient_without_auth_returns_401(client: TestClient):
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "unauthorized"}
+
+
+def test_get_patient_after_registration_returns_empty_record(
+    client: TestClient, authed_headers: dict[str, str]
+):
+    register = client.post(
+        "/patients",
+        headers=authed_headers,
+        json={
+            "patient_id": "patient-reg",
+            "caller_id": "+910000000001",
+            "pin": "9999",
+        },
+    )
+    assert register.status_code == 201
+    response = client.get("/patients/patient-reg", headers=authed_headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["patient_id"] == "patient-reg"
+    assert payload["doctor_id"] == "dr-A"
+    assert payload["fact_count"] == 0

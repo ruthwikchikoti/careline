@@ -248,3 +248,16 @@ def test_extract_cross_tenant_blocked():
                 now=_NOW,
             )
         )
+
+
+def test_heuristic_extractor_handles_natural_phrasing():
+    extractor = HeuristicExtractor()
+    record = extractor.extract(
+        transcript="Continue Paracetamol 500mg twice daily. Follow a soft diet.",
+        consultation_id="consult-natural",
+        now=_NOW,
+    )
+    assert len(record.facts) >= 2
+    kinds = {fact.kind.value for fact in record.facts}
+    assert "medication" in kinds
+    assert "instruction" in kinds

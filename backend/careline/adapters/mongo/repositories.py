@@ -58,10 +58,15 @@ class MongoPatientRepository(PatientRepository):
         docs = await self._facts.find(
             scoped_filter(doctor_id=doctor_id, patient_id=patient_id)
         ).to_list(length=None)
-        if not docs:
+        if docs:
+            facts = tuple(doc_to_fact(d) for d in docs)
+            return Patient(patient_id=patient_id, doctor_id=doctor_id, facts=facts)
+        registered = await self._patients.find_one(
+            scoped_filter(doctor_id=doctor_id, patient_id=patient_id)
+        )
+        if registered is None:
             return None
-        facts = tuple(doc_to_fact(d) for d in docs)
-        return Patient(patient_id=patient_id, doctor_id=doctor_id, facts=facts)
+        return Patient(patient_id=patient_id, doctor_id=doctor_id, facts=())
 
     async def exists(self, *, doctor_id: str, patient_id: str) -> bool:
         n = await self._facts.count_documents(
