@@ -29,6 +29,12 @@ llm = [
     "anthropic>=0.40",
     "python-dotenv>=1.0",
 ]
+# Layer-1 MongoDB persistence (optional). Set CARELINE_MONGO_URI to enable;
+# omit it to run fully in-memory. dnspython is needed for mongodb+srv:// URIs.
+data = [
+    "motor>=3.4",
+    "dnspython>=2.4",
+]
 api = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
