@@ -10,10 +10,11 @@ _Last updated: 24 Jun._
 
 ---
 
-## Where we are
-- **Backend: complete.** 230 tests green; runs on real OpenAI (`gpt-5.5`) + Mongo Atlas.
-- **Ruthwik's slice: complete** (graph, brain, Decision, parity, Live Console, OpenAI-primary wiring, combined entrypoint).
-- **What's left:** 4 small code fixes + 2 UI screens. All below, in order.
+## Where we are — ✅ ALL COMPLETE (verified 24 Jun)
+- **Backend: complete — 253 tests green** (offline); runs on real OpenAI (`gpt-5.5`) + Mongo Atlas.
+- **Full HITL flow verified end-to-end:** register → consultation → consent → extract (natural
+  transcript → facts) → doctor approve → patient record → ask (ANSWER / ESCALATE).
+- **All 6 tasks below are done. Nothing pending.** (One test-hygiene note under the checklist.)
 
 **Run the whole app (one backend):**
 ```bash
@@ -26,17 +27,17 @@ cd web && npm run dev                                 # localhost:3000
 
 ## ✅ Remaining tasks (do in this order)
 
-| # | Task | Owner | Pri | Status | Blocks |
-|---|---|---|---|---|---|
-| 1 | Fix extraction so natural transcripts yield facts (broaden regex) | **Naresh** | 🔴 High | ⬜ | the whole consult→approve→answer demo |
-| 2 | LLM-backed `Extractor` adapter (real fix for #1) | **Srujan** | 🔴 High | ⬜ | — (supersedes #1) |
-| 3 | `GET /patients/{id}` returns the record (not 404) after register | **Naresh** | 🟡 Med | ⬜ | task #4 |
-| 4 | Patient Record + history-timeline UI page | **Naga** | 🟡 Med | ⬜ | needs #3 |
-| 5 | Backend read endpoints for audit / escalations / eval | **Vinay** + Naresh | 🟡 Med | ⬜ | makes those pages live |
-| 6 | Grounded-answer panel (citations + verifier) UI | **Srujan** | 🟢 Low | ⬜ | — (polish) |
+| # | Task | Owner | Status |
+|---|---|---|---|
+| 1 | Extraction handles natural transcripts (regex broadened) | **Naresh** | ✅ done — verified (natural transcript → 2 facts) |
+| 2 | LLM-backed `Extractor` adapter (`adapters/llm/extraction_backend.py`) | **Srujan** | ✅ done |
+| 3 | `GET /patients/{id}/record` (valid slice + history) | **Naresh / Srujan** | ✅ done — verified |
+| 4 | Patient Record + history-timeline UI (`app/patients/[id]/`) | **Naga** | ✅ done |
+| 5 | `/audit`, `/escalations`, `/eval` read endpoints | **Vinay** + Naresh | ✅ done |
+| 6 | Grounded-answer panel (citations + verifier) UI | **Srujan** | ✅ done |
+| + | Live Console loading UX (instant message + thinking bubble) | **Ruthwik** | ✅ done |
 
-**Critical path to a working end-to-end demo: #1 → #3 → #4.** #2/#5/#6 are parallel.
-If time is tight, just do **#1** and you have a complete clickable flow.
+**All complete and verified end-to-end on real OpenAI + Mongo Atlas.** Detail below kept as a record of what was fixed.
 
 ---
 
@@ -74,6 +75,12 @@ Render an ANSWER with its citations + the verifier's affirmation/confidence. No 
 Design + kickoff prompt: `UI-BUILD-PLAN.md`. **Done when:** the console answer shows cited facts + verifier badge.
 
 ---
+
+## ⚠️ Test-hygiene note (so nobody panics running `pytest`)
+The suite is **253 passed offline**. But running `pytest` from `backend/` while
+`backend/.env` sets `CARELINE_MONGO_URI` makes the tests try to reach Mongo Atlas →
+slow run + ~17 false failures/errors. **Run tests with `.env` absent** (CI does; locally,
+temporarily move `.env` aside or unset the Mongo var). Not a code bug — environment pollution.
 
 ## 📋 Submission checklist (definition of done)
 
