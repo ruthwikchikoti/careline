@@ -89,6 +89,16 @@ class _InMemoryPatientRepository(PatientRepository):
     async def get(self, *, doctor_id: str, patient_id: str) -> Patient | None:
         return self._store.get(self._key(doctor_id=doctor_id, patient_id=patient_id))
 
+    async def list_for_doctor(self, *, doctor_id: str) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for ident in self._identities.values():
+            if ident.doctor_id == doctor_id:
+                counts.setdefault(ident.patient_id, 0)
+        for (did, pid), patient in self._store.items():
+            if did == doctor_id:
+                counts[pid] = sum(1 for f in patient.facts if getattr(f, "approved_by", None))
+        return sorted(counts.items())
+
     async def exists(self, *, doctor_id: str, patient_id: str) -> bool:
         return self._key(doctor_id=doctor_id, patient_id=patient_id) in self._store
 
@@ -182,8 +192,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.is_production:
         settings.assert_prod_safe()
 
-    audit = AuditService()
     mongo_client = None
+    audit_store = None
 
     if settings.mongo_uri:
         from careline.adapters.mongo import (
@@ -193,6 +203,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             create_client,
             ensure_indexes,
         )
+        from careline.adapters.mongo.audit_store import create_audit_store
 
         mongo_client = create_client(settings.mongo_uri)
         database = mongo_client["careline"]
@@ -200,10 +211,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         patient_repo = MongoPatientRepository(database)
         consultation_repo = MongoConsultationRepository(database)
         memory = MongoMemoryProvider(database)
+        # Durable, restart-survivable audit trail (hydrate now + write-through).
+        audit_store = create_audit_store(settings.mongo_uri)
     else:
         patient_repo = _InMemoryPatientRepository()
         consultation_repo = _InMemoryConsultationRepository()
         memory = LocalMemoryProvider()
+
+    audit = AuditService(store=audit_store)
 
     consultation_svc = ConsultationService(repo=consultation_repo, audit=audit)
     auth_svc = AuthService(settings=settings)
@@ -240,6 +255,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if mongo_client is not None:
         mongo_client.close()
+    if audit_store is not None:
+        audit_store.close()
 
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:
@@ -257,6 +274,17 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(consultations_router)
     app.include_router(brain_router)
     app.include_router(observability_router)
+
+    # Mount the keyless Live-Console demo endpoints (`/demo/*`) here so the console
+    # works against *any* entrypoint, not only `careline.combined`. They are a demo
+    # affordance, so they are withheld in production. Function-level import avoids a
+    # cycle (combined imports create_app).
+    if not (settings or get_settings()).is_production:
+        from careline.combined import demo_ask, demo_patient
+
+        app.add_api_route("/demo/patient", demo_patient, methods=["GET"], tags=["demo"])
+        app.add_api_route("/demo/ask", demo_ask, methods=["POST"], tags=["demo"])
+
     if settings is not None:
         app.state.settings = settings
     return app

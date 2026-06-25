@@ -95,11 +95,14 @@ async def demo_ask(request: Request, body: AskIn) -> dict:
 
 
 def app():
-    """Factory: the real app plus the demo console endpoints."""
-    application = create_app()
-    application.add_api_route("/demo/patient", demo_patient, methods=["GET"], tags=["demo"])
-    application.add_api_route("/demo/ask", demo_ask, methods=["POST"], tags=["demo"])
-    return application
+    """Factory: the real app plus the demo console endpoints.
+
+    The demo routes now live inside ``create_app`` itself (mounted for any non-prod
+    entrypoint), so this factory is just an explicit alias kept for back-compat —
+    ``uvicorn careline.combined:app --factory`` and ``careline.api.app:create_app``
+    are now equivalent.
+    """
+    return create_app()
 
 
 __all__ = ["app"]
