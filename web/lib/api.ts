@@ -39,10 +39,12 @@ export interface DemoPatient {
   current_facts: DemoFact[];
 }
 
-export async function ask(question: string): Promise<AnswerResult> {
+export async function ask(question: string, patientId?: string): Promise<AnswerResult> {
   // Send the doctor's token when signed in so the demo turn is attributed to
   // them — that's what makes console escalations appear in their queue. The
   // endpoint stays auth-free, so an anonymous demo (no token) still works.
+  // When patientId is set (and signed in), the answer is grounded in that real
+  // registered patient's persisted facts instead of the bundled demo patient.
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -50,7 +52,7 @@ export async function ask(question: string): Promise<AnswerResult> {
   const res = await fetch(`${BASE}/demo/ask`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, patient_id: patientId || null }),
   });
   if (!res.ok) throw new Error(`Demo API error ${res.status}`);
   return res.json();

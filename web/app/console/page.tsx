@@ -41,6 +41,9 @@ export default function ConsolePage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Optional: ask against a real registered patient (Mongo-persisted facts) when
+  // signed in. Blank → the bundled demo patient.
+  const [patientId, setPatientId] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
   // The trace panel follows the most recent *completed* turn.
@@ -59,7 +62,7 @@ export default function ConsolePage() {
     setTurns((t) => [...t, { question: q, result: null }]);
     scrollToEnd();
     try {
-      const result = await ask(q);
+      const result = await ask(q, patientId.trim() || undefined);
       // Fill in the result on the pending (last) turn.
       setTurns((t) =>
         t.map((turn, i) => (i === t.length - 1 ? { ...turn, result } : turn)),
@@ -86,13 +89,24 @@ export default function ConsolePage() {
             <Phone className="h-4 w-4" />
           </span>
           <div>
-            <p className="text-sm font-semibold text-ink">Live call · Ravi K. (demo-patient)</p>
+            <p className="text-sm font-semibold text-ink">
+              Live call · {patientId.trim() ? patientId.trim() : "Ravi K. (demo patient)"}
+            </p>
             <p className="text-xs text-muted">Answers only from approved, currently-valid context</p>
           </div>
         </div>
-        <span className="hidden items-center gap-1.5 text-xs font-medium text-answer sm:flex">
-          <span className="h-2 w-2 rounded-full bg-answer" /> on the line
-        </span>
+        <div className="flex items-center gap-3">
+          <input
+            value={patientId}
+            onChange={(e) => setPatientId(e.target.value)}
+            placeholder="patient ID (blank = demo)"
+            title="Sign in, then enter a registered patient ID to ask against their real record"
+            className="hidden w-52 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs outline-none focus:border-primary sm:block"
+          />
+          <span className="hidden items-center gap-1.5 text-xs font-medium text-answer sm:flex">
+            <span className="h-2 w-2 rounded-full bg-answer" /> on the line
+          </span>
+        </div>
       </header>
 
       <div className="mx-auto grid w-full max-w-6xl flex-1 grid-cols-1 gap-6 p-6 lg:grid-cols-[1fr_360px]">
