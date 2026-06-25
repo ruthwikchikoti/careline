@@ -272,6 +272,9 @@ export interface AuditTurn {
   risk: number;
   trace_steps: TraceStep[];
   redacted: boolean;
+  resolved: boolean;
+  reply: string | null;
+  resolved_at: string | null;
 }
 
 export interface AuditCall {
@@ -323,6 +326,20 @@ export function getAuditLog(): Promise<AuditLog> {
 
 export function getEscalations(): Promise<EscalationsQueue> {
   return authFetch<EscalationsQueue>("/escalations");
+}
+
+export interface EscalationResolved {
+  turn_id: string;
+  patient_id: string;
+  reply: string;
+  resolved_at: string;
+}
+
+export function resolveEscalation(turnId: string, reply: string): Promise<EscalationResolved> {
+  return authFetch<EscalationResolved>(`/escalations/${encodeURIComponent(turnId)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ reply }),
+  });
 }
 
 export function runEval(): Promise<EvalRun> {

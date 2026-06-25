@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, PhoneForwarded, ServerOff, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  PhoneForwarded,
+  Send,
+  ServerOff,
+  ShieldAlert,
+} from "lucide-react";
 import { AppShell } from "@/components/shell/AppShell";
 import { RedFlagBadge } from "@/components/badges/RedFlagBadge";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { getEscalations, type EscalationsQueue } from "@/lib/api";
+import { getEscalations, resolveEscalation, type AuditTurn, type EscalationsQueue } from "@/lib/api";
 
 export default function EscalationsPage() {
   useRequireAuth();
@@ -15,16 +22,16 @@ export default function EscalationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let active = true;
-    getEscalations()
-      .then((data) => active && setQueue(data))
-      .catch((e) => active && setError(String(e)))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
+  const load = useCallback(() => {
+    return getEscalations()
+      .then(setQueue)
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const groups = queue?.groups ?? [];
 
@@ -97,23 +104,8 @@ export default function EscalationsPage() {
                     {/* this patient's escalated turns */}
                     <ul className="space-y-2 border-l-2 border-escalate-bg pl-3">
                       {group.escalations.map((turn) => (
-                        <li
-                          key={turn.turn_id}
-                          className="rounded-xl border border-border bg-surface px-4 py-3"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm leading-6 text-ink">
-                              {turn.escalation_reason ?? "Escalated to the doctor."}
-                            </p>
-                            <span className="whitespace-nowrap text-xs text-muted">
-                              {new Date(turn.logged_at).toLocaleTimeString()}
-                            </span>
-                          </div>
-                          {turn.question && (
-                            <p className="mt-1 text-xs text-muted">
-                              Asked: “{turn.question}” · risk {(turn.risk * 100).toFixed(0)}%
-                            </p>
-                          )}
+                        <li key={turn.turn_id}>
+                          <EscalationItem turn={turn} onResolved={load} />
                         </li>
                       ))}
                     </ul>
@@ -127,6 +119,78 @@ export default function EscalationsPage() {
         </Card>
       </div>
     </AppShell>
+  );
+}
+
+function EscalationItem({ turn, onResolved }: { turn: AuditTurn; onResolved: () => void }) {
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function send() {
+    const text = reply.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setErr(null);
+    try {
+      await resolveEscalation(turn.turn_id, text);
+      onResolved(); // refresh the queue → this turn now shows as answered
+    } catch (e) {
+      setErr(String(e));
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm leading-6 text-ink">
+          {turn.escalation_reason ?? "Escalated to the doctor."}
+        </p>
+        <span className="whitespace-nowrap text-xs text-muted">
+          {new Date(turn.logged_at).toLocaleTimeString()}
+        </span>
+      </div>
+      {turn.question && (
+        <p className="mt-1 text-xs text-muted">
+          Asked: “{turn.question}” · risk {(turn.risk * 100).toFixed(0)}%
+        </p>
+      )}
+
+      {turn.resolved ? (
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-answer-bg px-3 py-2">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-answer" />
+          <div>
+            <p className="text-xs font-medium text-answer">
+              You replied{turn.resolved_at ? ` · ${new Date(turn.resolved_at).toLocaleString()}` : ""}
+            </p>
+            <p className="text-sm leading-6 text-ink">{turn.reply}</p>
+            <p className="mt-1 text-[11px] text-muted">The patient sees this in their portal.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <div className="flex gap-2">
+            <input
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              placeholder="Reply to the patient…"
+              disabled={sending}
+              className="flex-1 rounded-lg border border-border bg-canvas px-3 py-1.5 text-sm outline-none focus:border-primary"
+            />
+            <button
+              onClick={send}
+              disabled={sending || !reply.trim()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-fg transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {sending ? "Sending…" : "Reply & resolve"} <Send className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {err && <p className="mt-1 text-xs text-escalate">{err}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 
