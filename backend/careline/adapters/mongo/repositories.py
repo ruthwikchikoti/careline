@@ -68,6 +68,19 @@ class MongoPatientRepository(PatientRepository):
             return None
         return Patient(patient_id=patient_id, doctor_id=doctor_id, facts=())
 
+    async def list_for_doctor(self, *, doctor_id: str) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        async for d in self._patients.find(
+            scoped_filter(doctor_id=doctor_id), {"patient_id": 1}
+        ):
+            counts.setdefault(d["patient_id"], 0)
+        async for d in self._facts.find(
+            {**scoped_filter(doctor_id=doctor_id), "approved_by": {"$ne": None}},
+            {"patient_id": 1},
+        ):
+            counts[d["patient_id"]] = counts.get(d["patient_id"], 0) + 1
+        return sorted(counts.items())
+
     async def exists(self, *, doctor_id: str, patient_id: str) -> bool:
         n = await self._facts.count_documents(
             scoped_filter(doctor_id=doctor_id, patient_id=patient_id)

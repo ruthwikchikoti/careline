@@ -37,6 +37,14 @@ from careline.domain.model.patient import Patient, PatientIdentity, ValidSlice
 class PatientRepository(ABC):
     """Read/write access to the longitudinal record for one patient under one doctor."""
 
+    async def list_for_doctor(self, *, doctor_id: str) -> list[tuple[str, int]]:
+        """This doctor's registered patients as ``(patient_id, approved_fact_count)``.
+
+        Concrete default returns empty so existing implementations and test doubles
+        keep working unchanged; real repos override it.
+        """
+        return []
+
     @abstractmethod
     async def get(self, *, doctor_id: str, patient_id: str) -> Patient | None:
         """The full aggregate (current + retired facts), or ``None`` if absent.
