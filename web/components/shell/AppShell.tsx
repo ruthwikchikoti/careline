@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/Button";
 // Nav reflects the full product + which member owns each screen (UI-BUILD-PLAN §5).
 // Only items with `ready` are built in this foundation slice.
 const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, ready: true, owner: "Ruthwik" },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, ready: true, owner: "Ruthwik" },
   { href: "/console", label: "Live Console", icon: MessageSquareText, ready: true, owner: "Ruthwik" },
   { href: "/patients/new", label: "Register patient", icon: UserPlus, ready: true, owner: "Naresh" },
   { href: "/patients", label: "Patients", icon: Users, ready: true, owner: "Naga" },
@@ -49,7 +49,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
-        <Link href="/" className="mb-6 flex items-center gap-2 px-3">
+        <Link href="/dashboard" className="mb-6 flex items-center gap-2 px-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-fg">
             <ShieldCheck className="h-5 w-5" />
           </span>
