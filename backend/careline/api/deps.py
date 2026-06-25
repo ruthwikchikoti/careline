@@ -11,7 +11,27 @@ from fastapi import Header, HTTPException, Request
 
 from careline.adapters.auth.internal_key import KeyInvalid
 from careline.adapters.auth.jwt import TokenInvalid
-from careline.adapters.auth.principals import DoctorPrincipal, InternalPrincipal
+from careline.adapters.auth.principals import (
+    DoctorPrincipal,
+    InternalPrincipal,
+    PatientPrincipal,
+)
+
+
+def get_current_patient(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> PatientPrincipal:
+    """Decode a patient bearer JWT via :attr:`app.state.auth_svc` (patient portal)."""
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    try:
+        return request.app.state.auth_svc.authenticate_patient(token)
+    except TokenInvalid:
+        raise HTTPException(status_code=401, detail="unauthorized") from None
 
 
 def get_current_doctor(

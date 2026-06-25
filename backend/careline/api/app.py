@@ -21,6 +21,7 @@ from careline.api.routers import (
     brain_router,
     consultations_router,
     observability_router,
+    patient_portal_router,
     patients_router,
 )
 from careline.config import Settings, get_settings
@@ -98,6 +99,12 @@ class _InMemoryPatientRepository(PatientRepository):
             if did == doctor_id:
                 counts[pid] = sum(1 for f in patient.facts if getattr(f, "approved_by", None))
         return sorted(counts.items())
+
+    async def find_by_patient_id(self, *, patient_id: str) -> PatientIdentity | None:
+        for ident in self._identities.values():
+            if ident.patient_id == patient_id:
+                return ident
+        return None
 
     async def exists(self, *, doctor_id: str, patient_id: str) -> bool:
         return self._key(doctor_id=doctor_id, patient_id=patient_id) in self._store
@@ -274,6 +281,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(consultations_router)
     app.include_router(brain_router)
     app.include_router(observability_router)
+    app.include_router(patient_portal_router)
 
     # Mount the keyless Live-Console demo endpoints (`/demo/*`) here so the console
     # works against *any* entrypoint, not only `careline.combined`. They are a demo

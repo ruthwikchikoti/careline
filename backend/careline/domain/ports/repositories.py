@@ -45,6 +45,15 @@ class PatientRepository(ABC):
         """
         return []
 
+    async def find_by_patient_id(self, *, patient_id: str) -> PatientIdentity | None:
+        """Resolve a registered patient's identity by ``patient_id`` (portal login).
+
+        Used by the patient portal to look up the doctor scope + PIN hash for a
+        patient signing in with their patient id. Concrete default returns ``None``
+        so existing implementations/test doubles keep working; real repos override.
+        """
+        return None
+
     @abstractmethod
     async def get(self, *, doctor_id: str, patient_id: str) -> Patient | None:
         """The full aggregate (current + retired facts), or ``None`` if absent.
