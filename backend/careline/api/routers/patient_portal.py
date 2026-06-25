@@ -147,11 +147,14 @@ async def patient_ask(
     )
     if patient is None:
         raise HTTPException(status_code=404, detail="patient record not found")
+    # One-shot web turn: no clarify budget, so a clinical question we can't ground
+    # goes straight to the doctor (who replies via the resolution loop) rather than
+    # looping on "could you rephrase?". Non-clinical input is still redirected.
     session = CallSession(
         call_id=f"portal-{principal.patient_id}",
         patient_id=principal.patient_id,
         doctor_id=principal.doctor_id,
-        max_clarify_turns=2,
+        max_clarify_turns=0,
     )
     decision: Decision = request.app.state.question_svc.run_question(
         question=body.question, patient=patient, session=session, now=now
