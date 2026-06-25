@@ -58,6 +58,22 @@ Polish landed after the core 6 were done — all verified end-to-end against rea
 | **Demo data seeded** | `backend/scripts/seed_demo.py` → 5 patients (21 facts incl. superseded) under **`dr-asha`** so the list/picker/record screens have real data. `python -m scripts.seed_demo` | list + record + console grounding verified on Atlas |
 | **Public landing page** | `/` is now a marketing landing (hero, 7-agent spine, safety rule, CTAs); the authed dashboard moved to `/dashboard` (login + nav updated) | tsc clean |
 
+### Closed-loop escalations + two-sided product (Ruthwik · verified on Atlas)
+This makes CareLine genuinely two-sided — a doctor console **and** a patient portal — and
+closes the escalation loop without SMS/telephony (the patient channel is the phone =
+patient-ID + PIN; the portal mirrors it for the demo).
+
+| Feature | What changed | Verified |
+|---|---|---|
+| **Escalation resolution** | Doctor replies to an escalated turn → saved as an `AuditResolutionRecord` (durable, write-through). `POST /escalations/{turn_id}/resolve`; resolved turns drop out of "waiting" but stay visible | reply persists across a simulated restart |
+| **Doctor reply UI** | Reply box on each escalation in the queue → "Reply & resolve" → shows the saved reply | tsc + build clean |
+| **Patient portal** | New `/patient` portal: sign in with **patient-ID + PIN** (reuses the caller-ID/PIN identity → patient JWT), see your **care plan**, **ask** the agent (scoped to yourself), and read the **doctor's replies** to escalated questions | full loop green: login(wrong-PIN→401) → ask → escalate → doctor reply → patient sees it; cross-patient isolation holds |
+
+> **The loop, end to end:** patient asks in the portal → escalates → doctor sees it in the
+> queue and replies → the reply is saved → the patient sees "Your doctor replied" in their
+> portal. No SMS, no telephony — patient auth is the same PIN the phone line uses.
+> Demo: doctor `dr-asha`; patient `ravi-kumar` / PIN `1234`.
+
 ---
 
 ## Task detail
