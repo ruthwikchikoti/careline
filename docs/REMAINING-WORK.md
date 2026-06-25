@@ -39,6 +39,25 @@ cd web && npm run dev                                 # localhost:3000
 
 **All complete and verified end-to-end on real OpenAI + Mongo Atlas.** Detail below kept as a record of what was fixed.
 
+### Post-completion UX hardening (Ruthwik · verified on Atlas)
+Polish landed after the core 6 were done — all verified end-to-end against real Atlas:
+
+| Enhancement | What changed | Verified |
+|---|---|---|
+| **Patient list / picker** | `GET /patients` (tenant-scoped, returns this doctor's patients + approved-fact counts); console now has a **dropdown** instead of a typed ID; patients page shows a clickable **list** | register→list→cross-tenant isolation green |
+| **Durable audit trail** | `AuditService` now hydrates + write-throughs to Mongo via a sync `MongoAuditStore` (was in-memory → "no history" after restart). Best-effort writes never block a live answer | turns survive a simulated restart |
+| **Escalations grouped by patient** | `/escalations` adds `groups` (+`patients_waiting`); queue UI renders per-patient instead of flat rows | 3 turns → 2 patient groups, newest-first |
+
+> Note the **patient-id text box is now a dropdown** in the Live Console — sign in, pick a
+> registered patient (or the demo patient). The `/demo/*` routes are now mounted **inside
+> `create_app`** (non-prod), so the console works on any entrypoint — no more `404`.
+
+| Enhancement | What changed | Verified |
+|---|---|---|
+| **Eval is genuinely live** | `/eval` now re-runs **all 8** T1–T8 scenarios through the real gate chain on every request (was 4 live + 4 hard-coded snapshot rows). Dashboard shows real computed verdicts | 8/8 pass live; bake-off test updated |
+| **Demo data seeded** | `backend/scripts/seed_demo.py` → 5 patients (21 facts incl. superseded) under **`dr-asha`** so the list/picker/record screens have real data. `python -m scripts.seed_demo` | list + record + console grounding verified on Atlas |
+| **Public landing page** | `/` is now a marketing landing (hero, 7-agent spine, safety rule, CTAs); the authed dashboard moved to `/dashboard` (login + nav updated) | tsc clean |
+
 ---
 
 ## Task detail
