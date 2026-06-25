@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from careline.adapters.auth.principals import DoctorPrincipal
 from careline.api.deps import get_current_doctor
@@ -23,6 +23,8 @@ from careline.api.dto.observability import (
     AuditLogOut,
     AuditTurnOut,
     EscalationGroupOut,
+    EscalationResolveIn,
+    EscalationResolveOut,
     EscalationsOut,
     EvalRunOut,
     EvalScenarioOut,
@@ -37,7 +39,8 @@ from careline.services.eval_rerun import rerun_offline_eval
 router = APIRouter(tags=["observability"])
 
 
-def _turn_out(turn: AuditTurnRecord) -> AuditTurnOut:
+def _turn_out(turn: AuditTurnRecord, audit: AuditService | None = None) -> AuditTurnOut:
+    resolution = audit.resolution_for(turn.turn_id) if audit is not None else None
     return AuditTurnOut(
         turn_id=turn.turn_id,
         call_id=turn.call_id,
@@ -51,6 +54,9 @@ def _turn_out(turn: AuditTurnRecord) -> AuditTurnOut:
         risk=turn.risk,
         trace_steps=turn.trace_steps,
         redacted=turn.redacted,
+        resolved=resolution is not None,
+        reply=resolution.reply_text if resolution else None,
+        resolved_at=resolution.resolved_at if resolution else None,
     )
 
 
@@ -82,7 +88,7 @@ async def get_audit(
     turns = audit.turns_for_doctor(principal.doctor_id)
     return AuditLogOut(
         calls=[_call_out(c) for c in calls],
-        turns=[_turn_out(t) for t in turns],
+        turns=[_turn_out(t, audit) for t in turns],
     )
 
 
@@ -129,16 +135,17 @@ async def get_escalations(
     """
     audit: AuditService = request.app.state.audit
     escalations = audit.escalations_for_doctor(principal.doctor_id)
-    flat = [_turn_out(t) for t in escalations]
+    flat = [_turn_out(t, audit) for t in escalations]
 
-    # Group preserving the newest-first order within each patient.
+    # Group preserving the newest-first order within each patient. Resolved turns
+    # stay visible (marked) but don't count toward "waiting".
     grouped: dict[str, list[AuditTurnOut]] = {}
     for turn in flat:
         grouped.setdefault(turn.patient_id, []).append(turn)
     groups = [
         EscalationGroupOut(
             patient_id=pid,
-            count=len(turns),
+            count=sum(1 for t in turns if not t.resolved),
             latest_at=turns[0].logged_at,  # flat is newest-first → first is latest
             escalations=turns,
         )
@@ -146,11 +153,45 @@ async def get_escalations(
     ]
     groups.sort(key=lambda g: g.latest_at, reverse=True)
 
+    waiting = sum(1 for t in flat if not t.resolved)
     return EscalationsOut(
-        waiting=len(flat),
-        patients_waiting=len(groups),
+        waiting=waiting,
+        patients_waiting=sum(1 for g in groups if g.count > 0),
         groups=groups,
         escalations=flat,
+    )
+
+
+@router.post("/escalations/{turn_id}/resolve", response_model=EscalationResolveOut)
+async def resolve_escalation(
+    turn_id: str,
+    body: EscalationResolveIn,
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> EscalationResolveOut:
+    """Close an escalated turn with the doctor's reply (the human-in-the-loop answer).
+
+    Tenant-scoped: a doctor can only resolve escalations raised under their own
+    account. The reply is persisted and surfaced back to the patient (their
+    "answered" view), closing the escalation loop.
+    """
+    audit: AuditService = request.app.state.audit
+    turn = next(
+        (t for t in audit.escalations_for_doctor(principal.doctor_id) if t.turn_id == turn_id),
+        None,
+    )
+    if turn is None:
+        raise HTTPException(status_code=404, detail="escalation not found")
+    record = audit.resolve_escalation(
+        turn_id=turn_id, reply_text=body.reply, resolved_by=principal.doctor_id
+    )
+    if record is None:  # pragma: no cover - turn existed above
+        raise HTTPException(status_code=404, detail="escalation not found")
+    return EscalationResolveOut(
+        turn_id=record.turn_id,
+        patient_id=record.patient_id,
+        reply=record.reply_text,
+        resolved_at=record.resolved_at,
     )
 
 

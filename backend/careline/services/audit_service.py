@@ -82,6 +82,24 @@ class AuditEventRecord(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AuditResolutionRecord(BaseModel):
+    """A doctor's reply that closes an escalated turn — the human-in-the-loop answer.
+
+    Keyed to the escalated ``turn_id`` so the patient can be shown the doctor's
+    response to the exact question they asked. This is the loop-closing record:
+    the agent handed off, the doctor answered, and that answer is now durable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    patient_id: str
+    doctor_id: str
+    reply_text: str
+    resolved_by: str
+    resolved_at: datetime
+
+
 def _trace_to_skeleton(trace: ReasoningTrace) -> list[dict[str, Any]]:
     """Serialise trace steps without clinical content — safe for redacted logs."""
     return [
@@ -106,9 +124,15 @@ class AuditStore(Protocol):
     def save_turn(self, record: AuditTurnRecord) -> None: ...
     def save_call(self, record: AuditCallRecord) -> None: ...
     def save_event(self, record: AuditEventRecord) -> None: ...
+    def save_resolution(self, record: AuditResolutionRecord) -> None: ...
     def load(
         self,
-    ) -> tuple[list[AuditTurnRecord], list[AuditCallRecord], list[AuditEventRecord]]: ...
+    ) -> tuple[
+        list[AuditTurnRecord],
+        list[AuditCallRecord],
+        list[AuditEventRecord],
+        list[AuditResolutionRecord],
+    ]: ...
 
 
 class AuditService:
@@ -123,12 +147,14 @@ class AuditService:
         self._turns: list[AuditTurnRecord] = []
         self._calls: dict[str, AuditCallRecord] = {}
         self._events: list[AuditEventRecord] = []
+        self._resolutions: dict[str, AuditResolutionRecord] = {}
         self._store = store
         if store is not None:
-            turns, calls, events = store.load()
+            turns, calls, events, resolutions = store.load()
             self._turns = list(turns)
             self._calls = {c.call_id: c for c in calls}
             self._events = list(events)
+            self._resolutions = {r.turn_id: r for r in resolutions}
 
     def _persist_turn(self, record: AuditTurnRecord) -> None:
         """Best-effort write-through — a storage hiccup never breaks a live turn."""
@@ -149,6 +175,13 @@ class AuditService:
         if self._store is not None:
             try:
                 self._store.save_event(record)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _persist_resolution(self, record: AuditResolutionRecord) -> None:
+        if self._store is not None:
+            try:
+                self._store.save_resolution(record)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -282,6 +315,42 @@ class AuditService:
     def get_call(self, call_id: str) -> AuditCallRecord | None:
         return self._calls.get(call_id)
 
+    # --- escalation resolution (human-in-the-loop reply) ---------------------
+
+    def resolve_escalation(
+        self,
+        *,
+        turn_id: str,
+        reply_text: str,
+        resolved_by: str,
+        resolved_at: datetime | None = None,
+    ) -> AuditResolutionRecord | None:
+        """Record the doctor's reply that closes an escalated turn.
+
+        Returns ``None`` if the turn is unknown. The reply is keyed to the turn so
+        the patient can be shown the answer to the exact question they asked.
+        """
+        turn = next((t for t in self._turns if t.turn_id == turn_id), None)
+        if turn is None:
+            return None
+        record = AuditResolutionRecord(
+            turn_id=turn_id,
+            patient_id=turn.patient_id,
+            doctor_id=turn.doctor_id,
+            reply_text=reply_text,
+            resolved_by=resolved_by,
+            resolved_at=resolved_at or datetime.now(timezone.utc),
+        )
+        self._resolutions[turn_id] = record
+        self._persist_resolution(record)
+        return record
+
+    def resolution_for(self, turn_id: str) -> AuditResolutionRecord | None:
+        return self._resolutions.get(turn_id)
+
+    def resolutions_for_patient(self, patient_id: str) -> list[AuditResolutionRecord]:
+        return [r for r in self._resolutions.values() if r.patient_id == patient_id]
+
     def redact_patient(self, patient_id: str) -> int:
         """DPDP erasure — null clinical text, keep audit skeleton.
 
@@ -326,5 +395,6 @@ __all__ = [
     "AuditTurnRecord",
     "AuditCallRecord",
     "AuditEventRecord",
+    "AuditResolutionRecord",
     "AuditService",
 ]
