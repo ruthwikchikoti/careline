@@ -44,6 +44,7 @@ from careline.domain.model.proposal import ClassifierProposal, VerificationResul
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
 from careline.domain.rails.conversational import is_small_talk
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
+from careline.domain.retrieval import retrieval_detail, retrieve_relevant
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
 #: The explicit agent nodes, in spine order — used for the architecture diagram.
@@ -67,6 +68,7 @@ class GraphState(TypedDict, total=False):
     thresholds: Thresholds
     trace: ReasoningTrace
     valid_slice: ValidSlice
+    grounding: ValidSlice
     proposal: ClassifierProposal | None
     verification: VerificationResult | None
     decision: Decision | None
@@ -140,12 +142,25 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
         return {}
 
     def retrieve(state: GraphState) -> dict:
-        return {"valid_slice": state["patient"].valid_slice(state["now"])}
+        # Layer-1 source of truth, then retrieval-augmented grounding over it.
+        # Mirrors the Brain exactly (parity): rank the valid facts by relevance and
+        # ground the reasoner on the most relevant subset; the gate still sees the
+        # full valid slice. Ranking over the valid slice keeps every grounded fact
+        # source-of-truth-validated, so this never weakens safety.
+        valid_slice = state["patient"].valid_slice(state["now"])
+        result = retrieve_relevant(question=state["question"], valid_slice=valid_slice)
+        state["trace"].record(
+            "retrieval",
+            TraceStatus.PASS,
+            spec_section="§4.2",
+            detail=retrieval_detail(result),
+        )
+        return {"valid_slice": valid_slice, "grounding": result.grounding}
 
     def reason(state: GraphState) -> dict:
         try:
             proposal = reasoner.propose(
-                question=state["question"], context=state["valid_slice"]
+                question=state["question"], context=state["grounding"]
             )
         except ReasonerUnavailable:
             state["trace"].record(
@@ -164,6 +179,9 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
         if proposal is None or not proposal.is_answerable:
             return {"verification": None}
         try:
+            # Verifier is the INDEPENDENT backstop: it checks against the FULL valid slice
+            # (not the narrowed grounding), so a fact retrieval trimmed from the reasoner is
+            # still seen here. Mirrors the Brain exactly — keeps graph⇄brain parity.
             result = verifier.verify(
                 question=state["question"], proposal=proposal, context=state["valid_slice"]
             )
