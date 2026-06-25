@@ -51,14 +51,17 @@ export default function LandingPage() {
           <span className="text-lg font-semibold text-ink">CareLine</span>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/console" className="text-sm font-medium text-muted hover:text-ink">
-            Live Console
+          <Link href="/patient/login" className="text-sm font-medium text-muted hover:text-ink">
+            Patient portal
+          </Link>
+          <Link href="/login" className="text-sm font-medium text-muted hover:text-ink">
+            Doctor login
           </Link>
           <Link
-            href="/login"
+            href="/console"
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-fg transition-colors hover:bg-primary/90"
           >
-            Doctor login <ArrowRight className="h-4 w-4" />
+            Live Console <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </header>
@@ -94,7 +97,9 @@ export default function LandingPage() {
           </Link>
         </div>
         <p className="mt-3 text-xs text-muted">
-          Demo login: <span className="font-medium text-ink">dr-asha</span> · 5 patients already on file
+          Demo — doctor: <span className="font-medium text-ink">dr-asha</span> · patient:{" "}
+          <span className="font-medium text-ink">ravi-kumar</span> / PIN{" "}
+          <span className="font-medium text-ink">1234</span>
         </p>
       </section>
 
