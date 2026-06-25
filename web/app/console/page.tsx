@@ -1,13 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Phone, Send, Stethoscope, User } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { VerdictPill } from "@/components/ui/VerdictPill";
 import { TraceStepper } from "@/components/trace/TraceStepper";
 import { ConsoleAnswerPanel } from "./_answer/ConsoleAnswerPanel";
-import { ask, type AnswerResult } from "@/lib/api";
+import {
+  ask,
+  getPatientRecord,
+  listPatients,
+  type AnswerResult,
+  type FactRecord,
+  type PatientOut,
+} from "@/lib/api";
 
 interface Turn {
   question: string;
@@ -29,12 +36,48 @@ function ThinkingBubble() {
   );
 }
 
+// Generic fallbacks — used for the demo patient or when a record can't be loaded.
 const EXAMPLES = [
   "soft diet post surgery",
   "should I take amoxicillin",
   "Can I eat sweets post-surgery given my diabetes?",
   "I have chest pain",
 ];
+
+// Turn a patient's *current* approved facts into the kind of follow-up question
+// they'd actually phone in about — so the suggestions reflect their real record
+// instead of a hard-coded list.
+function suggestionsFor(facts: FactRecord[]): string[] {
+  const out: string[] = [];
+  for (const f of facts) {
+    const head = f.summary.split(/[\s,;:—-]/)[0]?.trim() || f.summary;
+    switch (f.kind) {
+      case "medication":
+        out.push(`What is my ${head} dose?`);
+        out.push(`Should I still take ${head}?`);
+        break;
+      case "instruction":
+        out.push(/diet/i.test(f.summary) ? "What diet should I follow now?" : "What are my care instructions?");
+        break;
+      case "allergy": {
+        const substance = f.summary.split(/allerg/i)[0]?.trim() || head;
+        out.push(`Am I allergic to ${substance}?`);
+        break;
+      }
+      case "diagnosis":
+        out.push(`Can you tell me about my ${f.summary.replace(/\.$/, "")}?`);
+        break;
+      case "observation":
+        out.push("What were my latest test results?");
+        break;
+      case "follow_up":
+        out.push("When is my next appointment?");
+        break;
+    }
+  }
+  const unique = Array.from(new Set(out));
+  return unique.length ? unique.slice(0, 5) : EXAMPLES;
+}
 
 export default function ConsolePage() {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -44,7 +87,43 @@ export default function ConsolePage() {
   // Optional: ask against a real registered patient (Mongo-persisted facts) when
   // signed in. Blank → the bundled demo patient.
   const [patientId, setPatientId] = useState("");
+  // The signed-in doctor's registered patients, for the picker. Empty when
+  // anonymous (no token) — the console still works against the demo patient.
+  const [patients, setPatients] = useState<PatientOut[]>([]);
+  // Suggested follow-ups — derived from the selected patient's real record, or
+  // the generic examples for the demo patient.
+  const [suggestions, setSuggestions] = useState<string[]>(EXAMPLES);
   const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listPatients()
+      .then(setPatients)
+      .catch(() => setPatients([])); // anonymous / no token → demo only
+  }, []);
+
+  useEffect(() => {
+    const id = patientId.trim();
+    if (!id) {
+      setSuggestions(EXAMPLES);
+      return;
+    }
+    let active = true;
+    getPatientRecord(id)
+      .then((rec) => active && setSuggestions(suggestionsFor(rec.current)))
+      .catch(() => active && setSuggestions(EXAMPLES));
+    return () => {
+      active = false;
+    };
+  }, [patientId]);
+
+  const selected = patients.find((p) => p.patient_id === patientId);
+  const callLabel = selected
+    ? `${selected.patient_id} · ${selected.fact_count} approved fact${
+        selected.fact_count === 1 ? "" : "s"
+      }`
+    : patientId.trim()
+      ? patientId.trim()
+      : "Ravi K. (demo patient)";
 
   // The trace panel follows the most recent *completed* turn.
   const active = [...turns].reverse().find((t) => t.result)?.result ?? null;
@@ -90,19 +169,35 @@ export default function ConsolePage() {
           </span>
           <div>
             <p className="text-sm font-semibold text-ink">
-              Live call · {patientId.trim() ? patientId.trim() : "Ravi K. (demo patient)"}
+              Live call · {callLabel}
             </p>
             <p className="text-xs text-muted">Answers only from approved, currently-valid context</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <input
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-            placeholder="patient ID (blank = demo)"
-            title="Sign in, then enter a registered patient ID to ask against their real record"
-            className="hidden w-52 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs outline-none focus:border-primary sm:block"
-          />
+          {patients.length > 0 ? (
+            <select
+              value={patientId}
+              onChange={(e) => setPatientId(e.target.value)}
+              title="Choose which patient's approved record to answer against"
+              className="hidden w-60 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs outline-none focus:border-primary sm:block"
+            >
+              <option value="">Ravi K. (demo patient)</option>
+              {patients.map((p) => (
+                <option key={p.patient_id} value={p.patient_id}>
+                  {p.patient_id} · {p.fact_count} approved
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={patientId}
+              onChange={(e) => setPatientId(e.target.value)}
+              placeholder="patient ID (blank = demo)"
+              title="Sign in to pick a registered patient from the list"
+              className="hidden w-52 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs outline-none focus:border-primary sm:block"
+            />
+          )}
           <span className="hidden items-center gap-1.5 text-xs font-medium text-answer sm:flex">
             <span className="h-2 w-2 rounded-full bg-answer" /> on the line
           </span>
@@ -115,9 +210,11 @@ export default function ConsolePage() {
           <div className="flex-1 space-y-4">
             {turns.length === 0 && (
               <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted">
-                Ask a follow-up question as the patient. Try one:
+                {selected
+                  ? `Ask a follow-up as ${selected.patient_id}. Try one from their record:`
+                  : "Ask a follow-up question as the patient. Try one:"}
                 <div className="mt-3 flex flex-wrap justify-center gap-2">
-                  {EXAMPLES.map((ex) => (
+                  {suggestions.map((ex) => (
                     <button
                       key={ex}
                       onClick={() => submit(ex)}
