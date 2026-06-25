@@ -398,6 +398,7 @@ async function patientFetch<T>(path: string, init: RequestInit = {}): Promise<T>
     }
     throw new ApiError(res.status, detail);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -435,4 +436,9 @@ export function patientAsk(question: string): Promise<PatientAnswer> {
 
 export function getPatientQuestions(): Promise<PatientQuestion[]> {
   return patientFetch<PatientQuestion[]>("/patient/questions");
+}
+
+/** Clear the signed-in patient's own Q&A history (after a practice run). */
+export function clearPatientHistory(): Promise<void> {
+  return patientFetch<void>("/patient/history", { method: "DELETE" });
 }
