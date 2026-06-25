@@ -36,6 +36,7 @@ from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
+from careline.domain.rails.conversational import is_small_talk
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
@@ -105,6 +106,24 @@ class Brain:
                 "Question spans multiple clinical conditions — transferring to your doctor.",
                 scope=ScopeCategory.CROSS_CONDITION,
                 risk=0.95,
+                trace=trace,
+            )
+
+        # -- Pre-LLM triage: small talk → nudge, never escalate ---------------
+        # A greeting/pleasantry is not a clinical question; without this it would
+        # be classified out-of-scope and escalated to the doctor. Runs *after* the
+        # red-flag rail so "hey, I have chest pain" still escalates correctly.
+        if is_small_talk(question):
+            trace.record(
+                "conversational_rail",
+                TraceStatus.TERMINAL,
+                spec_section="§5.1",
+                detail="non-clinical small talk — answering conversationally",
+            )
+            return Decision.clarify(
+                "Hi! I can help with questions about your medicines, diet, or the "
+                "care instructions your doctor approved. What would you like to know?",
+                scope=ScopeCategory.ADMINISTRATIVE,
                 trace=trace,
             )
 

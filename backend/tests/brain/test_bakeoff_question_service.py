@@ -106,8 +106,12 @@ class TestHappyPath:
         assert telephony.escalations == []
 
 
-class TestClarifyBudget:
-    def test_clarify_then_escalate_when_budget_exhausted(self):
+class TestOutOfScope:
+    def test_out_of_scope_redirects_without_escalating(self):
+        # Out-of-scope (non-clinical / not in the approved care plan) is a polite
+        # redirect, NOT a doctor escalation — even with the clarify budget spent.
+        # Escalating non-clinical noise would flood the queue; emergencies still
+        # escalate via the red-flag rail.
         svc, telephony = _service()
         session = _session(clarify_count=2)  # budget already exhausted
         decision = svc.run_question(
@@ -116,8 +120,8 @@ class TestClarifyBudget:
             session=session,
             now=_NOW,
         )
-        assert decision.verdict is Verdict.ESCALATE
-        assert telephony.last() is not None
+        assert decision.verdict is Verdict.CLARIFY
+        assert telephony.escalations == []
 
 
 class TestMultiConditionTripwire:

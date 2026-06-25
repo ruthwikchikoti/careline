@@ -42,6 +42,7 @@ from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient, ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
+from careline.domain.rails.conversational import is_small_talk
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
@@ -119,6 +120,23 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
                     trace=trace,
                 )
             }
+
+        # Small talk → nudge conversationally (parity with Brain), never escalate.
+        if is_small_talk(question):
+            trace.record(
+                "conversational_rail",
+                TraceStatus.TERMINAL,
+                spec_section="§5.1",
+                detail="non-clinical small talk — answering conversationally",
+            )
+            return {
+                "decision": Decision.clarify(
+                    "Hi! I can help with questions about your medicines, diet, or the "
+                    "care instructions your doctor approved. What would you like to know?",
+                    scope=ScopeCategory.ADMINISTRATIVE,
+                    trace=trace,
+                )
+            }
         return {}
 
     def retrieve(state: GraphState) -> dict:
@@ -191,6 +209,18 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
             return "escalate" if state.get("decision") is not None else next_node
         return _router
 
+    def _triage_router(state: GraphState) -> str:
+        """After triage: route a terminal decision on its verdict, else continue.
+
+        Triage can short-circuit to ESCALATE (red-flag / multi-condition) *or*
+        CLARIFY (small talk), so route on the actual verdict rather than assuming
+        escalate.
+        """
+        decision = state.get("decision")
+        if decision is not None:
+            return decision.verdict.value  # "escalate" | "clarify"
+        return "retrieve"
+
     def _route_on_verdict(state: GraphState) -> str:
         return state["decision"].verdict.value  # "answer" | "clarify" | "escalate"
 
@@ -210,8 +240,8 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
         g.add_node(name, fn)
 
     g.add_edge(START, "triage")
-    g.add_conditional_edges("triage", _terminated_or("retrieve"),
-                            {"retrieve": "retrieve", "escalate": "escalate"})
+    g.add_conditional_edges("triage", _triage_router,
+                            {"retrieve": "retrieve", "escalate": "escalate", "clarify": "clarify"})
     g.add_edge("retrieve", "reason")
     g.add_conditional_edges("reason", _terminated_or("verify"),
                             {"verify": "verify", "escalate": "escalate"})

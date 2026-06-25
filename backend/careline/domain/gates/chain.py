@@ -87,16 +87,22 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
         )
 
     if ctx.proposal.scope is ScopeCategory.OUT_OF_SCOPE:
+        # Out-of-scope = not a clinical question this patient's approved care plan
+        # covers (general knowledge, off-topic, another condition). Redirecting is
+        # the right move — escalating it would flood the doctor's queue with
+        # non-clinical noise and train them to ignore it (a real safety hazard).
+        # Genuine emergencies still escalate via the red-flag rail upstream.
         ctx.trace.record(
             "scope_gate",
             TraceStatus.TERMINAL,
             spec_section="§5.1",
-            detail="question is out of the doctor's established scope",
+            detail="out of the doctor's established scope — redirecting, not escalating",
         )
-        return Decision.escalate(
-            "Question is outside the doctor's established scope for this patient.",
+        return Decision.clarify(
+            "I can only help with the care your doctor approved for you — your "
+            "medicines, diet, and post-visit instructions. For anything else, please "
+            "contact the clinic directly.",
             scope=ScopeCategory.OUT_OF_SCOPE,
-            risk=0.8,
             trace=ctx.trace,
         )
 
