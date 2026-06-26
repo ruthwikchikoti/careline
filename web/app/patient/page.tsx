@@ -13,8 +13,10 @@ import {
   ShieldAlert,
   ShieldCheck,
   Stethoscope,
+  Trash2,
 } from "lucide-react";
 import {
+  clearPatientHistory,
   getCarePlan,
   getPatientQuestions,
   patientAsk,
@@ -23,6 +25,7 @@ import {
   type PatientQuestion,
 } from "@/lib/api";
 import { clearPatientToken, isPatientAuthenticated } from "@/lib/auth";
+import { suggestionsFor } from "@/lib/suggestions";
 
 const KIND_LABEL: Record<string, string> = {
   medication: "Medication",
@@ -59,6 +62,7 @@ export default function PatientPortalPage() {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [ready, setReady] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -86,14 +90,17 @@ export default function PatientPortalPage() {
     [questions],
   );
 
+  // Starter questions derived from the patient's own care plan (generic fallback).
+  const suggestions = useMemo(() => suggestionsFor(plan?.facts ?? [], SUGGESTIONS), [plan]);
+
   useEffect(() => {
     const reduce = typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     threadEndRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
   }, [thread.length, pending, asking]);
 
-  async function ask() {
-    const q = input.trim();
+  async function ask(question?: string) {
+    const q = (question ?? input).trim();
     if (!q || asking) return;
     setAsking(true);
     setPending(q); // optimistic: show the question immediately
@@ -104,6 +111,25 @@ export default function PatientPortalPage() {
     } finally {
       setPending(null);
       setAsking(false);
+    }
+  }
+
+  async function clearHistory() {
+    if (clearing || (thread.length === 0 && !pending)) return;
+    if (
+      !window.confirm(
+        "Clear your question history? This removes the conversation from your portal.",
+      )
+    )
+      return;
+    setClearing(true);
+    try {
+      await clearPatientHistory();
+      setQuestions([]);
+    } catch {
+      // leave the thread as-is on failure
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -134,12 +160,23 @@ export default function PatientPortalPage() {
               <p className="text-xs text-muted">{plan?.patient_id ?? "—"}</p>
             </div>
           </div>
-          <button
-            onClick={signOut}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-          >
-            Sign out
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={clearHistory}
+              disabled={clearing || (thread.length === 0 && !pending)}
+              title="Clear your question history"
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-40"
+            >
+              {clearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">Clear</span>
+            </button>
+            <button
+              onClick={signOut}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
@@ -162,7 +199,7 @@ export default function PatientPortalPage() {
           {/* thread */}
           <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-5">
             {thread.length === 0 && !pending ? (
-              <EmptyState onPick={setInput} />
+              <EmptyState suggestions={suggestions} onPick={(q) => ask(q)} />
             ) : (
               <>
                 {thread.map((q) => (
@@ -185,6 +222,21 @@ export default function PatientPortalPage() {
 
           {/* composer */}
           <div className="border-t border-border bg-surface px-3 py-3 sm:px-4">
+            {/* persistent suggestion chips — stay available after the first question */}
+            {(thread.length > 0 || pending) && suggestions.length > 0 && (
+              <div className="mb-2.5 flex gap-2 overflow-x-auto pb-1">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => ask(s)}
+                    disabled={asking}
+                    className="shrink-0 rounded-full border border-border bg-canvas px-3 py-1 text-xs text-muted transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <label htmlFor="ask" className="sr-only">
                 Your question
@@ -199,7 +251,7 @@ export default function PatientPortalPage() {
                 className="flex-1 rounded-xl border border-border bg-canvas px-3.5 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 disabled:opacity-50"
               />
               <button
-                onClick={ask}
+                onClick={() => ask()}
                 disabled={asking || !input.trim()}
                 aria-label="Send question"
                 className="inline-flex h-[42px] items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-medium text-primary-fg transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
@@ -236,7 +288,13 @@ export default function PatientPortalPage() {
 
 /* ----------------------------- conversation ----------------------------- */
 
-function EmptyState({ onPick }: { onPick: (q: string) => void }) {
+function EmptyState({
+  suggestions,
+  onPick,
+}: {
+  suggestions: string[];
+  onPick: (q: string) => void;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 py-10 text-center">
       <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-muted text-primary">
@@ -247,7 +305,7 @@ function EmptyState({ onPick }: { onPick: (q: string) => void }) {
         Ask anything about your care plan. Try one of these:
       </p>
       <div className="flex flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((s) => (
+        {suggestions.map((s) => (
           <button
             key={s}
             onClick={() => onPick(s)}
