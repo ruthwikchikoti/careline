@@ -11,6 +11,7 @@ authors = [{ name = "CareLine Team" }]
 dependencies = [
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
+    "langgraph>=0.2",
 ]
 
 [project.optional-dependencies]
