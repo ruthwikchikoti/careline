@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 
 import pytest
 
+from careline.domain.enums import FactKind
 from careline.domain.model.consultation import Consultation
+from careline.domain.model.fact import Instruction
+from careline.domain.model.temporal import Validity
 from careline.domain.ports.repositories import ConsultationRepository
 from careline.services.audit_service import AuditEventKind, AuditService
 from careline.services.consultation_service import (
@@ -195,3 +198,51 @@ def test_stamp_on_nonexistent_consultation_raises_not_found():
                 now=_NOW,
             )
         )
+
+
+def _draft_fact() -> Instruction:
+    return Instruction(
+        id="fact-001",
+        kind=FactKind.INSTRUCTION,
+        validity=Validity(effective_from=_NOW),
+        summary="rest for one week",
+        text="rest for one week",
+    )
+
+
+def test_attach_facts_requires_active_consent():
+    svc = _service()
+    c = _run(svc.create(doctor_id=_DR_A, patient_id=_PATIENT, now=_NOW))
+    with pytest.raises(ConsentViolation):
+        _run(
+            svc.attach_facts(
+                doctor_id=_DR_A,
+                consultation_id=c.consultation_id,
+                facts=(_draft_fact(),),
+                now=_NOW,
+            )
+        )
+
+
+def test_attach_facts_stores_on_draft():
+    svc = _service()
+    c = _run(svc.create(doctor_id=_DR_A, patient_id=_PATIENT, now=_NOW))
+    _run(
+        svc.stamp_consent(
+            doctor_id=_DR_A,
+            consultation_id=c.consultation_id,
+            purpose=_PURPOSE,
+            now=_NOW,
+        )
+    )
+    updated = _run(
+        svc.attach_facts(
+            doctor_id=_DR_A,
+            consultation_id=c.consultation_id,
+            facts=(_draft_fact(),),
+            now=_NOW,
+        )
+    )
+    assert updated.status == "draft"
+    assert len(updated.facts) == 1
+    assert updated.facts[0].id == "fact-001"
