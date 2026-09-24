@@ -20,8 +20,9 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from careline.adapters.mongo.client import AUDIT, CONSULTATIONS, DOCTORS, FACTS
+from careline.adapters.mongo.client import AUDIT, CONSULTATIONS, DOCTORS, FACTS, PATIENTS
 from careline.adapters.mongo.filters import (
+    caller_filter,
     history_filter,
     scoped_filter,
     valid_slice_filter,
@@ -30,7 +31,7 @@ from careline.adapters.mongo.mappers import doc_to_fact, fact_to_doc
 from careline.adapters.mongo.supersession import plan_supersession
 from careline.domain.model.consultation import Consultation
 from careline.domain.model.fact import Fact
-from careline.domain.model.patient import Patient, ValidSlice
+from careline.domain.model.patient import Patient, PatientIdentity, ValidSlice
 from careline.domain.ports.repositories import (
     AuditRepository,
     ConsultationRepository,
@@ -51,6 +52,7 @@ class MongoPatientRepository(PatientRepository):
 
     def __init__(self, database: Any) -> None:
         self._facts = database[FACTS]
+        self._patients = database[PATIENTS]
 
     async def get(self, *, doctor_id: str, patient_id: str) -> Patient | None:
         docs = await self._facts.find(
@@ -143,6 +145,22 @@ class MongoPatientRepository(PatientRepository):
         )
         return int(getattr(result, "modified_count", 0))
 
+    async def find_by_caller(
+        self, *, doctor_id: str, caller_id: str
+    ) -> PatientIdentity | None:
+        doc = await self._patients.find_one(
+            caller_filter(doctor_id=doctor_id, caller_id=caller_id)
+        )
+        return _doc_to_identity(doc) if doc else None
+
+    async def upsert_identity(self, *, identity: PatientIdentity) -> None:
+        doc = _identity_to_doc(identity)
+        await self._patients.update_one(
+            {"doctor_id": identity.doctor_id, "caller_id": identity.caller_id},
+            {"$set": doc},
+            upsert=True,
+        )
+
 
 class MongoConsultationRepository(ConsultationRepository):
     """Consultation drafts/approvals, backed by the ``consultations`` collection."""
@@ -200,6 +218,25 @@ class MongoDoctorRepository(DoctorRepository):
 
 
 # --- consultation (de)serialisation -----------------------------------------
+
+
+def _identity_to_doc(identity: PatientIdentity) -> dict[str, Any]:
+    return {
+        "_id": f"{identity.doctor_id}:{identity.patient_id}",
+        "doctor_id": identity.doctor_id,
+        "patient_id": identity.patient_id,
+        "caller_id": identity.caller_id,
+        "pin_hmac": identity.pin_hmac,
+    }
+
+
+def _doc_to_identity(doc: Mapping[str, Any]) -> PatientIdentity:
+    return PatientIdentity(
+        patient_id=doc["patient_id"],
+        doctor_id=doc["doctor_id"],
+        caller_id=doc["caller_id"],
+        pin_hmac=doc["pin_hmac"],
+    )
 
 
 def _consultation_to_doc(c: Consultation) -> dict[str, Any]:

@@ -66,4 +66,9 @@ def history_filter(
     return f
 
 
-__all__ = ["scoped_filter", "valid_slice_filter", "history_filter"]
+def caller_filter(*, doctor_id: str, caller_id: str) -> dict[str, Any]:
+    """Tenant-scoped lookup by caller-id — ``doctor_id`` always leads."""
+    return {"doctor_id": doctor_id, "caller_id": caller_id}
+
+
+__all__ = ["scoped_filter", "valid_slice_filter", "history_filter", "caller_filter"]
