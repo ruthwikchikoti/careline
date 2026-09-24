@@ -28,6 +28,7 @@ CONSULTATIONS = "consultations"
 AUDIT = "audit"
 DOCTORS = "doctors"
 MEMORY = "memory"
+PATIENTS = "patients"
 
 
 def create_client(uri: str, **kwargs: Any) -> Any:
@@ -66,6 +67,13 @@ async def ensure_indexes(database: Any) -> None:
     memory = database[MEMORY]
     await memory.create_index([("doctor_id", 1), ("patient_id", 1)])
 
+    patients = database[PATIENTS]
+    await patients.create_index(
+        [("doctor_id", 1), ("caller_id", 1)],
+        unique=True,
+        name="patients_doctor_caller_unique",
+    )
+
 
 __all__ = [
     "create_client",
@@ -75,4 +83,5 @@ __all__ = [
     "AUDIT",
     "DOCTORS",
     "MEMORY",
+    "PATIENTS",
 ]

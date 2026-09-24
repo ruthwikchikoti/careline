@@ -18,7 +18,7 @@ from careline.adapters.mongo.supersession import plan_supersession
 from careline.domain.enums import FactKind
 from careline.domain.model.consultation import Consultation
 from careline.domain.model.fact import Fact, Instruction, Medication
-from careline.domain.model.patient import Patient, ValidSlice
+from careline.domain.model.patient import Patient, PatientIdentity, ValidSlice
 from careline.domain.model.temporal import Validity
 from careline.domain.ports.memory import MemoryProvider
 from careline.domain.ports.repositories import ConsultationRepository, PatientRepository
@@ -74,9 +74,13 @@ class _InMemoryPatientRepository(PatientRepository):
 
     def __init__(self) -> None:
         self._store: dict[tuple[str, str], Patient] = {}
+        self._identities: dict[tuple[str, str], PatientIdentity] = {}
 
     def _key(self, *, doctor_id: str, patient_id: str) -> tuple[str, str]:
         return (doctor_id, patient_id)
+
+    def _caller_key(self, *, doctor_id: str, caller_id: str) -> tuple[str, str]:
+        return (doctor_id, caller_id)
 
     async def get(self, *, doctor_id: str, patient_id: str) -> Patient | None:
         return self._store.get(self._key(doctor_id=doctor_id, patient_id=patient_id))
@@ -149,6 +153,16 @@ class _InMemoryPatientRepository(PatientRepository):
             return 0
         del self._store[key]
         return 1
+
+    async def find_by_caller(
+        self, *, doctor_id: str, caller_id: str
+    ) -> PatientIdentity | None:
+        return self._identities.get(self._caller_key(doctor_id=doctor_id, caller_id=caller_id))
+
+    async def upsert_identity(self, *, identity: PatientIdentity) -> None:
+        self._identities[
+            self._caller_key(doctor_id=identity.doctor_id, caller_id=identity.caller_id)
+        ] = identity
 
 
 class _MemorySpy(LocalMemoryProvider):
