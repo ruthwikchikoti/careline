@@ -50,6 +50,9 @@ def test_to_thresholds_reads_env_overrides(monkeypatch):
 
 def test_assert_prod_safe_passes_with_defaults_in_production(monkeypatch):
     monkeypatch.setenv("CARELINE_ENVIRONMENT", "production")
+    monkeypatch.setenv("CARELINE_JWT_SECRET", "prod-jwt-secret-at-least-32-bytes-long!!")
+    monkeypatch.setenv("CARELINE_INTERNAL_API_KEY", "prod-internal-api-key-32bytes-min!!")
+    monkeypatch.setenv("CARELINE_PIN_HMAC_SECRET", "prod-pin-hmac-secret-32bytes-min!!")
     settings = Settings()
     settings.assert_prod_safe()
 

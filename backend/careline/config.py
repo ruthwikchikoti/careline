@@ -17,6 +17,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
+# Dev-only sentinels — must be replaced in production (see assert_prod_safe).
+# Each is >= 32 bytes so HMAC-SHA256 / HS256 meet RFC 7518 key-length guidance.
+_DEFAULT_JWT_SECRET = "dev-jwt-secret-change-in-production!!"
+_DEFAULT_INTERNAL_API_KEY = "dev-internal-api-key-change-in-production!"
+_DEFAULT_PIN_HMAC_SECRET = "dev-pin-hmac-secret-change-in-prod!!"
+_MIN_SECRET_BYTES = 32
+
 
 class Environment(str, Enum):
     """Deployment environment — drives production-only safety guards."""
@@ -57,6 +64,14 @@ class Settings(BaseSettings):
         default=DEFAULT_THRESHOLDS.max_clarify_turns,
         ge=0,
     )
+    jwt_secret: str = Field(default=_DEFAULT_JWT_SECRET, min_length=_MIN_SECRET_BYTES)
+    jwt_ttl_seconds: int = Field(default=3600, ge=60)
+    internal_api_key: str = Field(
+        default=_DEFAULT_INTERNAL_API_KEY, min_length=_MIN_SECRET_BYTES
+    )
+    pin_hmac_secret: str = Field(
+        default=_DEFAULT_PIN_HMAC_SECRET, min_length=_MIN_SECRET_BYTES
+    )
 
     @property
     def is_production(self) -> bool:
@@ -92,6 +107,34 @@ class Settings(BaseSettings):
             raise ValueError(
                 "risk_ceiling cannot be above the safe default "
                 f"({DEFAULT_THRESHOLDS.risk_ceiling}) in production"
+            )
+
+        if self.jwt_secret == _DEFAULT_JWT_SECRET:
+            raise ValueError("jwt_secret must be changed from the dev default in production")
+
+        if len(self.jwt_secret.encode()) < _MIN_SECRET_BYTES:
+            raise ValueError(
+                f"jwt_secret must be at least {_MIN_SECRET_BYTES} bytes in production"
+            )
+
+        if self.internal_api_key == _DEFAULT_INTERNAL_API_KEY:
+            raise ValueError(
+                "internal_api_key must be changed from the dev default in production"
+            )
+
+        if len(self.internal_api_key.encode()) < _MIN_SECRET_BYTES:
+            raise ValueError(
+                f"internal_api_key must be at least {_MIN_SECRET_BYTES} bytes in production"
+            )
+
+        if self.pin_hmac_secret == _DEFAULT_PIN_HMAC_SECRET:
+            raise ValueError(
+                "pin_hmac_secret must be changed from the dev default in production"
+            )
+
+        if len(self.pin_hmac_secret.encode()) < _MIN_SECRET_BYTES:
+            raise ValueError(
+                f"pin_hmac_secret must be at least {_MIN_SECRET_BYTES} bytes in production"
             )
 
 
