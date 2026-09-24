@@ -101,4 +101,19 @@ class Patient(BaseModel):
         return self.model_copy(update={"facts": (*self.facts, fact)})
 
 
-__all__ = ["ValidSlice", "Patient"]
+class PatientIdentity(BaseModel):
+    """Phone-line identity — caller auth fields, separate from the facts aggregate.
+
+    ``pin_hmac`` stores HMAC-SHA256(PIN, server secret); the plain PIN is never
+    persisted. Identity is tenant-scoped via ``doctor_id``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    patient_id: str
+    doctor_id: str
+    caller_id: str
+    pin_hmac: str
+
+
+__all__ = ["PatientIdentity", "ValidSlice", "Patient"]

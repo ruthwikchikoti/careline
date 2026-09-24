@@ -34,7 +34,7 @@ def test_ports_are_abstract(port):
 
 # ``save`` is scoped by the aggregate it receives (which carries ``doctor_id``
 # itself), so it does not — and must not — take a separate doctor_id keyword.
-_AGGREGATE_SCOPED = {"save"}
+_AGGREGATE_SCOPED = {"save", "upsert_identity"}
 
 
 @pytest.mark.parametrize("port", ALL_PORTS)
