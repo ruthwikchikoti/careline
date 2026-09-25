@@ -27,6 +27,7 @@ from careline.domain.model.patient import Patient
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
+from careline.services.audit_service import AuditEventKind, AuditService
 
 
 class QuestionService:
@@ -39,11 +40,13 @@ class QuestionService:
         verifier: Verifier,
         telephony: TelephonyPort | None = None,
         thresholds: Thresholds | None = None,
+        audit: AuditService | None = None,
     ) -> None:
         self._reasoner = reasoner
         self._verifier = verifier
         self._telephony = telephony or TelephonyStub()
         self._thresholds = thresholds or DEFAULT_THRESHOLDS
+        self._audit = audit
 
     @property
     def telephony(self) -> TelephonyPort:
@@ -61,6 +64,13 @@ class QuestionService:
         now = now or datetime.now(timezone.utc)
         session.record_turn()
         trace = ReasoningTrace()
+
+        if self._audit is not None:
+            self._audit.log_call(
+                call_id=session.call_id,
+                patient_id=session.patient_id,
+                doctor_id=session.doctor_id,
+            )
 
         with trace_span("question_service.run_question") as span:
             span.log_input(question=question, patient_id=patient.patient_id)
@@ -81,6 +91,22 @@ class QuestionService:
                 session.record_clarify()
             elif decision.verdict is Verdict.ESCALATE:
                 self._deliver_escalation(decision, session)
+
+            if self._audit is not None:
+                self._audit.log_turn(
+                    call_id=session.call_id,
+                    patient_id=session.patient_id,
+                    doctor_id=session.doctor_id,
+                    question=question,
+                    decision=decision,
+                )
+                if decision.verdict is Verdict.ESCALATE:
+                    self._audit.log_event(
+                        AuditEventKind.ESCALATION,
+                        patient_id=session.patient_id,
+                        doctor_id=session.doctor_id,
+                        detail=decision.escalation_reason,
+                    )
 
             span.log_output(verdict=decision.verdict.value)
             return decision
