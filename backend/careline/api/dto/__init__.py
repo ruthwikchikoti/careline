@@ -1,6 +1,7 @@
 """API request/response DTOs (owner: Naresh)."""
 
 from careline.api.dto.auth import LoginRequest, TokenResponse
+from careline.api.dto.brain import AnswerOut, QuestionIn, TraceStepOut
 from careline.api.dto.consultations import (
     ApprovalOut,
     ConsentIn,
@@ -11,6 +12,7 @@ from careline.api.dto.consultations import (
 from careline.api.dto.patients import PatientOut
 
 __all__ = [
+    "AnswerOut",
     "ApprovalOut",
     "ConsentIn",
     "ConsultationCreateIn",
@@ -18,5 +20,7 @@ __all__ = [
     "ExtractOut",
     "LoginRequest",
     "PatientOut",
+    "QuestionIn",
     "TokenResponse",
+    "TraceStepOut",
 ]
