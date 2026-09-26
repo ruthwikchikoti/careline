@@ -218,6 +218,42 @@ class AuditService:
     def get_call(self, call_id: str) -> AuditCallRecord | None:
         return self._calls.get(call_id)
 
+    def redact_patient(self, patient_id: str) -> int:
+        """DPDP erasure — null clinical text, keep audit skeleton.
+
+        Returns the number of records redacted (turns + calls).
+        """
+        count = 0
+        redacted_turns: list[AuditTurnRecord] = []
+        for turn in self._turns:
+            if turn.patient_id != patient_id or turn.redacted:
+                redacted_turns.append(turn)
+                continue
+            redacted_turns.append(
+                turn.model_copy(
+                    update={
+                        "question": None,
+                        "answer_text": None,
+                        "escalation_reason": None,
+                        "redacted": True,
+                    }
+                )
+            )
+            count += 1
+        self._turns = redacted_turns
+
+        for call_id, call in list(self._calls.items()):
+            if call.patient_id == patient_id and not call.redacted:
+                self._calls[call_id] = call.model_copy(update={"redacted": True})
+                count += 1
+
+        self.log_event(
+            AuditEventKind.ERASURE,
+            patient_id=patient_id,
+            detail=f"redacted {count} audit record(s) — clinical text nulled",
+        )
+        return count
+
 
 __all__ = [
     "AuditEventKind",
