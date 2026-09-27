@@ -30,7 +30,11 @@ export default function DashboardPage() {
         <Card>
           <CardHeader
             title="Demo patient"
-            subtitle={patient ? `${patient.patient_id} · under ${patient.doctor_id}` : "Loading…"}
+            subtitle={
+              patient
+                ? `${patient.patient_id} · under ${patient.doctor_id} · reasoning: ${patient.backend}`
+                : "Loading…"
+            }
             action={
               <Link href="/console">
                 <Button>
