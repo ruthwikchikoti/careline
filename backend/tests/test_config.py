@@ -116,6 +116,17 @@ def test_to_thresholds_result_is_frozen():
         thresholds.confidence_floor = 0.99
 
 
+def test_settings_mongo_uri_defaults_to_none():
+    settings = Settings()
+    assert settings.mongo_uri is None
+
+
+def test_settings_mongo_uri_reads_env(monkeypatch):
+    monkeypatch.setenv("CARELINE_MONGO_URI", "mongodb://localhost:27017")
+    settings = Settings()
+    assert settings.mongo_uri == "mongodb://localhost:27017"
+
+
 # -- factory -----------------------------------------------------------------
 
 
