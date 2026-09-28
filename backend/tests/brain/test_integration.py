@@ -1,7 +1,7 @@
 """End-to-end integration of the assembled graph (RU-6).
 
 Unlike the unit tests (which inject fake ports), this builds the graph the way the
-app does — through ``build_default_graph()`` and the real offline heuristic twins —
+app does — through ``build_default_graph(_OFFLINE)`` and the real offline heuristic twins —
 and drives real questions through it. Proves the composition entry point wires a
 working spine with no API key and no database, and that the safety routes hold with
 the real reasoner/verifier rather than fakes.
@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from careline.adapters.factory import LLMConfig
 from careline.adapters.orchestration.graph import build_default_graph
+
+# Force the offline heuristic backend so the suite never makes a live LLM call,
+# regardless of any OPENAI_API_KEY/ANTHROPIC_API_KEY in the environment.
+_OFFLINE = LLMConfig()
 from careline.domain.enums import FactKind, ScopeCategory, Verdict
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.fact import Instruction, Medication
@@ -56,7 +61,7 @@ def _session() -> CallSession:
 
 
 def test_default_graph_builds_offline_and_runs():
-    graph = build_default_graph()  # keyless heuristic twins
+    graph = build_default_graph(_OFFLINE)  # keyless heuristic twins
     decision = graph.run_question(
         question="What diet should I follow?", patient=_patient(), now=_NOW, session=_session()
     )
@@ -66,7 +71,7 @@ def test_default_graph_builds_offline_and_runs():
 
 
 def test_red_flag_escalates_through_real_spine():
-    graph = build_default_graph()
+    graph = build_default_graph(_OFFLINE)
     decision = graph.run_question(
         question="I have severe chest pain and difficulty breathing",
         patient=_patient(),
@@ -78,7 +83,7 @@ def test_red_flag_escalates_through_real_spine():
 
 
 def test_final_state_exposes_route_and_decision():
-    graph = build_default_graph()
+    graph = build_default_graph(_OFFLINE)
     state = graph.final_state(
         question="I have chest pain", patient=_patient(), now=_NOW, session=_session()
     )
