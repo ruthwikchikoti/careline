@@ -30,6 +30,7 @@ from careline.services.approval_service import ApprovalService
 from careline.services.audit_service import AuditService
 from careline.services.auth_service import AuthService
 from careline.services.consultation_service import ConsultationService
+from careline.services.dpdp_service import DpdpService
 from careline.services.extraction_service import ExtractionService, HeuristicExtractor
 from careline.services.patient_lookup_service import PatientLookupService
 from careline.services.question_service import QuestionService
@@ -183,6 +184,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     graph = build_default_graph(thresholds=settings.to_thresholds())
     question_svc = QuestionService(graph=graph, audit=audit)
+    dpdp_svc = DpdpService(patient_repo=patient_repo, memory=memory, audit=audit)
 
     app.state.settings = settings
     app.state.auth_svc = auth_svc
@@ -193,6 +195,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.approval_svc = approval_svc
     app.state.graph = graph
     app.state.question_svc = question_svc
+    app.state.dpdp_svc = dpdp_svc
 
     yield
 

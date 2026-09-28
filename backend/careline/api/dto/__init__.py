@@ -9,7 +9,7 @@ from careline.api.dto.consultations import (
     ConsultationOut,
     ExtractOut,
 )
-from careline.api.dto.patients import PatientOut
+from careline.api.dto.patients import ErasureOut, PatientOut
 
 __all__ = [
     "AnswerOut",
@@ -17,6 +17,7 @@ __all__ = [
     "ConsentIn",
     "ConsultationCreateIn",
     "ConsultationOut",
+    "ErasureOut",
     "ExtractOut",
     "LoginRequest",
     "PatientOut",
