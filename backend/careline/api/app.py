@@ -11,7 +11,7 @@ from datetime import datetime
 
 from fastapi import FastAPI
 
-from careline.adapters.factory import LLMConfig, build_reasoner, build_verifier
+from careline.adapters.orchestration.graph import build_default_graph
 from careline.adapters.memory.local import LocalMemoryProvider
 from careline.adapters.mongo.supersession import plan_supersession
 from careline.api.errors import register_exception_handlers
@@ -162,7 +162,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.is_production:
         settings.assert_prod_safe()
 
-    llm_config = LLMConfig.from_env()
     audit = AuditService()
     memory = LocalMemoryProvider()
     patient_repo = _InMemoryPatientRepository()
@@ -182,12 +181,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         memory=memory,
         audit=audit,
     )
-    question_svc = QuestionService(
-        reasoner=build_reasoner(llm_config),
-        verifier=build_verifier(llm_config),
-        thresholds=settings.to_thresholds(),
-        audit=audit,
-    )
+    graph = build_default_graph(thresholds=settings.to_thresholds())
+    question_svc = QuestionService(graph=graph, audit=audit)
 
     app.state.settings = settings
     app.state.auth_svc = auth_svc
@@ -196,6 +191,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.consultation_svc = consultation_svc
     app.state.extraction_svc = extraction_svc
     app.state.approval_svc = approval_svc
+    app.state.graph = graph
     app.state.question_svc = question_svc
 
     yield

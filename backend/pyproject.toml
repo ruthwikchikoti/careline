@@ -27,6 +27,7 @@ auth = [
 llm = [
     "openai>=1.40",
     "anthropic>=0.40",
+    "python-dotenv>=1.0",
 ]
 api = [
     "fastapi>=0.111",
