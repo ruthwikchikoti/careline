@@ -9,6 +9,7 @@ import {
   MessageSquareText,
   ShieldAlert,
   ShieldCheck,
+  TestTube2,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -26,8 +27,9 @@ const NAV = [
   { href: "/patients/new", label: "Register patient", icon: UserPlus, ready: true, owner: "Naresh" },
   { href: "/patients", label: "Patients", icon: Users, ready: false, owner: "Naga" },
   { href: "/consultations", label: "Consultations", icon: ClipboardList, ready: true, owner: "Naresh" },
-  { href: "/escalations", label: "Escalations", icon: ShieldAlert, ready: false, owner: "Priyanshu" },
-  { href: "/audit", label: "Audit", icon: Activity, ready: false, owner: "Priyanshu" },
+  { href: "/escalations", label: "Escalations", icon: ShieldAlert, ready: true, owner: "Priyanshu" },
+  { href: "/audit", label: "Audit", icon: Activity, ready: true, owner: "Priyanshu" },
+  { href: "/eval", label: "Eval", icon: TestTube2, ready: true, owner: "Priyanshu" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
