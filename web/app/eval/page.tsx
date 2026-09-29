@@ -1,17 +1,48 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Activity, CheckCircle2, FlaskConical, ShieldCheck, XCircle } from "lucide-react";
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/badges/StatusBadge";
 import { VerdictPill } from "@/components/badges/VerdictPill";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { runEval, type EvalRun } from "@/lib/api";
 import { EvalCharts } from "./EvalCharts";
-import { EVAL_SNAPSHOT } from "./eval-results";
+import { EVAL_SNAPSHOT, type EvalScenario } from "./eval-results";
+
+// Overlay live rerun results onto the validated T1–T8 backbone. The backend
+// reruns a representative subset through the live spine; rows it covers show
+// the live verdict + pass/fail, the rest keep the last validated snapshot.
+function mergeLive(run: EvalRun | null): EvalScenario[] {
+  if (!run) return EVAL_SNAPSHOT.scenarios;
+  const live = new Map(run.scenarios.map((s) => [s.name.split("-")[0], s]));
+  return EVAL_SNAPSHOT.scenarios.map((scenario) => {
+    const hit = live.get(scenario.id);
+    if (!hit) return scenario;
+    return { ...scenario, verdict: hit.verdict, status: hit.passed ? "pass" : "fail" };
+  });
+}
 
 export default function EvalPage() {
   useRequireAuth();
-  const { scenarios } = EVAL_SNAPSHOT;
+
+  const [run, setRun] = useState<EvalRun | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    runEval()
+      .then((data) => active && setRun(data))
+      .catch((e) => active && setError(String(e)))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const scenarios = mergeLive(run);
   const passed = scenarios.filter((scenario) => scenario.status === "pass").length;
   const failed = scenarios.filter((scenario) => scenario.status === "fail").length;
 
@@ -32,7 +63,9 @@ export default function EvalPage() {
             </p>
           </div>
           <p className="text-xs text-muted">
-            Snapshot {EVAL_SNAPSHOT.generatedAt} · {EVAL_SNAPSHOT.source}
+            {run
+              ? `Live rerun · ${run.passed}/${run.total} representative scenarios passed`
+              : `Snapshot ${EVAL_SNAPSHOT.generatedAt} · ${EVAL_SNAPSHOT.source}`}
           </p>
         </div>
 
@@ -43,7 +76,10 @@ export default function EvalPage() {
         </div>
 
         <Card>
-          <CardHeader title="Eval health" subtitle="Latest validated static result snapshot" />
+          <CardHeader
+            title="Eval health"
+            subtitle={run ? "Live rerun overlaid on validated snapshot" : "Latest validated static snapshot"}
+          />
           <CardBody>
             <EvalCharts scenarios={scenarios} />
           </CardBody>
@@ -96,12 +132,13 @@ export default function EvalPage() {
           <CardBody className="flex items-start gap-3">
             <Activity className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <p className="text-sm leading-6 text-muted">
-              Live reruns are backend-blocked: <code className="rounded bg-canvas px-1.5 py-0.5">
-                rerun_offline_eval
-              </code>{" "}
-              exists as a Python service but has no authenticated HTTP endpoint. Until that contract
-              is exposed, this page displays the last test-validated static snapshot permitted by
-              the build plan.
+              {loading
+                ? "Rerunning the offline T-scenarios through the live safety spine…"
+                : error
+                  ? `Live rerun unavailable (${error}). Showing the last test-validated static snapshot.`
+                  : run
+                    ? run.digest
+                    : "Showing the last test-validated static snapshot."}
             </p>
           </CardBody>
         </Card>

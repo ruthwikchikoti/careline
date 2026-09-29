@@ -212,6 +212,15 @@ class AuditService:
     def turns_for_patient(self, patient_id: str) -> list[AuditTurnRecord]:
         return [t for t in self._turns if t.patient_id == patient_id]
 
+    def turns_for_doctor(self, doctor_id: str) -> list[AuditTurnRecord]:
+        """All logged turns for one doctor, newest first."""
+        turns = [t for t in self._turns if t.doctor_id == doctor_id]
+        return sorted(turns, key=lambda t: t.logged_at, reverse=True)
+
+    def escalations_for_doctor(self, doctor_id: str) -> list[AuditTurnRecord]:
+        """Doctor-scoped turns that terminated in ESCALATE, newest first."""
+        return [t for t in self.turns_for_doctor(doctor_id) if t.verdict is Verdict.ESCALATE]
+
     def calls_for_doctor(self, doctor_id: str) -> list[AuditCallRecord]:
         return [c for c in self._calls.values() if c.doctor_id == doctor_id]
 

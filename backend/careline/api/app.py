@@ -20,6 +20,7 @@ from careline.api.routers import (
     auth_router,
     brain_router,
     consultations_router,
+    observability_router,
     patients_router,
 )
 from careline.config import Settings, get_settings
@@ -216,6 +217,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     dpdp_svc = DpdpService(patient_repo=patient_repo, memory=memory, audit=audit)
 
     app.state.settings = settings
+    app.state.audit = audit
     app.state.auth_svc = auth_svc
     app.state.patient_lookup_svc = patient_lookup_svc
     app.state.patient_repo = patient_repo
@@ -247,6 +249,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(patients_router)
     app.include_router(consultations_router)
     app.include_router(brain_router)
+    app.include_router(observability_router)
     if settings is not None:
         app.state.settings = settings
     return app

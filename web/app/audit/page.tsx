@@ -1,14 +1,34 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Activity, FileClock, LockKeyhole, ServerOff } from "lucide-react";
 import { AppShell } from "@/components/shell/AppShell";
+import { VerdictPill } from "@/components/ui/VerdictPill";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { getAuditLog, type AuditLog } from "@/lib/api";
 
-const COLUMNS = ["Time", "Patient", "Call / event", "Verdict", "Confidence", "Risk", "Trace"];
+const COLUMNS = ["Time", "Patient", "Call", "Verdict", "Confidence", "Risk", "Trace"];
 
 export default function AuditPage() {
   useRequireAuth();
+
+  const [log, setLog] = useState<AuditLog | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    getAuditLog()
+      .then((data) => active && setLog(data))
+      .catch((e) => active && setError(String(e)))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const turns = log?.turns ?? [];
 
   return (
     <AppShell>
@@ -68,23 +88,62 @@ export default function AuditPage() {
                   ))}
                 </tr>
               </thead>
+              {turns.length > 0 && (
+                <tbody>
+                  {turns.map((turn) => (
+                    <tr key={turn.turn_id} className="border-b border-border last:border-0">
+                      <td className="whitespace-nowrap px-4 py-3 pl-6 text-sm text-muted">
+                        {new Date(turn.logged_at).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-ink">{turn.patient_id}</td>
+                      <td className="px-4 py-3 text-sm text-muted">{turn.call_id}</td>
+                      <td className="px-4 py-3">
+                        <VerdictPill verdict={turn.verdict} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-ink">
+                        {(turn.confidence * 100).toFixed(0)}%
+                      </td>
+                      <td className="px-4 py-3 text-sm text-ink">{(turn.risk * 100).toFixed(0)}%</td>
+                      <td className="px-4 py-3 pr-6 text-sm text-muted">
+                        {turn.trace_steps.length} step{turn.trace_steps.length === 1 ? "" : "s"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              )}
             </table>
           </div>
-          <CardBody>
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 py-14 text-center">
-              <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-muted">
-                <ServerOff className="h-6 w-6" />
-              </span>
-              <h2 className="text-sm font-semibold text-ink">Audit read API is not available</h2>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-                Audit turns, calls, and events exist in the backend service, but there is no
-                authenticated doctor-scoped HTTP read endpoint. The UI is ready for a{" "}
-                <code className="rounded bg-canvas px-1.5 py-0.5">GET /audit</code> contract.
-              </p>
-            </div>
-          </CardBody>
+          {turns.length === 0 && (
+            <CardBody>
+              <EmptyState loading={loading} error={error} />
+            </CardBody>
+          )}
         </Card>
       </div>
     </AppShell>
+  );
+}
+
+function EmptyState({ loading, error }: { loading: boolean; error: string | null }) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center px-6 py-14 text-sm text-muted">
+        Loading audit trail…
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 py-14 text-center">
+      <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-muted">
+        <ServerOff className="h-6 w-6" />
+      </span>
+      <h2 className="text-sm font-semibold text-ink">
+        {error ? "Could not load the audit trail" : "No audit records yet"}
+      </h2>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
+        {error ??
+          "Audit turns are recorded as patients ask questions through the live spine. Run a call or the Live Console, then refresh to see verdicts, scores, and trace skeletons here."}
+      </p>
+    </div>
   );
 }
