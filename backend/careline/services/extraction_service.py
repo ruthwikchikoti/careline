@@ -143,13 +143,15 @@ def _materialise_fact(
 
 
 _MEDICATION_RE = re.compile(
-    r"(?i)(?:prescribed|prescribe|take|started on)\s+"
+    r"(?i)(?:prescribed|prescribe|take|started on"
+    r"|continue|keep|maintain|stay on)\s+"
     r"([A-Za-z][A-Za-z0-9-]*)"
     r"(?:\s+(\d+\s*mg))?"
     r"(?:\s+(twice daily|once daily|three times daily|every\s+\d+\s+hours))?"
 )
 _INSTRUCTION_RE = re.compile(
-    r"(?i)(?:patient should|advised to|must|should)\s+(.+?)(?:\.|$)"
+    r"(?i)(?:patient should|advised to|must|should"
+    r"|follow|stick to|continue to|maintain)\s+(.+?)(?:\.|$)"
 )
 _REST_RE = re.compile(r"(?i)rest for\s+(.+?)(?:\.|$)")
 _DIAGNOSIS_RE = re.compile(
