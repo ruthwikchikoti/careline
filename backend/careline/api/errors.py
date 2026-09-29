@@ -18,7 +18,6 @@ from careline.adapters.auth.jwt import TokenInvalid
 from careline.domain.ports.reasoning import ReasonerUnavailable
 from careline.services.approval_service import AlreadyApprovedError, NoFactsError
 from careline.services.consultation_service import ConsentViolation, ConsultationNotFound
-from careline.services.extraction_service import NoTranscriptError
 from careline.services.dpdp_service import ErasedNothing
 from careline.services.patient_lookup_service import PatientNotFound
 
@@ -56,10 +55,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(NoFactsError)
     async def _no_facts(_request: Request, _exc: NoFactsError) -> JSONResponse:
         return _json(422, "no facts to approve")
-
-    @app.exception_handler(NoTranscriptError)
-    async def _no_transcript(_request: Request, _exc: NoTranscriptError) -> JSONResponse:
-        return _json(422, "no transcript")
 
     @app.exception_handler(ReasonerUnavailable)
     async def _reasoner_unavailable(

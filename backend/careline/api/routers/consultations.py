@@ -49,6 +49,18 @@ async def create_consultation(
     return _consultation_out(consultation)
 
 
+@router.get("", response_model=list[ConsultationOut])
+async def list_consultations(
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> list[ConsultationOut]:
+    """All consultations for the authenticated doctor, newest first."""
+    consultations = await request.app.state.consultation_svc.list(
+        doctor_id=principal.doctor_id
+    )
+    return [_consultation_out(c) for c in consultations]
+
+
 @router.get("/{consultation_id}", response_model=ConsultationOut)
 async def get_consultation(
     consultation_id: str,

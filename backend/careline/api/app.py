@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from careline.adapters.orchestration.graph import build_default_graph
 from careline.adapters.memory.local import LocalMemoryProvider
@@ -59,6 +60,16 @@ class _InMemoryConsultationRepository(ConsultationRepository):
             for c in self._store.values()
             if c.doctor_id == doctor_id and c.patient_id == patient_id
         )
+
+    async def list_for_doctor(
+        self, *, doctor_id: str, limit: int = 50
+    ) -> tuple[Consultation, ...]:
+        results = sorted(
+            (c for c in self._store.values() if c.doctor_id == doctor_id),
+            key=lambda c: c.created_at,
+            reverse=True,
+        )
+        return tuple(results[:limit])
 
 
 class _InMemoryPatientRepository(PatientRepository):
@@ -225,6 +236,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(*, settings: Settings | None = None) -> FastAPI:
     """Build the CareLine FastAPI application."""
     app = FastAPI(title="CareLine", lifespan=_lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     register_exception_handlers(app)
     app.include_router(auth_router)
     app.include_router(patients_router)

@@ -136,6 +136,13 @@ class ConsultationRepository(ABC):
     ) -> tuple[Consultation, ...]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def list_for_doctor(
+        self, *, doctor_id: str, limit: int = 50
+    ) -> tuple[Consultation, ...]:
+        """All consultations under one doctor, newest first, capped at limit."""
+        raise NotImplementedError
+
 
 class AuditRepository(ABC):
     """Append-only access log (DPDP access-logging + the reasoning audit trail)."""

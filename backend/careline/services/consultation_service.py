@@ -177,6 +177,12 @@ class ConsultationService:
             doctor_id=doctor_id, patient_id=patient_id
         )
 
+    async def list(
+        self, *, doctor_id: str, limit: int = 50
+    ) -> tuple[Consultation, ...]:
+        """All consultations for a doctor, newest first."""
+        return await self._repo.list_for_doctor(doctor_id=doctor_id, limit=limit)
+
     async def _get_or_raise(
         self, *, doctor_id: str, consultation_id: str
     ) -> Consultation:
