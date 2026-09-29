@@ -56,6 +56,16 @@ class _InMemoryConsultationRepository(ConsultationRepository):
             if c.doctor_id == doctor_id and c.patient_id == patient_id
         )
 
+    async def list_for_doctor(
+        self, *, doctor_id: str, limit: int = 50
+    ) -> tuple[Consultation, ...]:
+        results = sorted(
+            (c for c in self._store.values() if c.doctor_id == doctor_id),
+            key=lambda c: c.created_at,
+            reverse=True,
+        )
+        return tuple(results[:limit])
+
 
 def _service(*, audit: AuditService | None = None) -> ConsultationService:
     return ConsultationService(repo=_InMemoryConsultationRepository(), audit=audit)
@@ -185,6 +195,31 @@ def test_list_for_patient_is_tenant_scoped():
     listed = _run(svc.list_for_patient(doctor_id=_DR_A, patient_id=_PATIENT))
     assert len(listed) == 1
     assert listed[0].consultation_id == c_a.consultation_id
+
+
+def test_list_for_doctor_is_tenant_scoped_and_newest_first():
+    svc = _service()
+    older = _run(
+        svc.create(
+            doctor_id=_DR_A,
+            patient_id="patient-old",
+            consultation_id="c-old",
+            now=datetime(2026, 6, 20, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    newer = _run(
+        svc.create(
+            doctor_id=_DR_A,
+            patient_id="patient-new",
+            consultation_id="c-new",
+            now=datetime(2026, 6, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    _run(svc.create(doctor_id=_DR_B, patient_id=_PATIENT, now=_NOW))
+    listed = _run(svc.list(doctor_id=_DR_A))
+    assert len(listed) == 2
+    assert listed[0].consultation_id == newer.consultation_id
+    assert listed[1].consultation_id == older.consultation_id
 
 
 def test_stamp_on_nonexistent_consultation_raises_not_found():

@@ -68,6 +68,16 @@ class _InMemoryConsultationRepository(ConsultationRepository):
             if c.doctor_id == doctor_id and c.patient_id == patient_id
         )
 
+    async def list_for_doctor(
+        self, *, doctor_id: str, limit: int = 50
+    ) -> tuple[Consultation, ...]:
+        results = sorted(
+            (c for c in self._store.values() if c.doctor_id == doctor_id),
+            key=lambda c: c.created_at,
+            reverse=True,
+        )
+        return tuple(results[:limit])
+
 
 class _InMemoryPatientRepository(PatientRepository):
     """Offline double — apply_facts uses the same supersession plan as Mongo."""

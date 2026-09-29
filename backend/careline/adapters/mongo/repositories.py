@@ -186,6 +186,14 @@ class MongoConsultationRepository(ConsultationRepository):
         ).to_list(length=None)
         return tuple(_doc_to_consultation(d) for d in docs)
 
+    async def list_for_doctor(
+        self, *, doctor_id: str, limit: int = 50
+    ) -> tuple[Consultation, ...]:
+        docs = await self._col.find(
+            scoped_filter(doctor_id=doctor_id)
+        ).sort("created_at", -1).limit(limit).to_list(length=limit)
+        return tuple(_doc_to_consultation(d) for d in docs)
+
 
 class MongoAuditRepository(AuditRepository):
     """Append-only access log, backed by the ``audit`` collection."""
