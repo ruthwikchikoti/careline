@@ -40,9 +40,16 @@ export interface DemoPatient {
 }
 
 export async function ask(question: string): Promise<AnswerResult> {
+  // Send the doctor's token when signed in so the demo turn is attributed to
+  // them — that's what makes console escalations appear in their queue. The
+  // endpoint stays auth-free, so an anonymous demo (no token) still works.
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   const res = await fetch(`${BASE}/demo/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ question }),
   });
   if (!res.ok) throw new Error(`Demo API error ${res.status}`);
