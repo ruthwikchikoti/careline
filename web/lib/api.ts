@@ -50,6 +50,7 @@ export async function ask(question: string): Promise<AnswerResult> {
   const res = await fetch(`${BASE}/demo/ask`, {
     method: "POST",
     headers,
+    headers,
     body: JSON.stringify({ question }),
   });
   if (!res.ok) throw new Error(`Demo API error ${res.status}`);
