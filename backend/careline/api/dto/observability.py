@@ -51,6 +51,19 @@ class AuditCallOut(BaseModel):
     redacted: bool = False
 
 
+class AuditEventOut(BaseModel):
+    """A non-turn audit event (consent, erasure, eval run, system)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    kind: str
+    logged_at: datetime
+    patient_id: str | None = None
+    detail: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class AuditLogOut(BaseModel):
     """Doctor-scoped audit trail — calls plus their turns, newest first."""
 
@@ -93,6 +106,7 @@ class EvalRunOut(BaseModel):
 __all__ = [
     "AuditTurnOut",
     "AuditCallOut",
+    "AuditEventOut",
     "AuditLogOut",
     "EscalationsOut",
     "EvalScenarioOut",
