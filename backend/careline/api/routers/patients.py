@@ -5,13 +5,20 @@ Owner: Naresh (scope ``api``).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from careline.adapters.auth.principals import DoctorPrincipal
 from careline.api.deps import get_current_doctor
-from careline.api.dto.patients import ErasureOut, PatientOut, PatientRegisterIn
+from careline.api.dto.patients import (
+    ErasureOut,
+    FactOut,
+    PatientOut,
+    PatientRecordOut,
+    PatientRegisterIn,
+)
 from careline.domain.model.patient import PatientIdentity
 from careline.services.patient_lookup_service import hash_pin
 
@@ -63,6 +70,40 @@ async def get_patient(
         patient_id=patient.patient_id,
         doctor_id=patient.doctor_id,
         fact_count=len(patient.facts),
+    )
+
+
+@router.get("/{patient_id}/record", response_model=PatientRecordOut)
+async def get_patient_record(
+    patient_id: str,
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> PatientRecordOut:
+    """Return the patient's valid slice (current facts) + superseded history.
+
+    Tenant-scoped to the authenticated doctor; a cross-tenant or unknown patient is
+    a 404, never another doctor's record. The repository pushes the half-open
+    validity + approval predicate down, so ``current`` never contains a superseded
+    or unapproved fact.
+    """
+    repo = request.app.state.patient_repo
+    patient = await repo.get(doctor_id=principal.doctor_id, patient_id=patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="not found")
+
+    now = datetime.now(timezone.utc)
+    valid = await repo.valid_slice(
+        doctor_id=principal.doctor_id, patient_id=patient_id, now=now
+    )
+    retired = await repo.history(
+        doctor_id=principal.doctor_id, patient_id=patient_id, now=now
+    )
+    return PatientRecordOut(
+        patient_id=patient.patient_id,
+        doctor_id=patient.doctor_id,
+        as_of=now,
+        current=[FactOut.from_fact(f, current=True) for f in valid.facts],
+        history=[FactOut.from_fact(f, current=False) for f in retired],
     )
 
 
