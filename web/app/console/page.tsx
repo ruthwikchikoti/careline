@@ -6,6 +6,7 @@ import { ArrowLeft, Phone, Send, Stethoscope, User } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { VerdictPill } from "@/components/ui/VerdictPill";
 import { TraceStepper } from "@/components/trace/TraceStepper";
+import { ConsoleAnswerPanel } from "./_answer/ConsoleAnswerPanel";
 import { ask, type AnswerResult } from "@/lib/api";
 
 interface Turn {
@@ -107,19 +108,8 @@ export default function ConsolePage() {
                     <span className="mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-canvas text-ink">
                       <Stethoscope className="h-4 w-4" />
                     </span>
-                    <div className="space-y-2 rounded-2xl rounded-tl-sm border border-border bg-surface px-4 py-3">
-                      <VerdictPill verdict={turn.result.verdict} />
-                      <p className="text-sm text-ink">
-                        {turn.result.answer_text ?? turn.result.escalation_reason}
-                      </p>
-                      {turn.result.verdict === "answer" && (
-                        <p className="text-xs text-muted">
-                          confidence {(turn.result.confidence * 100).toFixed(0)}% · risk{" "}
-                          {(turn.result.risk * 100).toFixed(0)}%
-                          {turn.result.citations.length > 0 &&
-                            ` · grounded in ${turn.result.citations.join(", ")}`}
-                        </p>
-                      )}
+                    <div className="min-w-0 flex-1">
+                      <ConsoleAnswerPanel result={turn.result} />
                     </div>
                   </div>
                 </div>
