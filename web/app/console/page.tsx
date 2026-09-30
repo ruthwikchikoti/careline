@@ -11,7 +11,22 @@ import { ask, type AnswerResult } from "@/lib/api";
 
 interface Turn {
   question: string;
-  result: AnswerResult;
+  result: AnswerResult | null; // null while the agent is still working
+}
+
+function ThinkingBubble() {
+  return (
+    <div className="inline-flex items-center gap-3 rounded-2xl rounded-tl-sm border border-border bg-surface px-4 py-3 shadow-soft">
+      <span className="flex gap-1" aria-hidden>
+        <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+        <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+        <span className="h-2 w-2 animate-bounce rounded-full bg-primary" />
+      </span>
+      <span className="text-sm text-muted">
+        Checking the patient&apos;s approved record…
+      </span>
+    </div>
+  );
 }
 
 const EXAMPLES = [
@@ -28,7 +43,11 @@ export default function ConsolePage() {
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  const active = turns[turns.length - 1]?.result;
+  // The trace panel follows the most recent *completed* turn.
+  const active = [...turns].reverse().find((t) => t.result)?.result ?? null;
+
+  const scrollToEnd = () =>
+    setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 0);
 
   async function submit(question: string) {
     const q = question.trim();
@@ -36,14 +55,22 @@ export default function ConsolePage() {
     setInput("");
     setLoading(true);
     setError(null);
+    // Show the patient's message immediately + a pending agent turn.
+    setTurns((t) => [...t, { question: q, result: null }]);
+    scrollToEnd();
     try {
       const result = await ask(q);
-      setTurns((t) => [...t, { question: q, result }]);
-      setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 0);
+      // Fill in the result on the pending (last) turn.
+      setTurns((t) =>
+        t.map((turn, i) => (i === t.length - 1 ? { ...turn, result } : turn)),
+      );
     } catch (e) {
       setError(String(e));
+      // Drop the pending turn so the chat doesn't hang on a spinner.
+      setTurns((t) => t.slice(0, -1));
     } finally {
       setLoading(false);
+      scrollToEnd();
     }
   }
 
@@ -109,7 +136,11 @@ export default function ConsolePage() {
                       <Stethoscope className="h-4 w-4" />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <ConsoleAnswerPanel result={turn.result} />
+                      {turn.result ? (
+                        <ConsoleAnswerPanel result={turn.result} />
+                      ) : (
+                        <ThinkingBubble />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -145,7 +176,13 @@ export default function ConsolePage() {
           <div className="rounded-2xl border border-border bg-surface p-5 shadow-soft">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Agent trace</h2>
-              {active && <VerdictPill verdict={active.verdict} />}
+              {loading ? (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-primary">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-primary" /> evaluating…
+                </span>
+              ) : active ? (
+                <VerdictPill verdict={active.verdict} />
+              ) : null}
             </div>
             {active ? (
               <TraceStepper steps={active.trace} verdict={active.verdict} />
