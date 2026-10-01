@@ -22,6 +22,7 @@ from careline.api.dto.observability import (
     AuditEventOut,
     AuditLogOut,
     AuditTurnOut,
+    EscalationGroupOut,
     EscalationsOut,
     EvalRunOut,
     EvalScenarioOut,
@@ -120,12 +121,36 @@ async def get_escalations(
     request: Request,
     principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
 ) -> EscalationsOut:
-    """Doctor-scoped human-handoff queue — turns that terminated in ESCALATE."""
+    """Doctor-scoped human-handoff queue — ESCALATE turns, grouped by patient.
+
+    The flat list (newest first) is preserved; ``groups`` bundles those same turns
+    per patient so the doctor triages by *who* is waiting rather than scanning
+    row-by-row. Patients are ordered by their most recent escalation.
+    """
     audit: AuditService = request.app.state.audit
     escalations = audit.escalations_for_doctor(principal.doctor_id)
+    flat = [_turn_out(t) for t in escalations]
+
+    # Group preserving the newest-first order within each patient.
+    grouped: dict[str, list[AuditTurnOut]] = {}
+    for turn in flat:
+        grouped.setdefault(turn.patient_id, []).append(turn)
+    groups = [
+        EscalationGroupOut(
+            patient_id=pid,
+            count=len(turns),
+            latest_at=turns[0].logged_at,  # flat is newest-first → first is latest
+            escalations=turns,
+        )
+        for pid, turns in grouped.items()
+    ]
+    groups.sort(key=lambda g: g.latest_at, reverse=True)
+
     return EscalationsOut(
-        waiting=len(escalations),
-        escalations=[_turn_out(t) for t in escalations],
+        waiting=len(flat),
+        patients_waiting=len(groups),
+        groups=groups,
+        escalations=flat,
     )
 
 

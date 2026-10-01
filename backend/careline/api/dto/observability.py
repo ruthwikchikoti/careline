@@ -73,12 +73,34 @@ class AuditLogOut(BaseModel):
     turns: list[AuditTurnOut] = Field(default_factory=list)
 
 
+class EscalationGroupOut(BaseModel):
+    """One patient's escalations, bundled so the queue reads per-patient.
+
+    A doctor triages by *who is waiting*, not by individual rows, so the queue
+    groups every ESCALATE turn under its patient — newest patient first, and
+    newest turn first within each patient.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    patient_id: str
+    count: int
+    latest_at: datetime
+    escalations: list[AuditTurnOut] = Field(default_factory=list)
+
+
 class EscalationsOut(BaseModel):
-    """Doctor-scoped human-handoff queue — turns that terminated in ESCALATE."""
+    """Doctor-scoped human-handoff queue — turns that terminated in ESCALATE.
+
+    ``groups`` is the per-patient view (the primary shape the queue UI renders);
+    ``escalations`` keeps the flat, newest-first list for any caller that wants it.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     waiting: int = 0
+    patients_waiting: int = 0
+    groups: list[EscalationGroupOut] = Field(default_factory=list)
     escalations: list[AuditTurnOut] = Field(default_factory=list)
 
 
@@ -108,6 +130,7 @@ __all__ = [
     "AuditCallOut",
     "AuditEventOut",
     "AuditLogOut",
+    "EscalationGroupOut",
     "EscalationsOut",
     "EvalScenarioOut",
     "EvalRunOut",
