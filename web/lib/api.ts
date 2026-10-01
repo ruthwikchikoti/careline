@@ -134,6 +134,25 @@ export interface ErasureOut {
   audit_redacted: number;
 }
 
+export interface FactRecord {
+  id: string;
+  kind: string;
+  summary: string;
+  effective_from: string;
+  superseded_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  current: boolean;
+}
+
+export interface PatientRecord {
+  patient_id: string;
+  doctor_id: string;
+  as_of: string;
+  current: FactRecord[];
+  history: FactRecord[];
+}
+
 async function authFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   if (!token) throw new AuthError();
@@ -186,6 +205,10 @@ export function registerPatient(body: PatientRegisterIn): Promise<PatientOut> {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export function getPatientRecord(id: string): Promise<PatientRecord> {
+  return authFetch<PatientRecord>(`/patients/${encodeURIComponent(id)}/record`);
 }
 
 export function createConsultation(body: ConsultationCreateIn): Promise<ConsultationOut> {
