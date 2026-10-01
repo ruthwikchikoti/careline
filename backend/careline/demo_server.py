@@ -102,6 +102,9 @@ print(f"[careline.demo] reasoning backend: {_BACKEND}")
 
 class AskIn(BaseModel):
     question: str
+    # When set (and a doctor JWT is supplied), the console asks against this real
+    # registered patient's Mongo-persisted facts instead of the bundled demo patient.
+    patient_id: str | None = None
 
 
 app = FastAPI(title="CareLine Demo API", description="Live Agent Console backend (demo).")

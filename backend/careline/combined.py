@@ -59,17 +59,37 @@ async def demo_ask(request: Request, body: AskIn) -> dict:
         except Exception:
             pass
 
+    # Use a real registered patient (Mongo-persisted facts) when one is named and
+    # we have a signed-in doctor; otherwise fall back to the bundled demo patient.
+    from datetime import datetime, timezone
+
+    patient = None
+    patient_id = "demo-patient"
+    now = _NOW
+    if body.patient_id and doctor_id != "demo-doctor":
+        try:
+            patient = await request.app.state.patient_repo.get(
+                doctor_id=doctor_id, patient_id=body.patient_id
+            )
+        except Exception:
+            patient = None
+        if patient is not None:
+            patient_id = body.patient_id
+            now = datetime.now(timezone.utc)
+    if patient is None:
+        patient = _demo_patient()
+
     session = CallSession(
         call_id="web-demo",
-        patient_id="demo-patient",
+        patient_id=patient_id,
         doctor_id=doctor_id,
         max_clarify_turns=2,
     )
     decision = request.app.state.question_svc.run_question(
         question=body.question,
-        patient=_demo_patient(),
+        patient=patient,
         session=session,
-        now=_NOW,
+        now=now,
     )
     return _decision_payload(decision)
 
