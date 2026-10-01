@@ -53,6 +53,30 @@ async def register_patient(
     )
 
 
+@router.get("", response_model=list[PatientOut])
+async def list_patients(
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> list[PatientOut]:
+    """Every patient registered under the authenticated doctor.
+
+    Tenant-scoped: only this doctor's patients are ever returned. Each carries its
+    approved-fact count so the UI can show who is answerable (count > 0) vs. merely
+    registered. Powers the console patient picker and the patients-page list.
+    """
+    rows = await request.app.state.patient_repo.list_for_doctor(
+        doctor_id=principal.doctor_id
+    )
+    return [
+        PatientOut(
+            patient_id=pid,
+            doctor_id=principal.doctor_id,
+            fact_count=fact_count,
+        )
+        for pid, fact_count in rows
+    ]
+
+
 @router.get("/{patient_id}", response_model=PatientOut)
 async def get_patient(
     patient_id: str,
