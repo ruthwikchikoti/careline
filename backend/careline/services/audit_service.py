@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -95,13 +95,62 @@ def _trace_to_skeleton(trace: ReasoningTrace) -> list[dict[str, Any]]:
     ]
 
 
-class AuditService:
-    """In-memory audit store for offline/MVP; Mongo persistence is NR-layer."""
+class AuditStore(Protocol):
+    """Durable persistence seam for the audit trail (see mongo/audit_store.py).
 
-    def __init__(self) -> None:
+    The service keeps an in-memory read model; an optional store makes that model
+    restart-survivable by hydrating it on construction and receiving every write.
+    Kept as a Protocol so the offline suite needs no store at all (``None``).
+    """
+
+    def save_turn(self, record: AuditTurnRecord) -> None: ...
+    def save_call(self, record: AuditCallRecord) -> None: ...
+    def save_event(self, record: AuditEventRecord) -> None: ...
+    def load(
+        self,
+    ) -> tuple[list[AuditTurnRecord], list[AuditCallRecord], list[AuditEventRecord]]: ...
+
+
+class AuditService:
+    """In-memory audit read model, optionally write-through to a durable store.
+
+    With no ``store`` (offline/tests) it is pure in-memory, exactly as before.
+    With a store (Mongo), the in-memory model is hydrated on startup and mirrored
+    on every write, so the audit trail survives restarts.
+    """
+
+    def __init__(self, *, store: AuditStore | None = None) -> None:
         self._turns: list[AuditTurnRecord] = []
         self._calls: dict[str, AuditCallRecord] = {}
         self._events: list[AuditEventRecord] = []
+        self._store = store
+        if store is not None:
+            turns, calls, events = store.load()
+            self._turns = list(turns)
+            self._calls = {c.call_id: c for c in calls}
+            self._events = list(events)
+
+    def _persist_turn(self, record: AuditTurnRecord) -> None:
+        """Best-effort write-through — a storage hiccup never breaks a live turn."""
+        if self._store is not None:
+            try:
+                self._store.save_turn(record)
+            except Exception:  # noqa: BLE001 - durability is best-effort, answer must return
+                pass
+
+    def _persist_call(self, record: AuditCallRecord) -> None:
+        if self._store is not None:
+            try:
+                self._store.save_call(record)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _persist_event(self, record: AuditEventRecord) -> None:
+        if self._store is not None:
+            try:
+                self._store.save_event(record)
+            except Exception:  # noqa: BLE001
+                pass
 
     @property
     def turns(self) -> tuple[AuditTurnRecord, ...]:
@@ -137,16 +186,19 @@ class AuditService:
             trace_steps=_trace_to_skeleton(decision.trace),
         )
         self._turns.append(record)
+        self._persist_turn(record)
 
         if call_id in self._calls:
             call = self._calls[call_id]
-            self._calls[call_id] = call.model_copy(
+            updated = call.model_copy(
                 update={
                     "turn_count": call.turn_count + 1,
                     "final_verdict": decision.verdict,
                     "escalated": call.escalated or decision.verdict is Verdict.ESCALATE,
                 }
             )
+            self._calls[call_id] = updated
+            self._persist_call(updated)
         return record
 
     def log_call(
@@ -167,6 +219,7 @@ class AuditService:
             started_at=started_at or datetime.now(timezone.utc),
         )
         self._calls[call_id] = record
+        self._persist_call(record)
         return record
 
     def end_call(
@@ -181,6 +234,7 @@ class AuditService:
             return None
         updated = call.model_copy(update={"ended_at": ended_at or datetime.now(timezone.utc)})
         self._calls[call_id] = updated
+        self._persist_call(updated)
         return updated
 
     def log_event(
@@ -204,6 +258,7 @@ class AuditService:
             metadata=dict(metadata or {}),
         )
         self._events.append(record)
+        self._persist_event(record)
         return record
 
     def turns_for_call(self, call_id: str) -> list[AuditTurnRecord]:
@@ -238,22 +293,24 @@ class AuditService:
             if turn.patient_id != patient_id or turn.redacted:
                 redacted_turns.append(turn)
                 continue
-            redacted_turns.append(
-                turn.model_copy(
-                    update={
-                        "question": None,
-                        "answer_text": None,
-                        "escalation_reason": None,
-                        "redacted": True,
-                    }
-                )
+            redacted = turn.model_copy(
+                update={
+                    "question": None,
+                    "answer_text": None,
+                    "escalation_reason": None,
+                    "redacted": True,
+                }
             )
+            redacted_turns.append(redacted)
+            self._persist_turn(redacted)  # overwrite the durable copy too
             count += 1
         self._turns = redacted_turns
 
         for call_id, call in list(self._calls.items()):
             if call.patient_id == patient_id and not call.redacted:
-                self._calls[call_id] = call.model_copy(update={"redacted": True})
+                marked = call.model_copy(update={"redacted": True})
+                self._calls[call_id] = marked
+                self._persist_call(marked)
                 count += 1
 
         self.log_event(
