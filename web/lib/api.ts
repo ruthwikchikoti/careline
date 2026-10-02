@@ -209,6 +209,10 @@ export function registerPatient(body: PatientRegisterIn): Promise<PatientOut> {
   });
 }
 
+export function listPatients(): Promise<PatientOut[]> {
+  return authFetch<PatientOut[]>("/patients");
+}
+
 export function getPatientRecord(id: string): Promise<PatientRecord> {
   return authFetch<PatientRecord>(`/patients/${encodeURIComponent(id)}/record`);
 }
@@ -268,6 +272,9 @@ export interface AuditTurn {
   risk: number;
   trace_steps: TraceStep[];
   redacted: boolean;
+  resolved: boolean;
+  reply: string | null;
+  resolved_at: string | null;
 }
 
 export interface AuditCall {
@@ -286,8 +293,17 @@ export interface AuditLog {
   turns: AuditTurn[];
 }
 
+export interface EscalationGroup {
+  patient_id: string;
+  count: number;
+  latest_at: string;
+  escalations: AuditTurn[];
+}
+
 export interface EscalationsQueue {
   waiting: number;
+  patients_waiting: number;
+  groups: EscalationGroup[];
   escalations: AuditTurn[];
 }
 
@@ -310,6 +326,20 @@ export function getAuditLog(): Promise<AuditLog> {
 
 export function getEscalations(): Promise<EscalationsQueue> {
   return authFetch<EscalationsQueue>("/escalations");
+}
+
+export interface EscalationResolved {
+  turn_id: string;
+  patient_id: string;
+  reply: string;
+  resolved_at: string;
+}
+
+export function resolveEscalation(turnId: string, reply: string): Promise<EscalationResolved> {
+  return authFetch<EscalationResolved>(`/escalations/${encodeURIComponent(turnId)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ reply }),
+  });
 }
 
 export function runEval(): Promise<EvalRun> {

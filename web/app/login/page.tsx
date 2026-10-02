@@ -16,7 +16,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated()) router.replace("/");
+    if (isAuthenticated()) router.replace("/dashboard");
   }, [router]);
 
   async function handleSubmit(e: FormEvent) {
@@ -26,7 +26,7 @@ export default function LoginPage() {
     try {
       const { access_token } = await login(doctorId.trim());
       setToken(access_token);
-      router.push("/");
+      router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed");
     } finally {

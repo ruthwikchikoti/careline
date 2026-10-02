@@ -11,9 +11,10 @@ import { runEval, type EvalRun } from "@/lib/api";
 import { EvalCharts } from "./EvalCharts";
 import { EVAL_SNAPSHOT, type EvalScenario } from "./eval-results";
 
-// Overlay live rerun results onto the validated T1–T8 backbone. The backend
-// reruns a representative subset through the live spine; rows it covers show
-// the live verdict + pass/fail, the rest keep the last validated snapshot.
+// Overlay live rerun results onto the T1–T8 backbone. The backend reruns all
+// eight scenarios through the live gate chain on every request, so every row
+// shows its freshly-computed verdict + pass/fail; the static snapshot only
+// supplies the descriptions and the pre-load placeholder.
 function mergeLive(run: EvalRun | null): EvalScenario[] {
   if (!run) return EVAL_SNAPSHOT.scenarios;
   const live = new Map(run.scenarios.map((s) => [s.name.split("-")[0], s]));
@@ -64,7 +65,7 @@ export default function EvalPage() {
           </div>
           <p className="text-xs text-muted">
             {run
-              ? `Live rerun · ${run.passed}/${run.total} representative scenarios passed`
+              ? `Live rerun · all ${run.total} scenarios run · ${run.passed}/${run.total} passed`
               : `Snapshot ${EVAL_SNAPSHOT.generatedAt} · ${EVAL_SNAPSHOT.source}`}
           </p>
         </div>
@@ -78,7 +79,7 @@ export default function EvalPage() {
         <Card>
           <CardHeader
             title="Eval health"
-            subtitle={run ? "Live rerun overlaid on validated snapshot" : "Latest validated static snapshot"}
+            subtitle={run ? "All T1–T8 re-run live through the safety spine" : "Latest validated static snapshot"}
           />
           <CardBody>
             <EvalCharts scenarios={scenarios} />
