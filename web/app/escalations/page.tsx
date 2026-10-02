@@ -26,7 +26,7 @@ export default function EscalationsPage() {
     };
   }, []);
 
-  const escalations = queue?.escalations ?? [];
+  const groups = queue?.groups ?? [];
 
   return (
     <AppShell>
@@ -56,8 +56,8 @@ export default function EscalationsPage() {
             tone="escalate"
           />
           <QueueStat
-            label="On a call"
-            value={queue ? "0" : "—"}
+            label="Patients waiting"
+            value={queue ? String(queue.patients_waiting) : "—"}
             icon={PhoneForwarded}
             tone="clarify"
           />
@@ -72,33 +72,54 @@ export default function EscalationsPage() {
         <Card>
           <CardHeader
             title="Active handoffs"
-            subtitle="Newest safety-critical escalation first"
+            subtitle="Grouped by patient · most recently escalated first"
           />
           <CardBody>
-            {escalations.length > 0 ? (
-              <ul className="space-y-3">
-                {escalations.map((turn) => (
-                  <li
-                    key={turn.turn_id}
-                    className="rounded-xl border border-border bg-surface px-4 py-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-ink">{turn.patient_id}</p>
+            {groups.length > 0 ? (
+              <div className="space-y-5">
+                {groups.map((group) => (
+                  <section key={group.patient_id}>
+                    {/* patient header */}
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-escalate-bg text-escalate">
+                          <ShieldAlert className="h-4 w-4" />
+                        </span>
+                        <p className="text-sm font-semibold text-ink">{group.patient_id}</p>
+                        <span className="rounded-full bg-escalate-bg px-2 py-0.5 text-xs font-medium text-escalate">
+                          {group.count} waiting
+                        </span>
+                      </div>
                       <span className="whitespace-nowrap text-xs text-muted">
-                        {new Date(turn.logged_at).toLocaleString()}
+                        latest {new Date(group.latest_at).toLocaleString()}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm leading-6 text-muted">
-                      {turn.escalation_reason ?? "Escalated to the doctor."}
-                    </p>
-                    {turn.question && (
-                      <p className="mt-1 text-xs text-muted">
-                        Asked: “{turn.question}” · risk {(turn.risk * 100).toFixed(0)}%
-                      </p>
-                    )}
-                  </li>
+                    {/* this patient's escalated turns */}
+                    <ul className="space-y-2 border-l-2 border-escalate-bg pl-3">
+                      {group.escalations.map((turn) => (
+                        <li
+                          key={turn.turn_id}
+                          className="rounded-xl border border-border bg-surface px-4 py-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm leading-6 text-ink">
+                              {turn.escalation_reason ?? "Escalated to the doctor."}
+                            </p>
+                            <span className="whitespace-nowrap text-xs text-muted">
+                              {new Date(turn.logged_at).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          {turn.question && (
+                            <p className="mt-1 text-xs text-muted">
+                              Asked: “{turn.question}” · risk {(turn.risk * 100).toFixed(0)}%
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
             ) : (
               <EmptyState loading={loading} error={error} />
             )}

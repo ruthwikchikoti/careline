@@ -209,6 +209,10 @@ export function registerPatient(body: PatientRegisterIn): Promise<PatientOut> {
   });
 }
 
+export function listPatients(): Promise<PatientOut[]> {
+  return authFetch<PatientOut[]>("/patients");
+}
+
 export function getPatientRecord(id: string): Promise<PatientRecord> {
   return authFetch<PatientRecord>(`/patients/${encodeURIComponent(id)}/record`);
 }
@@ -286,8 +290,17 @@ export interface AuditLog {
   turns: AuditTurn[];
 }
 
+export interface EscalationGroup {
+  patient_id: string;
+  count: number;
+  latest_at: string;
+  escalations: AuditTurn[];
+}
+
 export interface EscalationsQueue {
   waiting: number;
+  patients_waiting: number;
+  groups: EscalationGroup[];
   escalations: AuditTurn[];
 }
 
