@@ -109,5 +109,6 @@ class TestEvalRerun:
         from careline.services.eval_rerun import rerun_offline_eval
 
         results, digest = rerun_offline_eval()
+        assert len(results) == 8  # full T1–T8 bake-off runs live
         assert all(ok for _, _, ok in results)
-        assert "4/4" in digest
+        assert "8/8" in digest
