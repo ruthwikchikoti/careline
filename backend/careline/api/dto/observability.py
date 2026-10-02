@@ -34,6 +34,10 @@ class AuditTurnOut(BaseModel):
     risk: float = Field(default=0.0, ge=0.0, le=1.0)
     trace_steps: list[dict[str, Any]] = Field(default_factory=list)
     redacted: bool = False
+    # Human-in-the-loop resolution — present once a doctor replies to an escalation.
+    resolved: bool = False
+    reply: str | None = None
+    resolved_at: datetime | None = None
 
 
 class AuditCallOut(BaseModel):
@@ -104,6 +108,25 @@ class EscalationsOut(BaseModel):
     escalations: list[AuditTurnOut] = Field(default_factory=list)
 
 
+class EscalationResolveIn(BaseModel):
+    """A doctor's reply that closes an escalated turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reply: str = Field(min_length=1, max_length=2000)
+
+
+class EscalationResolveOut(BaseModel):
+    """Confirmation that an escalation was resolved with a doctor's reply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    patient_id: str
+    reply: str
+    resolved_at: datetime
+
+
 class EvalScenarioOut(BaseModel):
     """One re-run T-scenario and whether it matched its expected verdict."""
 
@@ -132,6 +155,8 @@ __all__ = [
     "AuditLogOut",
     "EscalationGroupOut",
     "EscalationsOut",
+    "EscalationResolveIn",
+    "EscalationResolveOut",
     "EvalScenarioOut",
     "EvalRunOut",
 ]

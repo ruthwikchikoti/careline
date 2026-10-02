@@ -27,12 +27,14 @@ from typing import Any
 from careline.services.audit_service import (
     AuditCallRecord,
     AuditEventRecord,
+    AuditResolutionRecord,
     AuditTurnRecord,
 )
 
 TURNS = "audit_turns"
 CALLS = "audit_calls"
 EVENTS = "audit_events"
+RESOLUTIONS = "audit_resolutions"
 
 
 def create_audit_store(uri: str, *, db_name: str = "careline") -> "MongoAuditStore":
@@ -59,6 +61,7 @@ class MongoAuditStore:
         self._turns = database[TURNS]
         self._calls = database[CALLS]
         self._events = database[EVENTS]
+        self._resolutions = database[RESOLUTIONS]
         self._client = client
 
     # --- write-through (upsert by the record's own id) -----------------------
@@ -74,15 +77,26 @@ class MongoAuditStore:
             {"_id": record.event_id}, self._event_doc(record), upsert=True
         )
 
+    def save_resolution(self, record: AuditResolutionRecord) -> None:
+        self._resolutions.replace_one(
+            {"_id": record.turn_id}, self._resolution_doc(record), upsert=True
+        )
+
     # --- hydrate (rebuild the in-memory read model on startup) ---------------
 
     def load(
         self,
-    ) -> tuple[list[AuditTurnRecord], list[AuditCallRecord], list[AuditEventRecord]]:
+    ) -> tuple[
+        list[AuditTurnRecord],
+        list[AuditCallRecord],
+        list[AuditEventRecord],
+        list[AuditResolutionRecord],
+    ]:
         turns = [AuditTurnRecord(**_strip_id(d)) for d in self._turns.find()]
         calls = [AuditCallRecord(**_strip_id(d)) for d in self._calls.find()]
         events = [AuditEventRecord(**_strip_id(d)) for d in self._events.find()]
-        return turns, calls, events
+        resolutions = [AuditResolutionRecord(**_strip_id(d)) for d in self._resolutions.find()]
+        return turns, calls, events, resolutions
 
     def close(self) -> None:
         if self._client is not None:
@@ -102,10 +116,14 @@ class MongoAuditStore:
     def _event_doc(record: AuditEventRecord) -> dict[str, Any]:
         return {**record.model_dump(), "_id": record.event_id}
 
+    @staticmethod
+    def _resolution_doc(record: AuditResolutionRecord) -> dict[str, Any]:
+        return {**record.model_dump(), "_id": record.turn_id}
+
 
 def _strip_id(doc: dict[str, Any]) -> dict[str, Any]:
     """Drop Mongo's ``_id`` so the (``extra='forbid'``) records validate cleanly."""
     return {k: v for k, v in doc.items() if k != "_id"}
 
 
-__all__ = ["MongoAuditStore", "create_audit_store", "TURNS", "CALLS", "EVENTS"]
+__all__ = ["MongoAuditStore", "create_audit_store", "TURNS", "CALLS", "EVENTS", "RESOLUTIONS"]
