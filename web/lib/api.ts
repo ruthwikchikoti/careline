@@ -2,7 +2,7 @@
 // Production screens use the authenticated API via Naresh's lib/api client; this
 // foundation talks to the zero-setup demo endpoints (careline.demo_server).
 
-import { getToken } from "@/lib/auth";
+import { getPatientToken, getToken, setPatientToken } from "@/lib/auth";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -344,4 +344,95 @@ export function resolveEscalation(turnId: string, reply: string): Promise<Escala
 
 export function runEval(): Promise<EvalRun> {
   return authFetch<EvalRun>("/eval");
+}
+
+// --- Patient portal (patient-scoped session, separate token) ---
+
+export interface PatientLoginOut {
+  access_token: string;
+  token_type: string;
+  patient_id: string;
+  doctor_id: string;
+}
+
+export interface CarePlan {
+  patient_id: string;
+  as_of: string;
+  facts: FactRecord[];
+}
+
+export interface PatientAnswer {
+  verdict: Verdict;
+  answer_text: string | null;
+  escalation_reason: string | null;
+  citations: string[];
+}
+
+export interface PatientQuestion {
+  turn_id: string;
+  asked_at: string;
+  question: string | null;
+  verdict: Verdict;
+  answer_text: string | null;
+  escalated: boolean;
+  doctor_reply: string | null;
+  replied_at: string | null;
+}
+
+async function patientFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getPatientToken();
+  if (!token) throw new AuthError();
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+
+  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  if (res.status === 401) throw new AuthError();
+  if (!res.ok) {
+    let detail = `API error ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function patientLogin(patientId: string, pin: string): Promise<PatientLoginOut> {
+  const res = await fetch(`${BASE}/patient/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patient_id: patientId, pin }),
+  });
+  if (!res.ok) {
+    let detail = `Sign in failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const data = (await res.json()) as PatientLoginOut;
+  setPatientToken(data.access_token);
+  return data;
+}
+
+export function getCarePlan(): Promise<CarePlan> {
+  return patientFetch<CarePlan>("/patient/me");
+}
+
+export function patientAsk(question: string): Promise<PatientAnswer> {
+  return patientFetch<PatientAnswer>("/patient/ask", {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+}
+
+export function getPatientQuestions(): Promise<PatientQuestion[]> {
+  return patientFetch<PatientQuestion[]>("/patient/questions");
 }
