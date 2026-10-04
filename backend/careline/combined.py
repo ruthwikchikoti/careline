@@ -79,11 +79,15 @@ async def demo_ask(request: Request, body: AskIn) -> dict:
     if patient is None:
         patient = _demo_patient()
 
+    # One-shot web turn (no multi-turn voice loop): with no clarify budget, a
+    # clinical question we can't ground goes straight to the doctor rather than
+    # looping on "could you rephrase?". Non-clinical input is still redirected by
+    # the scope gate, and greetings by the conversational rail.
     session = CallSession(
         call_id="web-demo",
         patient_id=patient_id,
         doctor_id=doctor_id,
-        max_clarify_turns=2,
+        max_clarify_turns=0,
     )
     decision = request.app.state.question_svc.run_question(
         question=body.question,
