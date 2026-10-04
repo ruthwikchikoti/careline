@@ -38,6 +38,7 @@ from careline.domain.model.patient import Patient
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
 from careline.domain.rails.conversational import is_small_talk
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
+from careline.domain.retrieval import retrieval_detail, retrieve_relevant
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
 
@@ -130,9 +131,23 @@ class Brain:
         # -- Retrieve the currently-valid slice for this patient + now --------
         valid_slice = patient.valid_slice(now)
 
+        # -- Retrieval-augmented grounding: rank the valid facts by relevance and
+        # ground the reasoner on the most relevant subset. Ranking over the valid
+        # slice means every grounded fact is already source-of-truth-validated; a
+        # small record passes through unchanged (parity-stable). The gate chain
+        # below still sees the *full* valid slice for its citation-validity check.
+        retrieval = retrieve_relevant(question=question, valid_slice=valid_slice)
+        grounding = retrieval.grounding
+        trace.record(
+            "retrieval",
+            TraceStatus.PASS,
+            spec_section="§4.2",
+            detail=retrieval_detail(retrieval),
+        )
+
         # -- Reasoner: propose a grounded candidate (fail closed) -------------
         try:
-            proposal = self._reasoner.propose(question=question, context=valid_slice)
+            proposal = self._reasoner.propose(question=question, context=grounding)
         except ReasonerUnavailable:
             trace.record(
                 "reasoner",
@@ -145,6 +160,9 @@ class Brain:
             )
 
         # -- Verifier: only when there is a real candidate to check -----------
+        # The verifier is the INDEPENDENT backstop, so it checks against the FULL valid
+        # slice (not the narrowed grounding) — a fact retrieval trimmed from the reasoner
+        # is still seen here. The graph node mirrors this for parity.
         verification = None
         if proposal.is_answerable:
             try:
