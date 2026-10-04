@@ -102,10 +102,17 @@ def compute_confidence(
         else 0.5  # no verifier = neutral (should not happen in real flow)
     )
 
-    # Grounding ratio: how much of the slice is cited
+    # Grounding ratio: are the cited facts real (present in the valid slice)?
+    # This measures citation *validity*, not coverage — a question about one
+    # medication legitimately cites one fact, so dividing by the patient's total
+    # fact count would wrongly punish a richer record (and a fabricated/superseded
+    # citation, which is the real hazard, still drags this down and the verifier
+    # hard-zeros it).
+    valid_ids = {fact.id for fact in valid_slice.facts}
+    citations = proposal.citations
     grounding = (
-        min(1.0, len(proposal.citations) / valid_slice.count)
-        if valid_slice.count > 0
+        sum(1 for cid in citations if cid in valid_ids) / len(citations)
+        if citations
         else 0.0
     )
 
