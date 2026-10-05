@@ -15,6 +15,19 @@ does not modify it — and mounts the demo router from ``demo_server``.
 
 from __future__ import annotations
 
+# Load .env BEFORE importing the app, so the observability adapter (which reads
+# LANGSMITH_API_KEY at import time) sees it on the standard
+# ``uvicorn careline.combined:app --factory`` launch — without this, tracing is
+# imported before the key is in the environment and silently stays disabled. The
+# offline test suite never imports this module, so it remains keyless/trace-free.
+# Optional dependency — never fatal.
+try:  # pragma: no cover - trivial optional import wiring
+    from dotenv import load_dotenv as _load_dotenv
+
+    _load_dotenv()
+except Exception:
+    pass
+
 from fastapi import Request
 
 from careline.api.app import create_app
