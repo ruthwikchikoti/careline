@@ -2,19 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Phone, Send, Stethoscope, User } from "lucide-react";
+import { ArrowLeft, ChevronDown, Phone, Send, Stethoscope, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { VerdictPill } from "@/components/ui/VerdictPill";
-import { TraceStepper } from "@/components/trace/TraceStepper";
 import { ConsoleAnswerPanel } from "./_answer/ConsoleAnswerPanel";
 import {
   ask,
+  getDemoPatient,
   getPatientRecord,
   listPatients,
   type AnswerResult,
-  type FactRecord,
   type PatientOut,
 } from "@/lib/api";
+import { suggestionsFor } from "@/lib/suggestions";
+import { cn } from "@/lib/cn";
 
 interface Turn {
   question: string;
@@ -44,39 +45,164 @@ const EXAMPLES = [
   "I have chest pain",
 ];
 
-// Turn a patient's *current* approved facts into the kind of follow-up question
-// they'd actually phone in about — so the suggestions reflect their real record
-// instead of a hard-coded list.
-function suggestionsFor(facts: FactRecord[]): string[] {
-  const out: string[] = [];
-  for (const f of facts) {
-    const head = f.summary.split(/[\s,;:—-]/)[0]?.trim() || f.summary;
-    switch (f.kind) {
-      case "medication":
-        out.push(`What is my ${head} dose?`);
-        out.push(`Should I still take ${head}?`);
-        break;
-      case "instruction":
-        out.push(/diet/i.test(f.summary) ? "What diet should I follow now?" : "What are my care instructions?");
-        break;
-      case "allergy": {
-        const substance = f.summary.split(/allerg/i)[0]?.trim() || head;
-        out.push(`Am I allergic to ${substance}?`);
-        break;
-      }
-      case "diagnosis":
-        out.push(`Can you tell me about my ${f.summary.replace(/\.$/, "")}?`);
-        break;
-      case "observation":
-        out.push("What were my latest test results?");
-        break;
-      case "follow_up":
-        out.push("When is my next appointment?");
-        break;
-    }
-  }
-  const unique = Array.from(new Set(out));
-  return unique.length ? unique.slice(0, 5) : EXAMPLES;
+// The agent route, in order — animated live while a question is in flight so the
+// console shows *which step it's on* in real time, then settles into the real trace.
+const PIPELINE = [
+  { key: "triage", label: "Triage", agent: "Triage" },
+  { key: "retrieve", label: "Retrieval", agent: "Retriever" },
+  { key: "reason", label: "Reason", agent: "Reasoner" },
+  { key: "verify", label: "Verify", agent: "Verifier" },
+  { key: "gate", label: "Gate", agent: "Gatekeeper" },
+];
+
+function LivePipeline() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const t = setInterval(
+      () => setStep((s) => Math.min(s + 1, PIPELINE.length - 1)),
+      550,
+    );
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <ol className="relative space-y-0" aria-label="Agent pipeline running">
+      {PIPELINE.map((p, i) => {
+        const done = i < step;
+        const running = i === step;
+        const isLast = i === PIPELINE.length - 1;
+        return (
+          <li key={p.key} className="relative flex gap-3 pb-4">
+            {!isLast && (
+              <span className="absolute left-[7px] top-4 h-full w-px bg-border" aria-hidden />
+            )}
+            <span
+              className={cn(
+                "relative z-10 mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 transition-colors",
+                done && "border-answer bg-answer",
+                running && "animate-pulse border-primary bg-primary",
+                !done && !running && "border-border bg-transparent",
+              )}
+            />
+            <div className={cn("min-w-0 flex-1", !done && !running && "opacity-40")}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-ink">{p.label}</span>
+                <span className="rounded-full bg-canvas px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                  {p.agent}
+                </span>
+                {running && (
+                  <span className="animate-pulse text-[10px] font-semibold uppercase tracking-wide text-primary">
+                    running…
+                  </span>
+                )}
+                {done && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-answer">
+                    done
+                  </span>
+                )}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// Map each backend rail/gate to the agent that owns it (for the per-step header).
+const AGENT_OF: Record<string, string> = {
+  retrieval: "Retriever",
+  red_flag_rail: "Triage",
+  multi_condition_tripwire: "Triage",
+  conversational_rail: "Triage",
+  reasoner: "Reasoner",
+  verifier: "Verifier",
+  scope_gate: "Gatekeeper",
+  risk_gate: "Gatekeeper",
+  cross_condition_gate: "Gatekeeper",
+  confidence_staleness_gate: "Gatekeeper",
+  independent_verification_gate: "Verifier",
+  final_verdict: "Decision",
+};
+const humanizeStep = (n: string) =>
+  n.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+// A LangSmith-style trace: each step is a clickable span; expand it to see THAT
+// step's JSON. The deciding (terminal) and final steps also carry the turn's
+// outputs (verdict / confidence / risk / citations / answer) as their "output".
+function ExpandableTrace({ result }: { result: AnswerResult }) {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <ol className="relative space-y-0">
+      {result.trace.map((step, i) => {
+        const isOpen = open === i;
+        const isLast = i === result.trace.length - 1;
+        const skipped = step.status === "skipped";
+        const dot =
+          step.status === "pass"
+            ? "border-answer bg-answer"
+            : skipped
+              ? "border-border bg-transparent"
+              : result.verdict === "clarify"
+                ? "border-clarify bg-clarify"
+                : "border-escalate bg-escalate";
+        const payload =
+          isLast || step.status === "terminal"
+            ? {
+                ...step,
+                verdict: result.verdict,
+                confidence: result.confidence,
+                risk: result.risk,
+                citations: result.citations,
+                answer_text: result.answer_text,
+                escalation_reason: result.escalation_reason,
+              }
+            : step;
+        return (
+          <li key={i} className="relative flex gap-3 pb-2">
+            {!isLast && (
+              <span className="absolute left-[7px] top-5 h-full w-px bg-border" aria-hidden />
+            )}
+            <span
+              className={cn(
+                "relative z-10 mt-1.5 h-3.5 w-3.5 shrink-0 rounded-full border-2",
+                dot,
+                skipped && "opacity-50",
+              )}
+            />
+            <div className="min-w-0 flex-1">
+              <button
+                onClick={() => setOpen(isOpen ? null : i)}
+                className="flex w-full items-center gap-2 text-left"
+              >
+                <span className={cn("text-sm font-medium text-ink", skipped && "opacity-45")}>
+                  {humanizeStep(step.name)}
+                </span>
+                <span className="rounded-full bg-canvas px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                  {AGENT_OF[step.name] ?? "Agent"}
+                </span>
+                {step.status === "terminal" && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-escalate">
+                    terminal
+                  </span>
+                )}
+                <ChevronDown
+                  className={cn(
+                    "ml-auto h-3.5 w-3.5 shrink-0 text-muted transition-transform",
+                    isOpen && "rotate-180",
+                  )}
+                />
+              </button>
+              {isOpen && (
+                <pre className="mt-1.5 max-h-56 overflow-auto rounded-lg border border-border bg-canvas px-2.5 py-2 text-[10px] leading-relaxed text-ink">
+                  {JSON.stringify(payload, null, 2)}
+                </pre>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 export default function ConsolePage() {
@@ -102,19 +228,31 @@ export default function ConsolePage() {
   }, []);
 
   useEffect(() => {
+    // Switching the patient starts a fresh call — clear the previous patient's
+    // conversation and trace so they don't bleed across records.
+    setTurns([]);
+    setInput("");
+    setError(null);
     const id = patientId.trim();
-    if (!id) {
-      setSuggestions(EXAMPLES);
-      return;
-    }
     let active = true;
-    getPatientRecord(id)
-      .then((rec) => active && setSuggestions(suggestionsFor(rec.current)))
+    // Derive the starter questions from whoever is selected: a registered patient's
+    // record, or the bundled demo patient when none is picked.
+    const facts = id
+      ? getPatientRecord(id).then((rec) => rec.current)
+      : getDemoPatient().then((demo) => demo.current_facts);
+    facts
+      .then((fs) => active && setSuggestions(suggestionsFor(fs, EXAMPLES)))
       .catch(() => active && setSuggestions(EXAMPLES));
     return () => {
       active = false;
     };
   }, [patientId]);
+
+  const clearChat = () => {
+    setTurns([]);
+    setInput("");
+    setError(null);
+  };
 
   const selected = patients.find((p) => p.patient_id === patientId);
   const callLabel = selected
@@ -198,6 +336,15 @@ export default function ConsolePage() {
               className="hidden w-52 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs outline-none focus:border-primary sm:block"
             />
           )}
+          {turns.length > 0 && (
+            <button
+              onClick={clearChat}
+              title="Clear the conversation"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted hover:border-primary hover:text-primary"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Clear
+            </button>
+          )}
           <span className="hidden items-center gap-1.5 text-xs font-medium text-answer sm:flex">
             <span className="h-2 w-2 rounded-full bg-answer" /> on the line
           </span>
@@ -262,6 +409,22 @@ export default function ConsolePage() {
 
           {error && <p className="mt-3 text-sm text-escalate">{error}</p>}
 
+          {/* persistent suggestion chips — stay available after the first question */}
+          {turns.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {suggestions.map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => submit(ex)}
+                  disabled={loading}
+                  className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-50"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* composer */}
           <form
             onSubmit={(e) => {
@@ -295,8 +458,35 @@ export default function ConsolePage() {
                 <VerdictPill verdict={active.verdict} />
               ) : null}
             </div>
-            {active ? (
-              <TraceStepper steps={active.trace} verdict={active.verdict} />
+            {loading ? (
+              <LivePipeline />
+            ) : active ? (
+              <>
+                <p className="mb-2 text-[11px] text-muted">Click a step to see its JSON.</p>
+                <ExpandableTrace result={active} />
+                <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3 text-xs">
+                  <div>
+                    <span className="text-muted">Confidence</span>{" "}
+                    <span className="font-medium text-ink">
+                      {Math.round(active.confidence * 100)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted">Risk</span>{" "}
+                    <span className="font-medium text-ink">
+                      {Math.round(active.risk * 100)}%
+                    </span>
+                  </div>
+                </div>
+                <details className="mt-3 rounded-lg border border-border bg-canvas">
+                  <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted hover:text-ink">
+                    More details (raw JSON)
+                  </summary>
+                  <pre className="max-h-72 overflow-auto px-3 pb-3 text-[10px] leading-relaxed text-ink">
+                    {JSON.stringify(active, null, 2)}
+                  </pre>
+                </details>
+              </>
             ) : (
               <p className="text-sm text-muted">
                 The 7-agent route appears here: triage → retrieve → reason → verify → gate.

@@ -351,6 +351,26 @@ class AuditService:
     def resolutions_for_patient(self, patient_id: str) -> list[AuditResolutionRecord]:
         return [r for r in self._resolutions.values() if r.patient_id == patient_id]
 
+    def clear_patient(self, patient_id: str) -> int:
+        """Remove this patient's turns + doctor replies entirely (UI 'clear history').
+
+        Distinct from :meth:`redact_patient` (DPDP — keeps a nulled skeleton for
+        compliance): this fully drops the records so the patient's portal thread is
+        empty after a practice/demo run. Returns the number of turns removed.
+        """
+        before = len(self._turns)
+        self._turns = [t for t in self._turns if t.patient_id != patient_id]
+        self._resolutions = {
+            tid: r for tid, r in self._resolutions.items() if r.patient_id != patient_id
+        }
+        # Best-effort durable delete — keep the in-memory clear even if storage hiccups.
+        if self._store is not None and hasattr(self._store, "delete_patient"):
+            try:
+                self._store.delete_patient(patient_id)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                pass
+        return before - len(self._turns)
+
     def redact_patient(self, patient_id: str) -> int:
         """DPDP erasure — null clinical text, keep audit skeleton.
 
