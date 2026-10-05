@@ -24,7 +24,7 @@ Tick every box before the room fills up. Each is a literal action.
 - [ ] **`.env` present and complete** — `backend/.env` has `OPENAI_API_KEY`, `CARELINE_MONGO_URI`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `LANGSMITH_PROJECT=careline`, `LANGSMITH_ENDPOINT=https://apac.api.smith.langchain.com`
 - [ ] **Pick the live brain** — for a real LLM demo, leave `CARELINE_LLM_BACKEND` unset-or-`openai` so the spine uses OpenAI (it prefers OpenAI when `OPENAI_API_KEY` is present)
 - [ ] **Mongo Atlas reachable** — `python -c "import asyncio; from careline.adapters.mongo import create_client; from careline.config import get_settings; c=create_client(get_settings().mongo_uri); print(asyncio.get_event_loop().run_until_complete(c.admin.command('ping')))"` prints `{'ok': 1.0}` (or just run the seed below — it fails fast if Atlas is unreachable)
-- [ ] **Seed data loaded** — `python -m scripts.seed_demo` → prints `Done. 5 patients, ... facts under 'dr-asha' (PIN 1234).`
+- [ ] **Seed data loaded** — `python -m scripts.seed_demo` → prints `Done. 5 patients, 33 facts under 'dr-asha' (PIN 1234).` This also **wipes the audit trail** (old questions/replies) for a clean slate — **restart the backend afterwards** so its in-memory history re-hydrates empty.
 - [ ] **Backend boots** — `uvicorn careline.combined:app --factory --reload` → `Application startup complete` on `:8000`
 - [ ] **Frontend boots** — `cd web && npm run dev` → ready on `http://localhost:3000`
 - [ ] **Smoke question returns ANSWER** — `curl -s localhost:8000/demo/ask -H 'content-type: application/json' -d '{"question":"what is my paracetamol dose?"}' | python -m json.tool` shows `"verdict": "answer"` with a citation
@@ -54,6 +54,24 @@ npm run dev                          # http://localhost:3000
 ```
 
 Frontend talks to the backend via `NEXT_PUBLIC_API_BASE` (defaults to `http://localhost:8000`, set in `web/.env.local`).
+
+> **Resetting between practice runs:** `python -m scripts.seed_demo` re-wipes everything (facts + the whole audit trail) and reseeds — restart the backend after. For a lighter reset *during* a session, use the **Clear** button (patient portal header, and the Live Console) to empty just the on-screen conversation/history. The patient Clear is durable (calls `DELETE /patient/history`); the console Clear is the current call only.
+
+---
+
+## 2.5. Seed-data reference (5 patients, all PIN `1234`, under `dr-asha`)
+
+Each patient is a coherent post-consultation record — use them to practise a real spread of verdicts. The Live Console **suggestion chips are now record-driven**: pick a patient and the starter questions reflect *their* facts.
+
+| Patient | Record (current facts) | Good demo questions → expected |
+|---|---|---|
+| **ravi-kumar** ⭐ | Post-appendectomy; Paracetamol 500mg; **superseded** Amoxicillin; soft-diet + wound-care instructions; penicillin allergy; temp obs; 2-wk follow-up | "what is my paracetamol dose?" → **ANSWER** · "how do I care for my wound?" → **ANSWER** · "am I allergic to anything?" → **ANSWER (penicillin)** · "should I take amoxicillin?" → **ESCALATE** (superseded, never answer from stale) · "can I eat sweets post-surgery given my diabetes?" → **ESCALATE** (cross-condition) |
+| **meera-shah** | Type-2 diabetes; Metformin + Glimepiride; low-sugar diet; HbA1c 7.8%; endo follow-up | "what is my metformin dose?" → **ANSWER** · "what's my latest HbA1c?" → **ANSWER** · "when is my endocrinology review?" → **ANSWER** |
+| **arjun-nair** | Hypertension + hyperlipidaemia; Atorvastatin + Aspirin + Amlodipine; low-salt diet; BP 138/88; cardiology follow-up | "what blood pressure medicine am I on?" → **ANSWER** · "what's my blood pressure?" → **ANSWER** · "when is my cardiology review?" → **ANSWER** |
+| **priya-iyer** | Knee osteoarthritis; Ibuprofen PRN; physiotherapy; BP 130/85; ortho follow-up | "how often can I take ibuprofen?" → **ANSWER** · "what exercises should I do?" → **ANSWER** |
+| **sanjay-rao** | Mild asthma; Salbutamol + Budesonide inhalers; avoid smoke/dust; dust-mite allergy; pulmonology follow-up | "when do I use my blue inhaler?" → **ANSWER** · "what triggers my asthma?" → **ANSWER** |
+
+Red-flag rail works for **any** patient: "I have chest pain" → **ESCALATE** at triage, pre-LLM.
 
 ---
 

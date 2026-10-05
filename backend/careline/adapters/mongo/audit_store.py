@@ -98,6 +98,16 @@ class MongoAuditStore:
         resolutions = [AuditResolutionRecord(**_strip_id(d)) for d in self._resolutions.find()]
         return turns, calls, events, resolutions
 
+    def delete_patient(self, patient_id: str) -> None:
+        """Hard-delete this patient's turns + resolutions (UI 'clear history').
+
+        Unlike DPDP redaction (which keeps a nulled skeleton), this removes the
+        records outright so the patient's portal thread is empty after a practice
+        run. Calls/events are tenant-level and left intact.
+        """
+        self._turns.delete_many({"patient_id": patient_id})
+        self._resolutions.delete_many({"patient_id": patient_id})
+
     def close(self) -> None:
         if self._client is not None:
             self._client.close()

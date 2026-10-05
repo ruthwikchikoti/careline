@@ -167,6 +167,20 @@ async def patient_ask(
     )
 
 
+@router.delete("/history", status_code=204)
+async def clear_patient_history(
+    request: Request,
+    principal: Annotated[PatientPrincipal, Depends(get_current_patient)],
+) -> None:
+    """Clear the signed-in patient's own question history (after a practice run).
+
+    Scoped to the JWT subject, so a patient can only ever clear *their own* thread —
+    the same one-patient isolation every other route enforces. The care plan and the
+    patient's record are untouched; only the Q&A thread is removed.
+    """
+    request.app.state.audit.clear_patient(principal.patient_id)
+
+
 @router.get("/questions", response_model=list[PatientQuestionOut])
 async def patient_questions(
     request: Request,
