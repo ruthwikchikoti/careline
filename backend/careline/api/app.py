@@ -12,7 +12,8 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from careline.adapters.orchestration.graph import build_default_graph
+from careline.adapters.factory import build_extractor
+from careline.adapters.orchestration.graph import build_default_graph, resolve_llm_config
 from careline.adapters.memory.local import LocalMemoryProvider
 from careline.adapters.mongo.supersession import plan_supersession
 from careline.api.errors import register_exception_handlers
@@ -34,7 +35,7 @@ from careline.services.audit_service import AuditService
 from careline.services.auth_service import AuthService
 from careline.services.consultation_service import ConsultationService
 from careline.services.dpdp_service import DpdpService
-from careline.services.extraction_service import ExtractionService, HeuristicExtractor
+from careline.services.extraction_service import ExtractionService
 from careline.services.patient_lookup_service import PatientLookupService
 from careline.services.question_service import QuestionService
 
@@ -230,8 +231,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     consultation_svc = ConsultationService(repo=consultation_repo, audit=audit)
     auth_svc = AuthService(settings=settings)
     patient_lookup_svc = PatientLookupService(patient_repo=patient_repo, settings=settings)
+    # Select the extraction backend the same way the reasoner is chosen: an LLM
+    # extractor when a key is configured (so natural phrasing like "continue
+    # paracetamol" is captured), else the keyless regex HeuristicExtractor. The
+    # factory falls back to heuristic for any non-OpenAI backend, so the offline
+    # suite stays keyless. Drafts remain unapproved until a doctor signs off.
     extraction_svc = ExtractionService(
-        extractor=HeuristicExtractor(),
+        extractor=build_extractor(resolve_llm_config()),
         consultation_svc=consultation_svc,
         audit=audit,
     )
