@@ -118,7 +118,7 @@ Seeds 5 patients under doctor **`dr-asha`**, each a coherent post-consultation r
 with current **and** superseded facts (so the history timeline and staleness safety have
 something to show). Demo logins:
 - **Doctor:** `dr-asha` (web doctor sign-in, or `POST /auth/token`)
-- **Patient portal:** patient id `ravi-kumar`, PIN `1234`
+- **Patient portal:** patient id `ravi-kumar`, PIN set by the seed run (`CARELINE_DEMO_PIN`, or the random PIN the seed script prints)
 
 ## Web screens
 - `/console` — **Live Agent Console**: ask a question, watch the trace stepper + verdict
