@@ -1,8 +1,12 @@
 """QuestionService — the brain endpoint use-case (VI-6).
 
 Thin application wrapper around the safety spine: delegates the verdict to
-Ruthwik's compiled LangGraph when injected, otherwise falls back to the inline
-pipeline (offline tests / eval harness).
+Ruthwik's compiled LangGraph when injected, otherwise to the headless
+``Brain`` — the *same* single safety authority the graph wraps. There is no
+third decision path: the service owns session/audit/telephony concerns and
+never re-implements rail, retrieval, or gate logic itself (the duplicated
+inline pipeline this replaced had already drifted: no small-talk rail, no
+retrieval narrowing).
 
 Manages per-call ``CallSession`` state (clarify-turn budget) and hands
 ESCALATE verdicts to the telephony port. Naresh's ``/internal/run-question``
@@ -18,13 +22,12 @@ from typing import TYPE_CHECKING
 
 from careline.adapters.llm.tracing import trace_span
 from careline.adapters.telephony.stub import EscalationPayload, TelephonyPort, TelephonyStub
-from careline.domain.enums import ScopeCategory, TraceStatus, Verdict
-from careline.domain.gates.chain import GateContext, run_gate_chain
+from careline.domain.brain.brain import Brain
+from careline.domain.enums import Verdict
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient
-from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
-from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
+from careline.domain.ports.reasoning import Reasoner, Verifier
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 from careline.services.audit_service import AuditEventKind, AuditService
 
@@ -47,12 +50,10 @@ class QuestionService:
     ) -> None:
         if graph is not None:
             self._graph = graph
-            self._reasoner = None
-            self._verifier = None
+            self._brain = None
         elif reasoner is not None and verifier is not None:
             self._graph = None
-            self._reasoner = reasoner
-            self._verifier = verifier
+            self._brain = Brain(reasoner=reasoner, verifier=verifier, thresholds=thresholds)
         else:
             raise ValueError("QuestionService requires graph or (reasoner, verifier)")
         self._telephony = telephony or TelephonyStub()
@@ -140,92 +141,17 @@ class QuestionService:
                 trace=trace,
             )
 
-        # -- Pre-LLM triage: red-flag rail ------------------------------------
-        matched = check_red_flag(question)
-        if matched:
-            trace.record(
-                "red_flag_rail",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail=f"emergency keyword matched: {matched!r}",
-            )
-            return Decision.escalate(
-                f"Emergency symptom detected ({matched}) — transferring to your doctor.",
-                scope=ScopeCategory.RED_FLAG,
-                risk=1.0,
-                trace=trace,
-            )
-
-        # -- Pre-LLM triage: multi-condition tripwire -------------------------
-        is_cross, groups = check_multi_condition(question)
-        if is_cross:
-            trace.record(
-                "multi_condition_tripwire",
-                TraceStatus.TERMINAL,
-                spec_section="§5.3",
-                detail=f"question spans conditions: {', '.join(groups)}",
-            )
-            return Decision.escalate(
-                "Question spans multiple clinical conditions — transferring to your doctor.",
-                scope=ScopeCategory.CROSS_CONDITION,
-                risk=0.95,
-                trace=trace,
-            )
-
-        valid_slice = patient.valid_slice(now)
-
-        # -- Reasoner ---------------------------------------------------------
-        try:
-            with trace_span("reasoner.propose") as rspan:
-                rspan.log_input(question=question)
-                proposal = self._reasoner.propose(question=question, context=valid_slice)
-                rspan.log_output(scope=proposal.scope.value, answerable=proposal.is_answerable)
-        except ReasonerUnavailable:
-            trace.record(
-                "reasoner",
-                TraceStatus.TERMINAL,
-                detail="reasoner unavailable — fail closed",
-            )
-            return Decision.escalate(
-                "Unable to process your question safely — transferring to your doctor.",
-                trace=trace,
-            )
-
-        # -- Verifier (only when there is a candidate to check) ---------------
-        verification = None
-        if proposal.is_answerable:
-            try:
-                with trace_span("verifier.verify") as vspan:
-                    vspan.log_input(citations=list(proposal.citations))
-                    verification = self._verifier.verify(
-                        question=question,
-                        proposal=proposal,
-                        context=valid_slice,
-                    )
-                    vspan.log_output(supported=verification.supported)
-            except ReasonerUnavailable:
-                trace.record(
-                    "verifier",
-                    TraceStatus.TERMINAL,
-                    detail="verifier unavailable — fail closed",
-                )
-                return Decision.escalate(
-                    "Unable to verify an answer safely — transferring to your doctor.",
-                    trace=trace,
-                )
-
-        # -- Gate chain -------------------------------------------------------
-        ctx = GateContext(
+        # Inline path: the Brain IS the single safety authority — the service
+        # adds session/audit/telephony concerns around it, never a second
+        # decision path. Parity with the graph path is asserted in
+        # tests/brain/test_parity_question_service.py.
+        return self._brain.run_question(
             question=question,
-            proposal=proposal,
-            verification=verification,
-            valid_slice=valid_slice,
-            thresholds=self._thresholds,
+            patient=patient,
             now=now,
-            call_session=session,
+            session=session,
             trace=trace,
         )
-        return run_gate_chain(ctx)
 
     def _deliver_escalation(self, decision: Decision, session: CallSession) -> None:
         terminal = decision.trace.terminal_step
