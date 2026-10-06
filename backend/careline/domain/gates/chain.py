@@ -33,6 +33,7 @@ from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
+from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.scoring.confidence import compute_confidence
 from careline.domain.scoring.risk import compute_risk
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
@@ -91,7 +92,67 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
         # covers (general knowledge, off-topic, another condition). Redirecting is
         # the right move — escalating it would flood the doctor's queue with
         # non-clinical noise and train them to ignore it (a real safety hazard).
-        # Genuine emergencies still escalate via the red-flag rail upstream.
+        #
+        # BUT the scope label is a *classifier output* and can be wrong: a caller
+        # that skipped the pre-LLM rails, or a reasoner that saw no matching fact,
+        # can label an emergency "out of scope". Defense-in-depth — the gate
+        # re-runs the deterministic rails on the raw question before redirecting,
+        # and fails closed on an empty valid slice (gate 4's rule, which a
+        # mislabelled scope must not be able to shadow). Gates only downgrade:
+        # ESCALATE here preempts a would-be CLARIFY, never the reverse.
+        matched = check_red_flag(ctx.question)
+        if matched:
+            ctx.trace.record(
+                "scope_gate",
+                TraceStatus.TERMINAL,
+                spec_section="§5.1",
+                detail=(
+                    f"scope labelled out-of-scope but rail matched {matched!r} "
+                    "on the raw question — escalating"
+                ),
+            )
+            return Decision.escalate(
+                f"Red-flag detected: {matched}",
+                scope=ScopeCategory.RED_FLAG,
+                risk=1.0,
+                trace=ctx.trace,
+            )
+
+        is_cross, groups = check_multi_condition(ctx.question)
+        if is_cross:
+            ctx.trace.record(
+                "scope_gate",
+                TraceStatus.TERMINAL,
+                spec_section="§5.3",
+                detail=(
+                    "scope labelled out-of-scope but question spans conditions: "
+                    f"{', '.join(groups)} — escalating"
+                ),
+            )
+            return Decision.escalate(
+                "Question spans multiple clinical conditions — cannot safely merge guidance.",
+                scope=ScopeCategory.CROSS_CONDITION,
+                risk=0.95,
+                trace=ctx.trace,
+            )
+
+        if ctx.valid_slice.is_empty:
+            ctx.trace.record(
+                "scope_gate",
+                TraceStatus.TERMINAL,
+                spec_section="§5.5",
+                detail=(
+                    "scope labelled out-of-scope but valid slice is empty — "
+                    "fail closed"
+                ),
+            )
+            return Decision.escalate(
+                "No approved, currently-valid facts available for this patient.",
+                scope=ScopeCategory.OUT_OF_SCOPE,
+                risk=compute_risk(ctx.proposal, ctx.valid_slice),
+                trace=ctx.trace,
+            )
+
         ctx.trace.record(
             "scope_gate",
             TraceStatus.TERMINAL,
