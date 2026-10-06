@@ -1,0 +1,32 @@
+schema: 1
+prompts:
+  reasoner:
+    version: v1
+    file: prompts/reasoner/v1.md
+    sha256_12: ba6c88c5ff53
+  verifier:
+    version: v1
+    file: prompts/verifier/v1.md
+    sha256_12: e2a3ae5a5d38
+  extractor:
+    version: v1
+    file: prompts/extractor/v1.md
+    sha256_12: aa7c75f999bd
+policies:
+  red_flags:
+    version: v1
+    file: policies/red-flags.v1.yaml
+    sha256_12: cfc480fecad8
+changelog:
+- artifact: red_flags
+  version: v1
+  note: baseline-v0 literal keyword rail (known paraphrase gap)
+- artifact: reasoner
+  version: v1
+  note: frozen constant extracted verbatim at baseline-v0
+- artifact: verifier
+  version: v1
+  note: frozen constant extracted verbatim at baseline-v0
+- artifact: extractor
+  version: v1
+  note: frozen constant extracted verbatim at baseline-v0
