@@ -16,6 +16,8 @@ so the history timeline has something to show.
 from __future__ import annotations
 
 import asyncio
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from careline.adapters.mongo import MongoPatientRepository, create_client, ensure_indexes
@@ -44,6 +46,20 @@ SOON = NOW + timedelta(days=14)
 
 def _v(effective_from: datetime = PAST, superseded_at: datetime | None = None) -> Validity:
     return Validity(effective_from=effective_from, superseded_at=superseded_at)
+
+
+def _demo_pin() -> tuple[str, bool]:
+    """Demo PIN: fixed via ``CARELINE_DEMO_PIN``, else freshly random per seed run.
+
+    A hardcoded default published in the repo means anyone could log in as any
+    seeded patient on a public deployment — so there is no default. For local
+    demos, set ``CARELINE_DEMO_PIN`` yourself; the web console's prefilled hint
+    only matches if you set it to the same value.
+    """
+    pin = os.environ.get("CARELINE_DEMO_PIN", "").strip()
+    if pin:
+        return pin, True
+    return f"{secrets.randbelow(9000) + 1000:04d}", False
 
 
 def _approved(**kw: object) -> dict[str, object]:
@@ -177,18 +193,24 @@ async def main() -> None:
         print(f"cleared {res.deleted_count:>3} from {col}")
 
     total_facts = 0
+    pin, pin_from_env = _demo_pin()
     for patient_id, (caller_id, facts) in PATIENTS_SEED.items():
         await repo.upsert_identity(identity=PatientIdentity(
             patient_id=patient_id, doctor_id=DOCTOR_ID, caller_id=caller_id,
-            pin_hmac=hash_pin(pin="1234", secret=settings.pin_hmac_secret),
+            pin_hmac=hash_pin(pin=pin, secret=settings.pin_hmac_secret),
         ))
         await repo.add_facts(doctor_id=DOCTOR_ID, patient_id=patient_id, facts=tuple(facts))
         current = sum(1 for f in facts if f.validity.superseded_at is None)
         total_facts += len(facts)
         print(f"  seeded {patient_id:14} caller {caller_id}  ·  {current} current / {len(facts)} total facts")
 
-    print(f"\nDone. {len(PATIENTS_SEED)} patients, {total_facts} facts under '{DOCTOR_ID}' (PIN 1234).")
-    print("Log in as 'dr-asha' in the web UI to see them.")
+    pin_note = (
+        "from CARELINE_DEMO_PIN"
+        if pin_from_env
+        else "generated for this run — set CARELINE_DEMO_PIN to fix it for demos"
+    )
+    print(f"\nDone. {len(PATIENTS_SEED)} patients, {total_facts} facts under '{DOCTOR_ID}'.")
+    print(f"Patient PIN for this seed: {pin} ({pin_note}). Log in as 'dr-asha' in the web UI.")
     client.close()
 
 
