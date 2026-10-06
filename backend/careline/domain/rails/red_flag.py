@@ -1,10 +1,18 @@
 """Pre-LLM red-flag matcher and multi-condition tripwire (VI-1).
 
-The Triage agent's first line of defense: a hardcoded keyword/phrase matcher
-that fires **before** any LLM call.  If a patient's question mentions chest
-pain, breathing difficulty, or any other emergency keyword, the turn is
-immediately routed to ESCALATE — no model involved, no confidence needed,
-fully deterministic.
+The Triage agent's first line of defense: a keyword/phrase matcher that fires
+**before** any LLM call.  If a patient's question mentions chest pain,
+breathing difficulty, or any other emergency phrase, the turn is immediately
+routed to ESCALATE — no model involved, no confidence needed, fully
+deterministic.
+
+The pattern list is mirrored into a **versioned policy artifact**
+(``backend/policies/red-flags.vN.yaml``, registered in
+``backend/prompts/manifest.yaml``) so every release of the rail is diffable,
+hash-stamped in eval reports, and gated in CI like any other prompt change.
+The domain stays pure (no file I/O): the artifact and this constant are held
+in sync by ``tests/llm/test_prompt_registry.py`` — changing one without the
+other fails the suite, and a policy bump without an eval run fails the gate.
 
 The multi-condition tripwire detects when a question spans multiple clinical
 condition groups (e.g. diabetic + post-op diet), which must escalate because
@@ -21,10 +29,11 @@ from __future__ import annotations
 import re
 
 # ---------------------------------------------------------------------------
-# Red-flag patterns (hardcoded emergency keywords)
+# Red-flag patterns (emergency keywords)
 # ---------------------------------------------------------------------------
 # Each pattern is a case-insensitive regex fragment.  They are compiled into a
 # single alternation for a single-pass scan of the question.
+# v1 = the original hand-written list (see policies/red-flags.v1.yaml).
 
 RED_FLAG_PATTERNS: tuple[str, ...] = (
     r"chest\s+pain",

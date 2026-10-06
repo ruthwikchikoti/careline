@@ -1,0 +1,26 @@
+version: v1
+description: Literal emergency keyword regexes for the pre-LLM red-flag rail. v1 =
+  the original hand-written list (baseline-v0).
+patterns:
+- chest\s+pain
+- difficulty\s+breathing
+- breathing\s+difficulty
+- can'?t\s+breathe
+- shortness\s+of\s+breath
+- unconscious
+- unresponsive
+- seizure
+- convulsion
+- bleeding\s+heavily
+- heavy\s+bleeding
+- suicid
+- self[- ]?harm
+- heart\s+attack
+- stroke\s+symptom
+- anaphyla
+- choking
+- overdose
+- poison
+- severe\s+allergic
+- head\s+injury
+- loss\s+of\s+consciousness
