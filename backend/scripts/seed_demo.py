@@ -10,7 +10,9 @@ clinically-coherent data to show — instead of an empty database.
 Idempotent: it first clears any existing ``dr-asha`` facts/patients/consultations
 (this is the demo tenant, so a clean reset is intended), then inserts a fixed set
 of patients with approved, currently-valid facts plus a couple of superseded ones
-so the history timeline has something to show.
+so the history timeline has something to show. Every patient carries at least
+one superseded (discontinued) medication so staleness handling — never answer
+from a superseded fact — can be exercised for any of them.
 """
 
 from __future__ import annotations
@@ -104,6 +106,9 @@ PATIENTS_SEED: dict[str, tuple[str, list]] = {
                        name="Metformin", dose="500mg", frequency="twice daily", **_approved()),
             Medication(id="meera-med-2", validity=_v(), summary="Glimepiride 1mg once before breakfast.",
                        name="Glimepiride", dose="1mg", frequency="once daily", route="before breakfast", **_approved()),
+            Medication(id="meera-med-3", validity=_v(OLDER, SUPERSEDED),
+                       summary="Glipizide 5mg once daily with breakfast (switched to Glimepiride, discontinued).",
+                       name="Glipizide", dose="5mg", frequency="once daily", **_approved(approved_at=OLDER)),
             Instruction(id="meera-ins-1", validity=_v(), summary="Low-sugar diet; check blood glucose each morning.",
                         text="Low-sugar diet; check blood glucose each morning.", **_approved()),
             Observation(id="meera-obs-1", validity=_v(), summary="HbA1c 7.8% (last lab).",
@@ -126,6 +131,9 @@ PATIENTS_SEED: dict[str, tuple[str, list]] = {
                        name="Aspirin", dose="75mg", frequency="once daily", **_approved()),
             Medication(id="arjun-med-3", validity=_v(), summary="Amlodipine 5mg once daily in the morning.",
                        name="Amlodipine", dose="5mg", frequency="once daily", route="morning", **_approved()),
+            Medication(id="arjun-med-4", validity=_v(OLDER, SUPERSEDED),
+                       summary="Telmisartan 40mg once daily (regimen simplified, discontinued).",
+                       name="Telmisartan", dose="40mg", frequency="once daily", **_approved(approved_at=OLDER)),
             Instruction(id="arjun-ins-1", validity=_v(), summary="Low-salt diet; 30 min brisk walk daily.",
                         text="Low-salt diet; 30 min brisk walk daily.", **_approved()),
             Observation(id="arjun-obs-1", validity=_v(), summary="Blood pressure 138/88 mmHg.",
@@ -142,6 +150,9 @@ PATIENTS_SEED: dict[str, tuple[str, list]] = {
                       condition="Right knee osteoarthritis", code="M17", **_approved(approved_at=OLDER)),
             Medication(id="priya-med-1", validity=_v(), summary="Ibuprofen 400mg as needed for knee pain (max thrice daily).",
                        name="Ibuprofen", dose="400mg", frequency="as needed", **_approved()),
+            Medication(id="priya-med-2", validity=_v(OLDER, SUPERSEDED),
+                       summary="Diclofenac gel, apply twice daily to the knee (switched to tablets, discontinued).",
+                       name="Diclofenac gel", dose="apply twice daily", frequency="twice daily", **_approved(approved_at=OLDER)),
             Instruction(id="priya-ins-1", validity=_v(), summary="Physiotherapy three times a week; ice the knee after exercise.",
                         text="Physiotherapy three times a week; ice the knee after exercise.", **_approved()),
             Observation(id="priya-obs-1", validity=_v(), summary="Blood pressure 130/85 mmHg.",
@@ -160,6 +171,9 @@ PATIENTS_SEED: dict[str, tuple[str, list]] = {
                        name="Salbutamol", dose="2 puffs", frequency="as needed", route="inhaled", **_approved()),
             Medication(id="sanjay-med-2", validity=_v(), summary="Budesonide inhaler, 1 puff twice daily (preventer).",
                        name="Budesonide", dose="1 puff", frequency="twice daily", route="inhaled", **_approved()),
+            Medication(id="sanjay-med-3", validity=_v(OLDER, SUPERSEDED),
+                       summary="Montelukast 10mg tablet at night (stopped at respiratory review, discontinued).",
+                       name="Montelukast", dose="10mg", frequency="once daily", route="at night", **_approved(approved_at=OLDER)),
             Instruction(id="sanjay-ins-1", validity=_v(), summary="Avoid smoke and dust; use inhaler before exertion.",
                         text="Avoid smoke and dust; use inhaler before exertion.", **_approved()),
             Allergy(id="sanjay-alg-1", validity=_v(), summary="Dust-mite allergy — triggers wheezing.",
