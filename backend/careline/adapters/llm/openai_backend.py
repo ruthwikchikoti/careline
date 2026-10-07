@@ -16,13 +16,18 @@ Owner: Srujan (scope ``llm``). Default model: ``gpt-5.5``.
 
 from __future__ import annotations
 
+import time
+
 from careline.adapters.llm import prompts
+from careline.adapters.llm import usage as usage_recorder
 from careline.adapters.llm.schemas import ProposalDTO, VerificationDTO
 from careline.domain.model.patient import ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
 
-DEFAULT_MODEL = "gpt-5.5"
+# Budget-first default (budget cap ~$20): swap via CARELINE_LLM_MODEL when a
+# stronger model is wanted; the price table + usage recorder keep the bill visible.
+DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class _OpenAIBase:
@@ -50,8 +55,10 @@ class _OpenAIBase:
         self._client = OpenAI(api_key=self._api_key)
         return self._client
 
-    def _parse(self, *, instructions: str, user_message: str, text_format):
+    def _parse(self, *, agent: str, instructions: str, user_message: str, text_format):
         client = self._ensure_client()
+        response = None
+        start = time.perf_counter()
         try:
             response = client.responses.parse(
                 model=self._model,
@@ -63,6 +70,15 @@ class _OpenAIBase:
             raise
         except Exception as exc:  # SDK / transport / validation — all fail closed
             raise ReasonerUnavailable(f"openai call failed: {exc}") from exc
+        finally:
+            # Observability never blocks the clinical call: record whatever usage
+            # the provider returned (None on failure) and move on.
+            usage_recorder.record(
+                agent=agent,
+                model=self._model,
+                usage=getattr(response, "usage", None),
+                latency_ms=(time.perf_counter() - start) * 1000.0,
+            )
 
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
@@ -75,6 +91,7 @@ class OpenAIReasoner(_OpenAIBase, Reasoner):
 
     def propose(self, *, question: str, context: ValidSlice) -> ClassifierProposal:
         dto: ProposalDTO = self._parse(
+            agent="reasoner",
             instructions=prompts.REASONER_SYSTEM_PROMPT,
             user_message=prompts.build_reasoner_user_message(question=question, context=context),
             text_format=ProposalDTO,
@@ -93,6 +110,7 @@ class OpenAIVerifier(_OpenAIBase, Verifier):
         context: ValidSlice,
     ) -> VerificationResult:
         dto: VerificationDTO = self._parse(
+            agent="verifier",
             instructions=prompts.VERIFIER_SYSTEM_PROMPT,
             user_message=prompts.build_verifier_user_message(
                 question=question,
