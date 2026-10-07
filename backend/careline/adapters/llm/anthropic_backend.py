@@ -24,15 +24,29 @@ Owner: Srujan (scope ``llm``). Default model: ``claude-opus-4-8``.
 
 from __future__ import annotations
 
+import time
+
 from careline.adapters.llm import prompts
+from careline.adapters.llm import usage as usage_recorder
 from careline.adapters.llm.schemas import ProposalDTO, VerificationDTO
 from careline.domain.model.patient import ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
 
-DEFAULT_MODEL = "claude-opus-4-8"
+# Budget-first default (budget cap ~$20): Haiku is the default workhorse;
+# Opus stays one CARELINE_LLM_MODEL away. Adaptive thinking + effort are
+# Opus/Sonnet features — sending them to Haiku-type models is an API error,
+# so they are attached per-model (see _adaptive_kwargs).
+DEFAULT_MODEL = "claude-haiku-4-5"
 DEFAULT_EFFORT = "high"
 DEFAULT_MAX_TOKENS = 2048
+
+
+def _adaptive_kwargs(model: str, effort: str) -> dict:
+    """thinking/output_config only for models that support them (Opus/Sonnet)."""
+    if any(tag in model.lower() for tag in ("haiku",)):
+        return {}
+    return {"thinking": {"type": "adaptive"}, "output_config": {"effort": effort}}
 
 
 def _cached_system(prompt: str) -> list[dict]:
@@ -73,23 +87,32 @@ class _AnthropicBase:
         self._client = anthropic.Anthropic(api_key=self._api_key)
         return self._client
 
-    def _parse(self, *, system: list[dict], user_message: str, output_format):
+    def _parse(self, *, agent: str, system: list[dict], user_message: str, output_format):
         """Run one structured-output completion, failing closed on any problem."""
         client = self._ensure_client()
+        response = None
+        start = time.perf_counter()
         try:
             response = client.messages.parse(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                thinking={"type": "adaptive"},
-                output_config={"effort": self._effort},
                 system=system,
                 output_format=output_format,
                 messages=[{"role": "user", "content": user_message}],
+                **_adaptive_kwargs(self._model, self._effort),
             )
         except ReasonerUnavailable:
             raise
         except Exception as exc:  # SDK / transport / validation — all fail closed
             raise ReasonerUnavailable(f"anthropic call failed: {exc}") from exc
+        finally:
+            # Observability never blocks the clinical call.
+            usage_recorder.record(
+                agent=agent,
+                model=self._model,
+                usage=getattr(response, "usage", None),
+                latency_ms=(time.perf_counter() - start) * 1000.0,
+            )
 
         parsed = getattr(response, "parsed_output", None)
         if parsed is None:
@@ -103,6 +126,7 @@ class AnthropicReasoner(_AnthropicBase, Reasoner):
 
     def propose(self, *, question: str, context: ValidSlice) -> ClassifierProposal:
         dto: ProposalDTO = self._parse(
+            agent="reasoner",
             system=_cached_system(prompts.REASONER_SYSTEM_PROMPT),
             user_message=prompts.build_reasoner_user_message(question=question, context=context),
             output_format=ProposalDTO,
@@ -121,6 +145,7 @@ class AnthropicVerifier(_AnthropicBase, Verifier):
         context: ValidSlice,
     ) -> VerificationResult:
         dto: VerificationDTO = self._parse(
+            agent="verifier",
             system=_cached_system(prompts.VERIFIER_SYSTEM_PROMPT),
             user_message=prompts.build_verifier_user_message(
                 question=question,

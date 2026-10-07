@@ -57,14 +57,23 @@ class TestAnthropicReasoner:
         assert proposal.is_answerable
         assert proposal.citations == ("med-1",)
 
-    def test_never_sends_sampling_knobs_and_uses_adaptive_thinking(self):
+    def test_never_sends_sampling_knobs_and_uses_adaptive_thinking_on_opus(self):
         client = _FakeClient(returns=ProposalDTO(scope=ScopeCategory.OUT_OF_SCOPE))
-        AnthropicReasoner(client=client).propose(question="q", context=CTX)
+        AnthropicReasoner(client=client, model="claude-opus-4-8").propose(question="q", context=CTX)
         kwargs = client.messages.last_kwargs
         assert kwargs["thinking"] == {"type": "adaptive"}
         assert kwargs["output_config"] == {"effort": "high"}
         for forbidden in ("temperature", "top_p", "top_k", "budget_tokens"):
             assert forbidden not in kwargs
+
+    def test_budget_models_omit_adaptive_thinking(self):
+        # Default model is Haiku (budget-first): adaptive thinking/effort are
+        # Opus/Sonnet features and are API errors on Haiku — so they are omitted.
+        client = _FakeClient(returns=ProposalDTO(scope=ScopeCategory.OUT_OF_SCOPE))
+        AnthropicReasoner(client=client).propose(question="q", context=CTX)
+        kwargs = client.messages.last_kwargs
+        assert "thinking" not in kwargs
+        assert "output_config" not in kwargs
 
     def test_sdk_error_fails_closed(self):
         reasoner = AnthropicReasoner(client=_FakeClient(raises=RuntimeError("boom")))

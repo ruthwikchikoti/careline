@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from careline.adapters.llm.tracing import trace_span
+from careline.adapters.observability import record_turn
 from careline.adapters.telephony.stub import EscalationPayload, TelephonyPort, TelephonyStub
 from careline.domain.brain.brain import Brain
 from careline.domain.enums import Verdict
@@ -121,6 +122,14 @@ class QuestionService:
                     )
 
             span.log_output(verdict=decision.verdict.value)
+            record_turn(
+                question=question,
+                patient_id=patient.patient_id,
+                model="deterministic-spine",
+                verdict=decision.verdict.value,
+                scope=decision.scope.value if decision.scope else "unscoped",
+                latency_ms=0.0,
+            )
             return decision
 
     def _run_pipeline(
