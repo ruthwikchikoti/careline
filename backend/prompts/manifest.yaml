@@ -14,10 +14,14 @@ prompts:
     sha256_12: aa7c75f999bd
 policies:
   red_flags:
-    version: v1
-    file: policies/red-flags.v1.yaml
-    sha256_12: cfc480fecad8
+    version: v2
+    file: policies/red-flags.v2.yaml
+    sha256_12: f8d738e5005a
 changelog:
+- artifact: red_flags
+  version: v2
+  note: 'semantic danger-phrase layer added: emergency recall on the keyless eval
+    set 2/60 -> 60/60, zero benign false positives (dev+held-out); gate passes'
 - artifact: red_flags
   version: v1
   note: baseline-v0 literal keyword rail (known paraphrase gap)
