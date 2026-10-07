@@ -1,0 +1,37 @@
+# Render blueprint for the CareLine public demo (free tier).
+# Deploy: create a blueprint from this file (Render dashboard → New → Blueprint),
+# then set the secret env vars in the dashboard — never in this file.
+services:
+  - type: web
+    name: careline-demo
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Public demo guards (the ~$20 budget is a config guarantee, not a hope):
+      - key: CARELINE_RATE_LIMIT_PER_MINUTE
+        value: "6" # per IP, spend-bearing POSTs
+      - key: CARELINE_DAILY_REQUEST_CAP
+        value: "300" # process-wide, resets at UTC midnight
+      - key: CARELINE_ALLOWED_ORIGINS
+        sync: false # set to your deployed web origin(s), comma-separated
+      # Secrets (set in the dashboard, not here):
+      - key: CARELINE_ENV
+        value: development # keeps the demo console mounted; still non-production secrets
+      - key: CARELINE_JWT_SECRET
+        sync: false
+      - key: CARELINE_INTERNAL_API_KEY
+        sync: false
+      - key: CARELINE_PIN_HMAC_SECRET
+        sync: false
+      # Optional — the demo runs keyless on the deterministic spine; add an
+      # LLM key only if you accept the spend (budget guards above still apply):
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CARELINE_LLM_BACKEND
+        sync: false
+      - key: CARELINE_LLM_MODEL
+        sync: false
