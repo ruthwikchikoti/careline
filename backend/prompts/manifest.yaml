@@ -14,10 +14,16 @@ prompts:
     sha256_12: aa7c75f999bd
 policies:
   red_flags:
-    version: v2
-    file: policies/red-flags.v2.yaml
-    sha256_12: f8d738e5005a
+    version: v3
+    file: policies/red-flags.v3.yaml
+    sha256_12: 8b1735562544
 changelog:
+- artifact: red_flags
+  version: v3
+  note: 'red-team hardening: history/denial context suppression, acute-concern fail-closed
+    layer before any redirect, literal patterns for inflections and number crises.
+    Novel-probe battery 42/42; committed eval set: emergency recall 60/60 held, over-escalation
+    7.1% -> 8.1% (one benign item now escalates via the acute layer; gate max 15%).'
 - artifact: red_flags
   version: v2
   note: 'semantic danger-phrase layer added: emergency recall on the keyless eval

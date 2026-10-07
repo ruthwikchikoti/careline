@@ -1,0 +1,273 @@
+version: v3
+description: 'Emergency rail policy. v3 = v2 semantic layer + red-team hardening: context suppression
+  (history/denial markers), acute-concern fail-closed layer before any out-of-scope redirect, literal
+  patterns for inflections and number crises, 1-char token fix. Derived from the adversarial review of
+  2026-10-07 (tests/brain/test_red_flag_novel.py).'
+patterns:
+- chest\s+pain
+- difficulty\s+breathing
+- breathing\s+difficulty
+- can'?t\s+breathe
+- shortness\s+of\s+breath
+- unconscious
+- unresponsive
+- seizure
+- convulsion
+- bleeding\s+heavily
+- heavy\s+bleeding
+- suicid
+- self[- ]?harm
+- heart\s+attack
+- stroke\s+symptom
+- anaphyla
+- choking
+- overdose
+- poison
+- severe\s+allergic
+- head\s+injury
+- loss\s+of\s+consciousness
+- cannot\s+breathe
+- can\s+not\s+breathe
+- shortness[\s-]+of[\s-]+breath
+- breathless\s+(?:at|while|when)\s+(?:rest|lying|sitting|speaking|talking|walking|climbing)
+- black\s+like\s+tar
+- black\s+(?:tarry\s+)?stool
+- coffee[\s-]ground
+- (?:sugar|glucose)\s+(?:has\s+|keeps\s+|is\s+|was\s+)?(?:dropped|dropping|low)\b
+- (?:sugar|glucose)\b[^.]{0,30}\b(?:[23]\d|4\d)\b(?!\d)
+- \b(?:1[7-9]\d|2\d\d)\s*(?:over|/)\s*1[0-4]\d\b
+- ketone\w*\s*(?:strips?|test|levels?)?\s*(?:is|are|show\w*|reading)?\s*high
+- nail\s+polish\s+remover
+- fruity\s+breath
+- (?:drank|drinking|swallowed|swallowing|ate|eaten|got\s+into)\b[^.]{0,40}\b(?:kerosene|bleach|pesticide|weed\s?-?killer|cleaning\s+liquid|detergent|camphor|naphthalene|petrol)\b
+- (?:cannot|could\s?not|won'?t)\s+be\s+woken
+- not\s+responding
+- \bslurr(?:ed|ing)\b
+- bleeding\s+(?:through|past|soaking)\s+(?:the\s+)?(?:bandage|dressing)
+- \btook\b[^.]{0,40}(?:instead\s+of\s+(?:my|mine)|by\s+mistake|wrong\s+(?:tablet|medicine|dose|bottle))
+- (?:turned|turning)\s+(?:blue|bluish|grey|gray)
+pattern_concepts:
+  heart\s+attack: cardiac_signs
+  stroke\s+symptom: stroke
+  head\s+injury: head_injury
+  chest\s+pain: chest_pain_cardiac
+  seizure: seizure
+  convulsion: seizure
+  unconscious: reduced_consciousness
+  unresponsive: reduced_consciousness
+  loss\s+of\s+consciousness: reduced_consciousness
+  suicid: suicid
+  self[- ]?harm: self_harm
+semantic:
+  threshold: 0.55
+  score: 0.6*token_coverage + 0.4*char_trigram_cosine
+  phrases:
+    suicidal_ideation:
+    - I want to end my life
+    - I don't want to be alive anymore
+    - I don't think I want to live anymore
+    - I am going to kill myself
+    - I feel like hurting myself
+    - I want to harm myself
+    - everyone would be better off without me
+    - taking all my tablets and not waking up
+    - I have thoughts of ending things
+    - I don't feel safe with myself tonight
+    overdose:
+    - I took too many tablets at once
+    - I took 20 tablets at once
+    - I took too many of my pain pills
+    - I took too many tablets today
+    - took an entire strip of tablets
+    - I had a double dose of my tablets by mistake
+    - took my tablet twice by accident
+    - I accidentally took two doses
+    - I accidentally took an extra dose of my medicine
+    - I overdosed on my medication
+    - my child ate some of my tablets
+    - my child got into my tablet strip
+    - swallowed a whole bottle of pills
+    poisoning:
+    - I drank cleaning liquid by mistake
+    - I swallowed something poisonous
+    - I accidentally drank a chemical
+    - my child swallowed something from the cupboard
+    - I drank the weed killer
+    chest_pain_cardiac:
+    - crushing pain in my chest
+    - tightness in my chest
+    - pressure on my chest
+    - my chest feels like an elephant is sitting on it
+    - a band is squeezing my chest
+    - chest is tight and squeezing
+    - pain in my chest like a knife
+    - chest pain going to my left arm
+    - chest pain going into my jaw
+    - pain in my chest and my arm feels funny
+    - sudden pain in my chest and cold sweat
+    - I broke into a cold sweat and feel like collapsing
+    stroke:
+    - my face is drooping on one side
+    - one side of my face has drooped
+    - my words are coming out slurred
+    - my speech is slurred
+    - my speech has gone funny
+    - one side of my body has gone weak and numb
+    - sudden weakness on one side of my body
+    - the worst headache of my life
+    - a sudden thunderclap headache
+    breathing_distress:
+    - finding it very hard to breathe
+    - I can't catch my breath
+    - cannot catch my breath
+    - I am gasping for air
+    - struggling to breathe
+    - so breathless I cannot finish a sentence
+    - cannot speak a full sentence
+    - my lips have turned blue
+    - my nails and lips have turned bluish
+    - I turned blue
+    anaphylaxis:
+    - my lips are swelling and my throat is closing
+    - my throat feels like it is closing
+    - my tongue is swelling up
+    - my face and tongue are swelling
+    - my whole body has come out in hives
+    - hives spreading fast over my body
+    - a rash all over my body
+    - rash spreading over my whole body after medicine
+    - severe swelling of my mouth and throat
+    reduced_consciousness:
+    - I cannot keep my eyes open
+    - my family cannot wake me
+    - nobody can wake me up
+    - I keep blacking out
+    - I have been blacking out repeatedly
+    - I fainted
+    - I passed out
+    - I collapsed
+    - I was unresponsive
+    - I feel like I might collapse
+    - I am very drowsy and confused
+    seizure:
+    - I keep fitting
+    - I am having fits
+    - jerking uncontrollably
+    - my limbs are jerking and I cannot control them
+    - was jerking in my sleep
+    - I had a seizure
+    - I had a convulsion
+    choking:
+    - I cannot stop choking
+    - something went down the wrong way and I am choking
+    - food is stuck and I cannot breathe
+    - I am choking
+    uncontrolled_bleeding:
+    - the wound will not stop bleeding
+    - I cannot stop the bleeding
+    - blood is soaking through the dressing
+    - bleeding heavily and it will not stop
+    - I am coughing up blood
+    - there is blood when I vomit
+    - I vomited blood
+    - I have cut myself deeply
+    - a deep cut that is bleeding a lot
+    head_injury:
+    - I hit my head badly
+    - I fell and hit my head
+    - I fell down the stairs and hurt my head
+    - a heavy blow to my head
+    hypoglycaemia:
+    - my sugar is very low and I am shaking and sweating
+    - my sugar is 42 and I am shaking
+    - shaking and sweating and my sugar is low
+    - low sugar episode with sweating and trembling
+    - I feel shaky sweaty and confused from low sugar
+    hyperglycaemia_dka:
+    - my sugar is very high and I keep vomiting
+    - my sugar reading is very high and I am being sick
+    - sugar above 350 and vomiting
+    - breath smells fruity and sugar very high
+    severe_asthma:
+    - my reliever inhaler is not helping at all
+    - the inhaler is not helping my breathing
+    - wheezing very badly
+    - wheezing that keeps getting worse
+    - I used the inhaler six times in two hours
+    - using the reliever again and again with no relief
+    - my chest has completely locked up
+    post_op_wound:
+    - my incision has opened up
+    - the surgical wound has opened
+    - pus is coming out of my wound
+    - the wound is oozing pus
+    - my wound smells bad and is leaking fluid
+    acute_neuro:
+    - the room is spinning and I cannot stand up
+    - severe dizziness and I cannot stand
+    - I am seeing things that are not there
+    - sudden confusion and I don't know where I am
+    - double vision that started suddenly
+    dvt_swelling:
+    - my calf is swollen and painful
+    - one leg is swollen and painful after a flight
+    - both ankles have swollen up hugely
+    - sudden severe swelling of my ankles
+    cardiac_signs:
+    - my heart is racing so fast
+    - my heart feels like it will jump out
+    - palpitations that will not stop
+    - I feel my heart pounding irregularly
+    severe_undifferentiated:
+    - sudden terrible pain and I am drenched in sweat
+    - the pain is unbearable tonight
+    - severe pain that is getting worse by the minute
+    - I feel very unwell after taking medicine that was not mine
+    - I feel very unwell after taking someone else's tablets
+    - I mixed my medicine with someone else's tablets and feel very unwell
+    - I feel extremely unwell right now
+    joint_redness_sepsis:
+    - my knee has become hot and red
+    - the joint is hot red and extremely painful
+    - red streaks spreading from my wound
+context:
+  history_suppressible_concepts:
+  - cardiac_signs
+  - chest_pain_cardiac
+  - dvt_swelling
+  - head_injury
+  - joint_redness_sepsis
+  - reduced_consciousness
+  - seizure
+  - severe_undifferentiated
+  - stroke
+  history_suppressible_regex_concepts:
+  - cardiac_signs
+  - chest_pain_cardiac
+  - head_injury
+  - reduced_consciousness
+  - seizure
+  - stroke
+  acute_concern:
+    note: first-person + acute-distress term + no definitional/history context -> escalate before any
+      redirect (wired in gates/chain.py)
+    term_patterns:
+      bleeding: \bbleed(?:ing|s)?\b|\bblood\s+in\s+(?:my\s+)?(?:vomit|stool|urine|phlegm|sputum)
+      breathing_distress: \bbreathless\w*|\bcannot\s+breathe|\bcan'?t\s+breathe|\bunable\s+to\s+breathe|\bshortness\s+of\s+breath|\bbreath\s+(?:keeps?\s+)?(?:stopping|getting\s+(?:hard|worse|difficult)|is\s+short)
+      chest: \bchest\b
+      collapse: \bcollapse[ds]?\b|\bfaint(?:ed|ing|s)?\b|\bpassed?\s+out\b|\bblacking\s+out\b|\bblackouts?\b
+      dizzy: \bdizzy\w*|\bdizziness\b|\broom\s+is\s+spinning\b|\bspinning\s+head\b
+      vomiting: \bvomit\w*|\bthrowing\s+up\b|\bbeing\s+sick\b|\bthrew\s+up\b
+      seizure: \bseizure\w*|\bconvulsion\w*|\bfitting\b|\bjerking\b
+      reduced_consciousness: \bunconscious\b|\bunresponsive\b|\bnot\s+responding\b|\bcannot\s+be\s+woken\b|\bcan'?t\s+(?:be\s+)?woken?\b|\bwon'?t\s+wake\b|\bcouldn'?t\s+be\s+woken\b|\bcan'?t\s+wake\s+(?:him|her|them)\b|\bkeep\s+my\s+eyes\s+open\b
+      neuro_focal: \bnumb\w*|\bslurr\w*|\bweak\w*\s+(?:all\s+over|one\s+side|down\s+one)\b|\bdrooping\b|\bdroop\b|\bone\s+side\b.{0,30}\b(?:weak|numb|droop)
+      rash_swelling: \brash\w*|\bswelling\b|\bswollen\b|\bhives\b|\bcoming\s+out\s+in\b
+      fever: \bfever\w*|\bburning\s+up\b|\bboiling\b
+      hypoglycaemia: \bsugar\s+(?:has\s+|keeps\s+|is\s+|was\s+)?(?:dropped|dropping|low)\b|\bglucose\s+(?:has\s+|is\s+)?(?:dropped|low)\b|\bhypo\b|\bsugar\s+is\s+(?:[23]\d|4\d)\b
+      tremor: \btrembl\w*|\bshak(?:ing|es)\b|\bshivering\s+uncontrollably\b
+      gi_bleed: \bblack\s+(?:stool|tarry)\b|\btarry\s+stool\b|\bblack\s+like\s+tar\b|\bcoffee[\s-]ground
+      head_injury: \bhit\s+my\s+head\b|\bfell\s+(?:down|on)\b|\bfallen\b|\bfell\s+and\b|\b(?:splitting|worst|severe|sudden|thunderclap)\s+headache
+      poisoning: \bkerosene\b|\bbleach\b|\bpesticide\b|\bweed\s?-?killer\b|\bcleaning\s+liquid\b|\bpoison\w*|\boverdosed?\b|\bketone\w*\s*(?:strips?|test)?\s*(?:is|are|show\w*)?\s*high|\bnail\s+polish\s+remover|\bfruity\s+breath
+      cyanosis: \b(?:turned|turning|is|look\w*)\s+(?:blue|bluish|grey|gray)\b
+      wrong_medication: \btook\b.{0,40}\binstead\s+of\s+(?:my|mine)\b|\bby\s+mistake\b|\bwrong\s+(?:tablet|medicine|dose|bottle)\b
+      bp_crisis: \b(?:1[7-9]\d|2\d\d)\s*(?:over|/)\s*1[0-4]\d\b

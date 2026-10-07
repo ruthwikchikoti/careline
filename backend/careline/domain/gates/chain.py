@@ -33,6 +33,7 @@ from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
+from careline.domain.rails.acute_concern import check_acute_concern
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.scoring.confidence import compute_confidence
 from careline.domain.scoring.risk import compute_risk
@@ -150,6 +151,32 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
                 "No approved, currently-valid facts available for this patient.",
                 scope=ScopeCategory.OUT_OF_SCOPE,
                 risk=compute_risk(ctx.proposal, ctx.valid_slice),
+                trace=ctx.trace,
+            )
+
+        # v3 fail-closed net: a first-person acute-distress statement that no
+        # approved fact matches must never be redirected — the red team showed
+        # fresh-vocabulary emergencies ("my stools are black like tar") landing
+        # on the polite redirect. Definitional/history context exempts benign
+        # questions (see acute_concern.py).
+        acute = check_acute_concern(ctx.question)
+        if acute is not None:
+            ctx.trace.record(
+                "scope_gate",
+                TraceStatus.TERMINAL,
+                spec_section="§5.1",
+                detail=(
+                    f"unmatched first-person acute concern ({acute}) — "
+                    "escalating rather than redirecting"
+                ),
+            )
+            return Decision.escalate(
+                "Your message may describe an urgent symptom this service "
+                "cannot assess from your approved record — transferring to "
+                "your doctor. If this is an emergency, call your local "
+                "emergency number now.",
+                scope=ScopeCategory.OUT_OF_SCOPE,
+                risk=0.9,
                 trace=ctx.trace,
             )
 
