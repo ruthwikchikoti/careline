@@ -49,7 +49,7 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     )
 
     policy = yaml.safe_load(load_policy("red_flags").text)
-    assert policy["version"] == "v2"
+    assert policy["version"] == "v3"
     assert tuple(policy["patterns"]) == tuple(RED_FLAG_PATTERNS), (
         "policies/red-flags YAML and domain RED_FLAG_PATTERNS have drifted — "
         "update both together and bump the policy version in the manifest"
@@ -61,6 +61,19 @@ def test_red_flag_policy_artifact_matches_domain_constant():
         "policies/red-flags YAML and domain PHRASE_LIBRARY have drifted — "
         "update both together and bump the policy version in the manifest"
     )
+    # v3 context layer must mirror the domain too.
+    from careline.domain.rails.acute_concern import (
+        ACUTE_TERM_PATTERNS,
+        SUPPRESSIBLE_CONCEPTS,
+        SUPPRESSIBLE_REGEX_CONCEPTS,
+    )
+
+    ctx = policy["context"]
+    assert sorted(SUPPRESSIBLE_CONCEPTS) == ctx["history_suppressible_concepts"]
+    assert sorted(SUPPRESSIBLE_REGEX_CONCEPTS) == ctx["history_suppressible_regex_concepts"]
+    assert dict(ACUTE_TERM_PATTERNS) == {
+        k: v for k, v in ctx["acute_concern"]["term_patterns"].items()
+    }
 
 
 def test_policy_artifact_hash_matches_manifest():

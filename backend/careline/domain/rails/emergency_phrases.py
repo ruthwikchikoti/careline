@@ -27,11 +27,16 @@ from __future__ import annotations
 SEMANTIC_THRESHOLD: float = 0.55
 """Minimum similarity (token-coverage ⊕ trigram-cosine blend) to flag a question.
 
-Calibrated on the dev (non-held-out) eval items: paraphrased emergencies the
-regexes miss score ≥ 0.669, benign near-miss questions score ≤ 0.482 — 0.55
-sits in the gap with margin on both sides. Benign near-misses are pinned in
-``tests/brain/test_red_flag_semantic.py``; re-calibrate (and bump the policy
-version) whenever the library grows.
+Calibrated on the dev (non-held-out) eval items and *stated honestly*: on that
+set, paraphrased emergencies the regexes miss score ≥ 0.669 and benign
+near-misses score below 0.55 — but this margin is a property of the eval set,
+not the system. An adversarial red-team run (see
+``tests/brain/test_red_flag_novel.py``) found fresh-vocabulary benign inputs
+scoring above threshold and fresh emergencies below it; v3 therefore pairs
+this matcher with context suppression (history/denial) and the scope gate's
+acute-concern fail-closed layer, which is what actually catches novel
+emergencies. The lexical matcher alone must not be presented as generalized
+emergency detection — see docs/TRADEOFFS.md.
 """
 
 PHRASE_LIBRARY: dict[str, tuple[str, ...]] = {

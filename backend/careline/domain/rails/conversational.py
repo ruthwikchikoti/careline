@@ -50,13 +50,15 @@ _TOKEN = re.compile(r"[a-z']+")
 def is_small_talk(question: str) -> bool:
     """True only if the whole message is a greeting/pleasantry (no clinical content).
 
-    Empty / punctuation-only input also counts (there is nothing to answer). A
-    message with any token outside the greeting+filler vocabulary is *not* small
-    talk and is left for the normal spine.
+    Empty / punctuation-only / other-script input is **not** small talk: an
+    unparseable turn (ASR garbage, a non-English emergency) must never receive
+    the cheerful greeting — it falls through to the spine, whose redirect says
+    to contact the clinic. A message with any token outside the
+    greeting+filler vocabulary is likewise *not* small talk.
     """
     tokens = _TOKEN.findall(question.lower())
     if not tokens:
-        return True  # empty or punctuation-only — nudge, don't escalate
+        return False  # nothing parseable — not a greeting; let the spine handle it
     if any(t not in _CORE and t not in _FILLER for t in tokens):
         return False  # a real word slipped in — treat as a genuine question
     return any(t in _CORE for t in tokens)  # require at least one greeting opener

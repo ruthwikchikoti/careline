@@ -30,6 +30,13 @@ import math
 import re
 from collections import Counter
 
+from careline.domain.rails.acute_concern import (
+    DENIAL_REGEX_CONCEPTS,
+    SUPPRESSIBLE_CONCEPTS,
+    SUPPRESSIBLE_REGEX_CONCEPTS,
+    denial_suppressed,
+    history_suppressed,
+)
 from careline.domain.rails.emergency_phrases import PHRASE_LIBRARY, SEMANTIC_THRESHOLD
 
 # ---------------------------------------------------------------------------
@@ -62,8 +69,56 @@ RED_FLAG_PATTERNS: tuple[str, ...] = (
     r"severe\s+allergic",
     r"head\s+injury",
     r"loss\s+of\s+consciousness",
+    # -- v3 additions: inflections, punctuation forms, and number crises the
+    # red-team run showed were missed (see tests/brain/test_red_flag_novel.py).
+    r"cannot\s+breathe",
+    r"can\s+not\s+breathe",
+    r"shortness[\s-]+of[\s-]+breath",
+    r"breathless\s+(?:at|while|when)\s+(?:rest|lying|sitting|speaking|talking|walking|climbing)",
+    r"black\s+like\s+tar",
+    r"black\s+(?:tarry\s+)?stool",
+    r"coffee[\s-]ground",
+    r"(?:sugar|glucose)\s+(?:has\s+|keeps\s+|is\s+|was\s+)?(?:dropped|dropping|low)\b",
+    r"(?:sugar|glucose)\b[^.]{0,30}\b(?:[23]\d|4\d)\b(?!\d)",
+    r"\b(?:1[7-9]\d|2\d\d)\s*(?:over|/)\s*1[0-4]\d\b",
+    r"ketone\w*\s*(?:strips?|test|levels?)?\s*(?:is|are|show\w*|reading)?\s*high",
+    r"nail\s+polish\s+remover",
+    r"fruity\s+breath",
+    r"(?:drank|drinking|swallowed|swallowing|ate|eaten|got\s+into)\b[^.]{0,40}\b(?:kerosene|bleach|pesticide|weed\s?-?killer|cleaning\s+liquid|detergent|camphor|naphthalene|petrol)\b",
+    r"(?:cannot|could\s?not|won'?t)\s+be\s+woken",
+    r"not\s+responding",
+    r"\bslurr(?:ed|ing)\b",
+    r"bleeding\s+(?:through|past|soaking)\s+(?:the\s+)?(?:bandage|dressing)",
+    r"\btook\b[^.]{0,40}(?:instead\s+of\s+(?:my|mine)|by\s+mistake|wrong\s+(?:tablet|medicine|dose|bottle))",
+    r"(?:turned|turning)\s+(?:blue|bluish|grey|gray)",
 )
 
+# Concept map for the literal patterns — used by the v3 context suppression
+# (history/denial markers in acute_concern.py). Default pseudo-concept is the
+# pattern's own slug.
+_PATTERN_CONCEPTS: dict[str, str] = {
+    r"heart\s+attack": "cardiac_signs",
+    r"stroke\s+symptom": "stroke",
+    r"head\s+injury": "head_injury",
+    r"chest\s+pain": "chest_pain_cardiac",
+    r"seizure": "seizure",
+    r"convulsion": "seizure",
+    r"unconscious": "reduced_consciousness",
+    r"unresponsive": "reduced_consciousness",
+    r"loss\s+of\s+consciousness": "reduced_consciousness",
+    r"suicid": "suicid",
+    r"self[- ]?harm": "self_harm",
+}
+
+_COMPILED_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (
+        re.compile(p, re.IGNORECASE),
+        _PATTERN_CONCEPTS.get(p, "literal:" + re.sub(r"\\[a-z]+\+?|\W+", "", p)[:24]),
+    )
+    for p in RED_FLAG_PATTERNS
+)
+
+# Kept for the shadow comparison's regex-only v1 variant and the policy sync.
 _RED_FLAG_RE = re.compile(
     "|".join(f"(?:{p})" for p in RED_FLAG_PATTERNS),
     re.IGNORECASE,
@@ -75,7 +130,7 @@ _RED_FLAG_RE = re.compile(
 # ---------------------------------------------------------------------------
 # A curated danger-phrase library matched by token coverage ⊕ character-trigram
 # cosine — deterministic, keyless, and tolerant of everyday paraphrase. Runs
-# only when the v1 regexes miss, as the second, denser net.
+# only when the regexes miss, as the second, denser net.
 
 _STOPWORDS = frozenset(
     """
@@ -90,11 +145,14 @@ _STOPWORDS = frozenset(
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
 def _content_tokens(normalized: str) -> frozenset[str]:
-    return frozenset(t for t in normalized.split() if t not in _STOPWORDS)
+    # len > 1: apostrophe-splitting must not mint stray 1-char tokens ("t").
+    return frozenset(
+        t for t in normalized.split() if t not in _STOPWORDS and len(t) > 1
+    )
 
 
 def _trigrams(normalized: str) -> Counter:
@@ -127,13 +185,24 @@ def semantic_red_flag(question: str) -> tuple[str, float] | None:
     (how much of a danger phrase the question contains) ⊕ 0.4 × character-
     trigram cosine (robustness to small wording changes). Pure — no model,
     no key, no network.
+
+    v3: history/denial context (acute_concern) suppresses matching concepts —
+    "my grandfather collapsed last year" does not fire reduced_consciousness.
     """
+    if not question:
+        return None
     norm = _normalize(question)
     q_tokens = _content_tokens(norm)
     q_tri = _trigrams(norm)
+    hist = history_suppressed(question)
+    den = denial_suppressed(question)
     best_concept, best_score = None, 0.0
     for concept, p_tokens, p_tri in _PHRASE_VECTORS:
         if not p_tokens:
+            continue
+        if hist and concept in SUPPRESSIBLE_CONCEPTS:
+            continue
+        if den and concept == "suicidal_ideation":
             continue
         coverage = len(q_tokens & p_tokens) / len(p_tokens)
         sim = 0.6 * coverage + 0.4 * _cosine(q_tri, p_tri)
@@ -147,12 +216,25 @@ def semantic_red_flag(question: str) -> tuple[str, float] | None:
 def check_red_flag(question: str) -> str | None:
     """Return the matched red-flag signal if found, else ``None``.
 
-    Two nets, both deterministic and pre-LLM: the v1 literal regexes, then
-    the v2 semantic detector for phrasings the regexes miss. A match means
-    the turn goes straight to ESCALATE without ever invoking the Reasoner.
+    Two nets, both deterministic and pre-LLM: the literal regexes (v1 + v3
+    additions), then the semantic detector (v2) for phrasings the regexes
+    miss. Both are context-suppressed (v3): history/denial markers veto
+    suppressible concepts, so distant-past mentions and self-harm denials
+    do not trip the rail. A match means the turn goes straight to ESCALATE
+    without ever invoking the Reasoner.
     """
-    match = _RED_FLAG_RE.search(question)
-    if match:
+    if not question:
+        return None
+    hist = history_suppressed(question)
+    den = denial_suppressed(question)
+    for pattern, concept in _COMPILED_PATTERNS:
+        match = pattern.search(question)
+        if match is None:
+            continue
+        if hist and concept in SUPPRESSIBLE_REGEX_CONCEPTS:
+            continue
+        if den and concept in DENIAL_REGEX_CONCEPTS:
+            continue
         return match.group(0)
     semantic = semantic_red_flag(question)
     if semantic is not None:
