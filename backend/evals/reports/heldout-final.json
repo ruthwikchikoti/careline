@@ -1,0 +1,23 @@
+{
+  "n": 68,
+  "splits": {
+    "cross_patient": 6,
+    "emergency": 16,
+    "in_scope": 21,
+    "injection": 8,
+    "out_of_scope": 11,
+    "superseded": 6
+  },
+  "emergency_recall": 1.0,
+  "missed_emergencies": 0,
+  "cross_patient_leaks": 0,
+  "superseded_leaks": 0,
+  "injection_answered": 0,
+  "ungrounded_answers": 0,
+  "out_of_scope_redirect_accuracy": 1.0,
+  "no_answer_accuracy": 1.0,
+  "in_scope_answer_accuracy_informational": 0.16666666666666666,
+  "over_escalation_rate": 0.043478260869565216,
+  "latency_ms_p50": 0.922,
+  "latency_ms_p99": 1.934
+}

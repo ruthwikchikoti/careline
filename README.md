@@ -39,14 +39,17 @@ not a hotfix:
 
 | Metric | Value | Basis |
 |---|---|---|
-| Emergency recall (red-team split, n=60) | **1.000** (was 0.033) | keyless eval gate, [`report`](backend/evals/reports/after-policy-v2.json) |
-| Cross-patient citation/text leaks | **0** | enforced on every PR |
-| Superseded-fact citations | **0** | enforced on every PR |
-| Over-escalation (benign split) | 7.1% (gate: ≤15%) | v2 did **not** buy recall with false alarms |
-| Eval latency p50 / p99 (spine) | 0.9 ms / 1.7 ms | 250-item gate run |
+| Emergency recall — committed eval set (n=60) | **60/60** (baseline-v0: 2/60) | keyless eval gate, [`report`](backend/evals/reports/after-policy-v3.json) |
+| Emergency recall — held-out split, excl. the one dev-tainted item | **15/16** | disclosure in [`RUBRIC.md`](backend/evals/RUBRIC.md) |
+| Emergency recall — *novel* red-team probes (independent adversarial battery, n=21+21) | **42/42 after policy v3** (v2 scored 10/42) | [`test_red_flag_novel.py`](backend/tests/brain/test_red_flag_novel.py) |
+| Cross-patient citation/text leaks | **0** | as measured on the eval probes (keyless spine) + repo-level isolation tests — not an API-penetration result |
+| Superseded-fact citations | **0** | enforced in CI on every backend PR (workflow committed; first gated PR lands on push) |
+| Ungrounded in-scope answers (keyless) | **0** | strict grounding gate added after the audit |
+| Over-escalation (benign split) | 9.4% (gate: ≤15%) | v3's acute-concern layer costs ~2 pts of over-escalation; disclosed, gated |
+| Eval latency p50 / p99 (spine) | ~1 ms / ~2 ms | 250-item gate run |
 | Throughput (deterministic spine) | **571 req/s**, p50 16.1 ms, p99 42.1 ms | [load test](backend/evals/reports/load-test.md), 300 req @ conc. 10 |
 | LLM cost per question (reasoner+verifier) | **≈ $0.000297** (gpt-4o-mini, est.) | [cost report](backend/evals/reports/cost.md); ~1,380 tokens; measured live runs replace the estimate |
-| Suite | 366 passed / 2 skipped, offline & keyless | `python -m pytest -q` |
+| Suite | 413 passed / 2 skipped, offline & keyless | `python -m pytest -q` |
 
 Prices are a versioned table (`adapters/llm/usage.py`, as-of 2026-10); unknown
 models are never guessed. Every live adapter call records tokens, latency, cost,
@@ -218,7 +221,7 @@ classifier + rules over fine-tuning; shadow comparison over auto-promote.
   path uses.
 
 ## Resume line
-> Built an eval-gated LLMOps release pipeline for a clinical follow-up agent: 250 hand-written safety evals (emergency/leak/injection) blocking merges in GitHub Actions via a deterministic keyless gate, versioned hash-stamped prompt & policy releases, semantic emergency detection lifting red-team recall 0.03 → 1.00, and per-request cost/latency observability — load-tested at 571 req/s for ~$0.0003 per question.
+> Built an eval-gated LLMOps release pipeline for a clinical follow-up agent: 250 hand-written safety evals (emergency/leak/injection) gating merges via a deterministic keyless CI check, versioned hash-stamped prompt & policy releases, and a red-team-hardened emergency rail that lifted novel-probe recall 0.03 → 0.48 → 1.00 across two audited releases — with per-request cost/latency observability, load-tested at 571 req/s for ~$0.0003 per question.
 
 ## Status
 **Backend:** full safety spine (Brain + graph + service parity), eval-gated release
