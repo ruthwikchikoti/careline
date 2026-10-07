@@ -58,6 +58,7 @@ class UsageRecord:
     latency_ms: float
     cost_usd: float | None
     artifacts: dict[str, str]   # e.g. {"reasoner": "reasoner@v1+…", "red_flags": "…"}
+    success: bool = True        # False = provider call failed; excluded from cost/latency stats
 
     @property
     def total_tokens(self) -> int:
@@ -86,10 +87,13 @@ def record(
     model: str,
     usage: object | None,
     latency_ms: float,
+    success: bool = True,
 ) -> UsageRecord | None:
     """Record one call from a provider usage object (``input_tokens``/``output_tokens``
     on Anthropic; ``input_tokens``/``output_tokens`` or ``prompt_tokens``/
-    ``completion_tokens`` on OpenAI). Never raises.
+    ``completion_tokens`` on OpenAI). ``success=False`` marks a failed provider
+    call (recorded for the failure count, excluded from cost/latency aggregates
+    so one 60 s timeout cannot become the reported p99). Never raises.
     """
     try:
         it = int(getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0) or 0)
@@ -100,8 +104,9 @@ def record(
             input_tokens=it,
             output_tokens=ot,
             latency_ms=round(latency_ms, 3),
-            cost_usd=estimate_cost_usd(model, it, ot),
+            cost_usd=estimate_cost_usd(model, it, ot) if success else None,
             artifacts=dict(active_versions()),
+            success=success,
         )
         with _lock:
             _records.append(rec)
@@ -120,33 +125,46 @@ def records() -> tuple[UsageRecord, ...]:
 
 
 def reset() -> None:
-    """Test hook — clear the in-memory buffer (file sink is append-only)."""
+    """Test hook — clear the in-memory buffer and close the file sink."""
     global _file
     with _lock:
         _records.clear()
+        if _file is not None:
+            try:
+                _file.close()
+            except Exception:
+                pass
         _file = None
 
 
 def summary() -> dict:
-    """Aggregate totals — the cost-per-request number for reports."""
+    """Aggregate totals — the cost-per-request number for reports.
+
+    Cost and latency statistics cover *successful* calls only; failures are
+    counted separately (a 60 s timeout must not become the reported p99).
+    ``per_call_usd`` divides by known-price successful calls only.
+    """
     with _lock:
         recs = list(_records)
     if not recs:
         return {"calls": 0}
-    known = [r for r in recs if r.cost_usd is not None]
-    lat = sorted(r.latency_ms for r in recs)
+    ok = [r for r in recs if r.success]
+    known = [r for r in ok if r.cost_usd is not None]
+    lat = sorted(r.latency_ms for r in ok)
+    pct = lambda q: lat[min(len(lat) - 1, int(q * len(lat)))] if lat else 0.0
     return {
         "calls": len(recs),
-        "total_tokens": sum(r.total_tokens for r in recs),
-        "input_tokens": sum(r.input_tokens for r in recs),
-        "output_tokens": sum(r.output_tokens for r in recs),
+        "failed_calls": len(recs) - len(ok),
+        "total_tokens": sum(r.total_tokens for r in ok),
+        "input_tokens": sum(r.input_tokens for r in ok),
+        "output_tokens": sum(r.output_tokens for r in ok),
         "cost_usd": round(sum(r.cost_usd for r in known), 6) if known else None,
-        "calls_with_unknown_price": len(recs) - len(known),
+        "calls_with_unknown_price": len(ok) - len(known),
         "per_call_usd": (
-            round(sum(r.cost_usd for r in known) / len(recs), 6) if known else None
+            round(sum(r.cost_usd for r in known) / len(known), 6) if known else None
         ),
-        "latency_ms_p50": lat[len(lat) // 2],
-        "latency_ms_p99": lat[min(len(lat) - 1, int(0.99 * len(lat)))],
+        "latency_ms_p50": pct(0.50),
+        "latency_ms_p99": pct(0.99),
         "by_agent": {
             agent: sum(1 for r in recs if r.agent == agent)
             for agent in sorted({r.agent for r in recs})

@@ -88,6 +88,34 @@ def test_unknown_prompt_fails_closed():
         load_prompt("nonexistent")
 
 
+def test_manifest_without_hashes_fails_closed(tmp_path, monkeypatch):
+    """A manifest entry missing sha256_12 must not silently disable tamper checks."""
+    import shutil
+
+    import careline.adapters.llm.prompt_registry as reg
+
+    manifest = yaml.safe_load((reg._BACKEND_ROOT / "prompts" / "manifest.yaml").read_text())
+    del manifest["prompts"]["reasoner"]["sha256_12"]
+    fake_root = tmp_path
+    (fake_root / "prompts" / "reasoner").mkdir(parents=True)
+    shutil.copy(
+        reg._BACKEND_ROOT / "prompts" / "reasoner" / "v1.md",
+        fake_root / "prompts" / "reasoner" / "v1.md",
+    )
+    (fake_root / "prompts" / "manifest.yaml").write_text(yaml.safe_dump(manifest))
+    monkeypatch.setattr(reg, "_BACKEND_ROOT", fake_root)
+    monkeypatch.setattr(
+        reg, "_MANIFEST_PATH", fake_root / "prompts" / "manifest.yaml"
+    )
+    reg.reload()
+    try:
+        with pytest.raises(RegistryError, match="no sha256_12"):
+            reg.load_prompt("reasoner")
+    finally:
+        monkeypatch.undo()
+        reg.reload()
+
+
 def test_reload_clears_caches():
     reload()
     assert active_versions()["red_flags"].startswith("red_flags@")

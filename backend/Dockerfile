@@ -31,5 +31,8 @@ EXPOSE 8000
 
 # Gunicorn-free single process keeps the in-memory rate-limit/daily-cap
 # counters meaningful (documented README limitation for multi-process).
+# --proxy-headers: behind Render's router the socket peer is the router, so
+# per-IP limits need the forwarded client IP (single trusted hop).
 CMD ["uvicorn", "careline.api.app:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8000"]
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]

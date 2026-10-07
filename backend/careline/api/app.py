@@ -277,6 +277,19 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     cfg = settings or get_settings()
     app = FastAPI(title="CareLine", lifespan=_lifespan)
 
+    # Middleware order matters: Starlette makes the LAST-added middleware the
+    # outermost. BudgetGuard is added first so CORS wraps it — its 429/503
+    # rejections must carry CORS headers or a browser console can never read
+    # the carefully-worded "daily demo cap" body.
+    if cfg.rate_limit_per_minute or cfg.daily_request_cap:
+        from careline.api.rate_limit import BudgetGuardMiddleware
+
+        app.add_middleware(
+            BudgetGuardMiddleware,
+            per_minute=cfg.rate_limit_per_minute,
+            daily_cap=cfg.daily_request_cap,
+        )
+
     # CORS: localhost for dev; the public deploy sets CARELINE_ALLOWED_ORIGINS.
     origins = (
         [o.strip() for o in cfg.allowed_origins.split(",") if o.strip()]
@@ -289,17 +302,6 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    # Budget guard: per-IP rate limit + hard daily cap on spend-bearing POSTs.
-    # Off by default (tests/dev); the deploy config turns both on.
-    if cfg.rate_limit_per_minute or cfg.daily_request_cap:
-        from careline.api.rate_limit import BudgetGuardMiddleware
-
-        app.add_middleware(
-            BudgetGuardMiddleware,
-            per_minute=cfg.rate_limit_per_minute,
-            daily_cap=cfg.daily_request_cap,
-        )
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict:

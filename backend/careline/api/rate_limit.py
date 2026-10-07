@@ -24,8 +24,6 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 
-SPEND_PATH_PREFIXES = ("/demo/ask", "/internal/run-question", "/demo/")
-
 _TOO_MANY = json.dumps(
     {"detail": "Rate limit reached — please wait a minute and try again."}
 ).encode()
@@ -107,5 +105,12 @@ class BudgetGuardMiddleware:
                 return
             window.append(now)
 
-        self._daily_count += 1
-        await self.app(scope, receive, send)
+        # The daily cap counts only requests the app actually accepted
+        # (status < 400): rejected/invalid POSTs spend nothing, so they must
+        # not darken the demo budget.
+        async def send_wrapper(message) -> None:
+            if message["type"] == "http.response.start" and message["status"] < 400:
+                self._daily_count += 1
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

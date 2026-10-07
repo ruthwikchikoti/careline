@@ -99,7 +99,8 @@ export default function LandingPage() {
         <p className="mt-3 text-xs text-muted">
           Demo — doctor: <span className="font-medium text-ink">dr-asha</span> · patient:{" "}
           <span className="font-medium text-ink">ravi-kumar</span> / PIN{" "}
-          <span className="font-medium text-ink">1234</span>
+          <span className="font-medium text-ink">from your seed run</span> (set{" "}
+          <code>CARELINE_DEMO_PIN</code> before seeding to fix it)
         </p>
       </section>
 
