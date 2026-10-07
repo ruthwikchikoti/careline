@@ -43,12 +43,24 @@ def test_prompts_match_artifacts_byte_for_byte():
 
 
 def test_red_flag_policy_artifact_matches_domain_constant():
+    from careline.domain.rails.emergency_phrases import (
+        PHRASE_LIBRARY,
+        SEMANTIC_THRESHOLD,
+    )
+
     policy = yaml.safe_load(load_policy("red_flags").text)
+    assert policy["version"] == "v2"
     assert tuple(policy["patterns"]) == tuple(RED_FLAG_PATTERNS), (
         "policies/red-flags YAML and domain RED_FLAG_PATTERNS have drifted — "
         "update both together and bump the policy version in the manifest"
     )
     assert policy["patterns"], "empty red-flag policy is a safety incident"
+    semantic = policy["semantic"]
+    assert semantic["threshold"] == SEMANTIC_THRESHOLD
+    assert {k: list(v) for k, v in PHRASE_LIBRARY.items()} == semantic["phrases"], (
+        "policies/red-flags YAML and domain PHRASE_LIBRARY have drifted — "
+        "update both together and bump the policy version in the manifest"
+    )
 
 
 def test_policy_artifact_hash_matches_manifest():

@@ -26,7 +26,11 @@ Owner: Priyanshu (scope ``safety``).
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
+
+from careline.domain.rails.emergency_phrases import PHRASE_LIBRARY, SEMANTIC_THRESHOLD
 
 # ---------------------------------------------------------------------------
 # Red-flag patterns (emergency keywords)
@@ -66,14 +70,94 @@ _RED_FLAG_RE = re.compile(
 )
 
 
-def check_red_flag(question: str) -> str | None:
-    """Return the matched red-flag phrase if found, else ``None``.
+# ---------------------------------------------------------------------------
+# Semantic emergency detector (policy v2)
+# ---------------------------------------------------------------------------
+# A curated danger-phrase library matched by token coverage ⊕ character-trigram
+# cosine — deterministic, keyless, and tolerant of everyday paraphrase. Runs
+# only when the v1 regexes miss, as the second, denser net.
 
-    Pure string matching — deterministic, runs pre-LLM.  A match means the
-    turn goes straight to ESCALATE without ever invoking the Reasoner.
+_STOPWORDS = frozenset(
+    """
+    i me my mine myself we our ours you your yours he him his she her it its
+    they them their a an the and or but if then than because so of in on at to
+    for with from by as is are was were be been being am do does did done have
+    has had not no nor too very just now this that these those there here what
+    when where which who whom how why can could will would shall should may
+    might must about into over under again also get got feel felt like
+    """.split()
+)
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _content_tokens(normalized: str) -> frozenset[str]:
+    return frozenset(t for t in normalized.split() if t not in _STOPWORDS)
+
+
+def _trigrams(normalized: str) -> Counter:
+    padded = f"  {normalized} "
+    return Counter(padded[i : i + 3] for i in range(len(padded) - 2))
+
+
+def _cosine(a: Counter, b: Counter) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(count * b.get(g, 0) for g, count in a.items() if g in b)
+    return dot / (
+        math.sqrt(sum(v * v for v in a.values())) * math.sqrt(sum(v * v for v in b.values()))
+    )
+
+
+# Phrase side precomputed once at import: (concept, tokens, trigram counter).
+_PHRASE_VECTORS: tuple[tuple[str, frozenset[str], Counter], ...] = tuple(
+    (concept, _content_tokens(_normalize(phrase)), _trigrams(_normalize(phrase)))
+    for concept, phrases in PHRASE_LIBRARY.items()
+    for phrase in phrases
+)
+
+
+def semantic_red_flag(question: str) -> tuple[str, float] | None:
+    """Score the question against the danger-phrase library.
+
+    Returns ``(concept, score)`` for the best-scoring phrase above
+    :data:`SEMANTIC_THRESHOLD`, else ``None``. Score = 0.6 × token coverage
+    (how much of a danger phrase the question contains) ⊕ 0.4 × character-
+    trigram cosine (robustness to small wording changes). Pure — no model,
+    no key, no network.
+    """
+    norm = _normalize(question)
+    q_tokens = _content_tokens(norm)
+    q_tri = _trigrams(norm)
+    best_concept, best_score = None, 0.0
+    for concept, p_tokens, p_tri in _PHRASE_VECTORS:
+        if not p_tokens:
+            continue
+        coverage = len(q_tokens & p_tokens) / len(p_tokens)
+        sim = 0.6 * coverage + 0.4 * _cosine(q_tri, p_tri)
+        if sim > best_score:
+            best_concept, best_score = concept, sim
+    if best_score >= SEMANTIC_THRESHOLD:
+        return best_concept, round(best_score, 4)
+    return None
+
+
+def check_red_flag(question: str) -> str | None:
+    """Return the matched red-flag signal if found, else ``None``.
+
+    Two nets, both deterministic and pre-LLM: the v1 literal regexes, then
+    the v2 semantic detector for phrasings the regexes miss. A match means
+    the turn goes straight to ESCALATE without ever invoking the Reasoner.
     """
     match = _RED_FLAG_RE.search(question)
-    return match.group(0) if match else None
+    if match:
+        return match.group(0)
+    semantic = semantic_red_flag(question)
+    if semantic is not None:
+        return f"semantic:{semantic[0]}"
+    return None
 
 
 # ---------------------------------------------------------------------------
