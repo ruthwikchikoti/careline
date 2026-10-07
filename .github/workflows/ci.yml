@@ -1,0 +1,85 @@
+name: CI
+
+# The release pipeline: every PR must keep the suite green AND pass the
+# deterministic eval gate (no secrets needed — fork PRs are gated too).
+# The gate compares against the last accepted metrics committed in
+# backend/evals/reports/after-policy-v2.json; any enforced-metric regression
+# fails the build. That failing check is the "show the CI" evidence.
+
+on:
+  pull_request:
+    paths: ["backend/**", ".github/workflows/ci.yml"]
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  tests:
+    name: Suite (keyless)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+  eval-gate:
+    name: Eval gate (deterministic slice)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pip install -e ".[dev]"
+      - name: Run the gate against the last accepted metrics
+        run: |
+          python -m careline.services.eval_gate \
+            --baseline evals/reports/after-policy-v2.json \
+            --json evals/reports/ci.json \
+            --markdown evals/reports/ci.md
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-gate-report
+          path: |
+            backend/evals/reports/ci.json
+            backend/evals/reports/ci.md
+
+  # Optional LLM slice: only on pushes to our own repo (forks have no
+  # secrets). The entrypoint exits 2 = "skipped, no key/wiring" so this job
+  # stays green until the LLM runner is wired in the observability slice.
+  llm-eval:
+    name: Eval gate (LLM slice, optional)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: |
+          set +e
+          python -m careline.services.eval_gate --mode llm
+          code=$?
+          # 0 = ran & passed, 2 = skipped (no key/wiring yet) — both fine.
+          if [ "$code" -gt 2 ]; then exit "$code"; fi

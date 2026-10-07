@@ -274,13 +274,54 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:
     """Build the CareLine FastAPI application."""
+    cfg = settings or get_settings()
     app = FastAPI(title="CareLine", lifespan=_lifespan)
+
+    # CORS: localhost for dev; the public deploy sets CARELINE_ALLOWED_ORIGINS.
+    origins = (
+        [o.strip() for o in cfg.allowed_origins.split(",") if o.strip()]
+        if cfg.allowed_origins
+        else ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_origins=origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Budget guard: per-IP rate limit + hard daily cap on spend-bearing POSTs.
+    # Off by default (tests/dev); the deploy config turns both on.
+    if cfg.rate_limit_per_minute or cfg.daily_request_cap:
+        from careline.api.rate_limit import BudgetGuardMiddleware
+
+        app.add_middleware(
+            BudgetGuardMiddleware,
+            per_minute=cfg.rate_limit_per_minute,
+            daily_cap=cfg.daily_request_cap,
+        )
+
+    @app.get("/health", tags=["meta"])
+    async def health() -> dict:
+        return {"status": "ok"}
+
+    @app.get("/api/meta", tags=["meta"])
+    async def meta() -> dict:
+        """Public-deploy banner: this is a fictional-data demo with fixed caps."""
+        return {
+            "demo": True,
+            "fictional_data": True,
+            "disclaimer": (
+                "CareLine demo: all patients, facts, and medicines are fictional. "
+                "Not a medical device; never substitute for professional care. "
+                "In a real emergency, call your local emergency number."
+            ),
+            "budget_guards": {
+                "rate_limit_per_minute": cfg.rate_limit_per_minute,
+                "daily_request_cap": cfg.daily_request_cap,
+            },
+        }
+
     register_exception_handlers(app)
     app.include_router(auth_router)
     app.include_router(patients_router)

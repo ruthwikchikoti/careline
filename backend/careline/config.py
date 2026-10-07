@@ -76,6 +76,30 @@ class Settings(BaseSettings):
         default=None,
         description="MongoDB connection URI; when unset the API uses in-memory stores.",
     )
+    allowed_origins: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated CORS origins for the public deploy "
+            "(e.g. 'https://careline.onrender.com'). Empty = localhost dev default."
+        ),
+    )
+    rate_limit_per_minute: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Per-IP POST limit per minute on spend-bearing endpoints "
+            "(demo ask / internal run-question). 0 = off (dev default; the public "
+            "deploy sets it)."
+        ),
+    )
+    daily_request_cap: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Hard process-wide cap on spend-bearing requests per UTC day — the "
+            ">$20 budget guard. 0 = off (dev default; the public deploy sets it)."
+        ),
+    )
 
     @property
     def is_production(self) -> bool:
