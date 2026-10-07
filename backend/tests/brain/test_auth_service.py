@@ -50,7 +50,14 @@ def test_decode_expired_token_raises_token_invalid():
 def test_decode_tampered_token_raises_token_invalid():
     svc = _auth()
     token = svc.issue_doctor_token("dr-A")
-    tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
+    # Flip a MIDDLE character: swapping the final base64url char can decode to
+    # identical bytes (the last char carries only 4 significant bits), which
+    # made this test flake — a "tampered" token that was byte-identical.
+    mid = len(token) // 2
+    flipped = "a" if token[mid] != "a" else "b"
+    tampered = token[:mid] + flipped + token[mid + 1 :]
+    if tampered == token:  # pragma: no cover - defensive
+        tampered = token + "x"
     with pytest.raises(TokenInvalid):
         svc.authenticate_doctor(tampered)
 

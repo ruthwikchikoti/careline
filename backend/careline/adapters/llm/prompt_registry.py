@@ -74,7 +74,13 @@ def _load(kind: str, name: str) -> Artifact:
     text = path.read_text(encoding="utf-8")
     actual = _sha12(text)
     recorded = entry.get("sha256_12")
-    if recorded and recorded != actual:
+    if not recorded:
+        # A manifest without hashes silently disables the tamper check — the
+        # module's whole contract. Fail closed.
+        raise RegistryError(
+            f"{name}: manifest entry has no sha256_12 — the tamper check is not optional"
+        )
+    if recorded != actual:
         raise RegistryError(
             f"{name}: file hash {actual} != manifest hash {recorded} — the artifact "
             "changed without a manifest update; bump the version and re-record the hash"

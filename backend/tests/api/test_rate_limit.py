@@ -50,3 +50,34 @@ def test_guards_off_by_default():
             client.post("/demo/ask", json={"question": "q"}).status_code for _ in range(10)
         }
         assert 429 not in statuses and 503 not in statuses
+
+
+def test_rejections_carry_cors_headers():
+    """A browser console must be able to READ the 429 body (middleware order)."""
+    app = create_app(
+        settings=Settings(
+            rate_limit_per_minute=1, allowed_origins="https://console.example"
+        )
+    )
+    with TestClient(app) as client:
+        client.post("/demo/ask", json={"question": "q"})  # passes the guard
+        rejected = client.post(
+            "/demo/ask",
+            json={"question": "q"},
+            headers={"Origin": "https://console.example"},
+        )
+        assert rejected.status_code == 429
+        assert (
+            rejected.headers.get("access-control-allow-origin") == "https://console.example"
+        ), "BudgetGuard rejection bypassed CORS — outer browser callers cannot read the body"
+
+
+def test_daily_cap_counts_only_accepted_requests():
+    """Rejected/invalid POSTs spend nothing and must not burn the daily cap."""
+    with TestClient(_app({"daily_request_cap": 2})) as client:
+        # Two requests the router answers 422 (missing body) — no spend.
+        for _ in range(4):
+            client.post("/demo/ask")
+        # Cap not burned: a valid request still goes through.
+        ok = client.post("/demo/ask", json={"question": "q"})
+        assert ok.status_code != 503

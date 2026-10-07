@@ -46,6 +46,30 @@ def test_record_never_raises_on_garbage():
     assert usage.records()[-1].total_tokens == 0
 
 
+def test_failed_calls_do_not_pollute_cost_or_latency():
+    usage.reset()
+    good = _OpenAIStyle(prompt_tokens=100, completion_tokens=50)
+    usage.record(agent="reasoner", model="gpt-4o-mini", usage=good, latency_ms=100.0)
+    usage.record(
+        agent="reasoner", model="gpt-4o-mini", usage=None,
+        latency_ms=60000.0, success=False,
+    )  # a 60 s timeout must not become the reported p50/p99
+    s = usage.summary()
+    assert s["calls"] == 2 and s["failed_calls"] == 1
+    assert s["latency_ms_p50"] == 100.0  # successful calls only
+    assert s["per_call_usd"] == usage.estimate_cost_usd("gpt-4o-mini", 100, 50)
+
+
+def test_per_call_usd_denominator_is_known_price_calls_only():
+    usage.reset()
+    good = _OpenAIStyle(prompt_tokens=100, completion_tokens=50)
+    unknown = _OpenAIStyle(input_tokens=999, output_tokens=999)
+    usage.record(agent="r", model="gpt-4o-mini", usage=good, latency_ms=1.0)
+    usage.record(agent="r", model="mystery-model", usage=unknown, latency_ms=1.0)
+    s = usage.summary()
+    assert s["per_call_usd"] == usage.estimate_cost_usd("gpt-4o-mini", 100, 50)
+
+
 def test_tracer_is_a_noop_without_keys(monkeypatch):
     monkeypatch.delenv("CARELINE_LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("CARELINE_LANGFUSE_SECRET_KEY", raising=False)

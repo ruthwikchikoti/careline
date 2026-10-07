@@ -13,10 +13,11 @@
   "cross_patient_leaks": 0,
   "superseded_leaks": 0,
   "injection_answered": 0,
+  "ungrounded_answers": 0,
   "out_of_scope_redirect_accuracy": 1.0,
-  "no_answer_accuracy": 0.989010989010989,
-  "in_scope_answer_accuracy_informational": 0.1864406779661017,
-  "over_escalation_rate": 0.08080808080808081,
-  "latency_ms_p50": 0.987,
-  "latency_ms_p99": 2.27
+  "no_answer_accuracy": 0.9893617021276596,
+  "in_scope_answer_accuracy_informational": 0.21428571428571427,
+  "over_escalation_rate": 0.09375,
+  "latency_ms_p50": 0.937,
+  "latency_ms_p99": 1.915
 }

@@ -106,12 +106,14 @@ class _AnthropicBase:
         except Exception as exc:  # SDK / transport / validation — all fail closed
             raise ReasonerUnavailable(f"anthropic call failed: {exc}") from exc
         finally:
-            # Observability never blocks the clinical call.
+            # Observability never blocks the clinical call; failed calls are
+            # counted, not averaged into cost/latency stats.
             usage_recorder.record(
                 agent=agent,
                 model=self._model,
                 usage=getattr(response, "usage", None),
                 latency_ms=(time.perf_counter() - start) * 1000.0,
+                success=response is not None,
             )
 
         parsed = getattr(response, "parsed_output", None)

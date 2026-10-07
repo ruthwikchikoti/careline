@@ -77,7 +77,7 @@ PATIENTS_SEED: dict[str, tuple[str, list]] = {
     "ravi-kumar": (
         "+91-90000-11111",
         [
-            Diagnosis(id="ravi-dx-1", validity=_v(OLDER), summary="Laparoscopic appendectomy — post-operative day 5.",
+            Diagnosis(id="ravi-dx-1", validity=_v(OLDER), summary="Laparoscopic appendectomy surgery — post-operative recovery.",
                       condition="Post-appendectomy recovery", code="K35", **_approved(approved_at=OLDER)),
             Medication(id="ravi-med-1", validity=_v(), summary="Paracetamol 500mg twice daily for post-op pain.",
                        name="Paracetamol", dose="500mg", frequency="twice daily", **_approved()),

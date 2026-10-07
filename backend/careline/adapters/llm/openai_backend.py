@@ -72,12 +72,13 @@ class _OpenAIBase:
             raise ReasonerUnavailable(f"openai call failed: {exc}") from exc
         finally:
             # Observability never blocks the clinical call: record whatever usage
-            # the provider returned (None on failure) and move on.
+            # the provider returned; failed calls are counted, not averaged in.
             usage_recorder.record(
                 agent=agent,
                 model=self._model,
                 usage=getattr(response, "usage", None),
                 latency_ms=(time.perf_counter() - start) * 1000.0,
+                success=response is not None,
             )
 
         parsed = getattr(response, "output_parsed", None)

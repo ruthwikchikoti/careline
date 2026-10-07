@@ -8,10 +8,10 @@ name: CI
 
 on:
   pull_request:
-    paths: ["backend/**", ".github/workflows/ci.yml"]
+    paths: ["backend/**", ".github/workflows/ci.yml", "render.yaml"]
   push:
     branches: [main]
-    paths: ["backend/**", ".github/workflows/ci.yml"]
+    paths: ["backend/**", ".github/workflows/ci.yml", "render.yaml"]
   workflow_dispatch:
 
 permissions:
@@ -49,7 +49,7 @@ jobs:
       - name: Run the gate against the last accepted metrics
         run: |
           python -m careline.services.eval_gate \
-            --baseline evals/reports/after-policy-v2.json \
+            --baseline evals/reports/after-policy-v3.json \
             --json evals/reports/ci.json \
             --markdown evals/reports/ci.md
       - name: Upload gate report
@@ -82,4 +82,5 @@ jobs:
           python -m careline.services.eval_gate --mode llm
           code=$?
           # 0 = ran & passed, 2 = skipped (no key/wiring yet) — both fine.
-          if [ "$code" -gt 2 ]; then exit "$code"; fi
+          # Anything else (1 = gate BLOCKED, >2 = crash) must redden the run.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi

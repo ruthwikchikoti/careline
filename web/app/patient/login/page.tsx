@@ -91,7 +91,7 @@ export default function PatientLoginPage() {
           </form>
 
           <p className="mt-4 flex items-center gap-1.5 text-xs text-muted">
-            <Phone className="h-3.5 w-3.5" /> Demo: patient ID <span className="font-medium text-ink">ravi-kumar</span>, PIN <span className="font-medium text-ink">1234</span>
+            <Phone className="h-3.5 w-3.5" /> Demo: patient ID <span className="font-medium text-ink">ravi-kumar</span>, PIN <span className="font-medium text-ink">from your seed run</span>
           </p>
         </div>
 
