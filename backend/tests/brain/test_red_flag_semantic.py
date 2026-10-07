@@ -1,11 +1,17 @@
-"""Semantic emergency detector — the policy-v2 red battery.
+"""Semantic emergency detector — the policy-v2 regression battery.
 
 The v1 literal regexes miss most everyday emergency phrasings (see
 ``evals/reports/baseline-v0-blocked.md``: 58 of 60 missed). Policy v2 adds a
 deterministic *semantic* layer to the rail: a curated danger-phrase library
 scored by token + character-trigram similarity, worded from NHS 111 / WHO
-danger-sign guidance rather than from our own regex vocabulary. This battery
-is intentionally red until that detector lands.
+danger-sign guidance rather than from our own regex vocabulary.
+
+**What this battery is, stated plainly:** 59 of the 60 emergency cases below
+are the eval set's emergency questions *verbatim* — they are regression pins
+for that set, not an independent sample. The independent generalisation
+battery is ``test_red_flag_novel.py`` (probes written by an adversarial
+reviewer after v2 shipped). Quoting this file's pass rate as generalisation
+would be train-on-test.
 """
 
 from __future__ import annotations

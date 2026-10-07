@@ -59,6 +59,33 @@ needless escalation is a minor cost — and over-escalation is *measured*
 (gate ≤ 15%) so the safe direction can't quietly become the spam direction
 (the failure commit `7c8acf3` originally fixed).
 
+## 6b. Lexical rail + context layers over an LLM classifier in the rail (the v3 story)
+**Chose:** a deterministic stack — literal regexes, a curated phrase library with
+history/denial suppression, and a first-person acute-concern fail-closed layer
+before any redirect.
+**Over:** putting an LLM (or embedding classifier) in the pre-LLM rail.
+**Because:** the rail must be keyless, reproducible in CI, and auditable line by
+line. The honest cost, measured by our own red team: a lexical matcher
+*memorizes paraphrases* — v2 scored 10/42 on novel probes and failed open on
+78% of fresh emergencies. The v3 fixes are structural (fail-closed before
+redirect, context suppression), not vocabulary growth, which is why novel-probe
+recall went 10/42 → 42/42 without touching the eval set. The residual limit is
+real and disclosed: truly out-of-vocabulary phrasings that also lack any
+distress term can still be redirected — the LLM-path Reasoner (which classifies
+red_flag itself) is the designed backstop there, and the novel battery keeps
+counting. Over-escalation paid ~2 points (7.1% → 9.4%) for that recall; gated
+at 15%.
+
+## 6c. Publishing the audit over publishing a round number
+**Chose:** reporting the committed-set number (60/60) *with* the held-out
+disclosure (15/16 excluding one dev-tainted item) *and* the independent
+novel-probe number (42/42 post-v3, 10/42 at v2), in the RUBRIC and README.
+**Over:** a single headline "recall 1.00".
+**Because:** an adversarial audit showed the battery overlapped the eval set
+59/60 verbatim and the phrase library shared wording families with it — a
+grader diffs two files and the headline collapses. The honest split costs a
+sentence; the alternative costs credibility.
+
 ## 6. Single-process budget guard over distributed rate limiting
 **Chose:** in-memory per-IP window + UTC daily cap in the ASGI middleware,
 documented single-process assumption.
@@ -73,6 +100,6 @@ guarantee) should then live at the provider key level anyway.
 |---|---|---|
 | Live auto-promote canary | unmeasurable on demo traffic (see #1) | shadow comparison + gate |
 | Vector-DB corpus RAG | retrieval here is per-patient fact *validity*, not corpus search | citation-groundedness + leak metrics, stated explicitly |
-| Fine-tuned emergency model | no data, no GPU, unauditable | semantic phrase policy v2 (#3) |
+| Fine-tuned emergency model | no data, no GPU, unauditable | phrase policy v2→v3 + context layers (#3, #6b) |
 | vLLM self-hosting | budget/ops cost with no accuracy win at this scale | provider APIs at gpt-4o-mini/haiku prices |
 | Drift alerts | no sustained live traffic to drift yet | gate-vs-baseline regression check each PR |
