@@ -1,13 +1,87 @@
-# CareLine — Orchestration Architecture (RU-6)
+# CareLine architecture
 
-How a single patient question flows through the multi-agent spine, and why the
-multi-node graph can never disagree with the verified decision core.
+How one patient question travels from the browser to a verdict, how each hop
+talks to the next, and how a change to a prompt or safety policy reaches
+production. The requirement ids (F*, N*) refer to the Requirements table in the
+[README](../README.md#requirements).
 
-## The compiled LangGraph
+## 1. End-to-end data flow (one question)
 
-The live call path is a compiled LangGraph `StateGraph` over one typed `GraphState`.
-Solid edges are unconditional; dotted edges are the conditional routes (the required
-branching point is the route on the verdict out of `gate`).
+```
+ Browser (Next.js web, patient portal / doctor console)
+   │  ① HTTPS · REST · JSON body · Authorization: Bearer <JWT, role=patient|doctor>     [sync]
+   ▼
+ FastAPI (uvicorn, one process)
+   │  middleware (outer → inner): ForwardedProto (scheme only, when proxy hops > 0) → CORS
+   │                              → BudgetGuard (per-IP / login / daily caps, when configured)
+   │  router: POST /patient/ask  ·  POST /internal/run-question (X-Internal-Key)  ·  POST /demo/ask (non-prod)
+   │  ② Patient aggregate loaded: PatientRepository.get(doctor_id, patient_id)
+   │     Mongo via motor (async) or in-memory  ·  Pydantic domain objects                [async, awaited]
+   │  ③ run_in_threadpool(QuestionService.run_question)  ·  in-process Python call       [sync on a worker thread]
+   ▼
+ QuestionService  (session, audit, telephony, monitoring around the graph)
+   │  ④ CompiledBrainGraph.run_question  ·  in-process  ·  typed GraphState               [sync]
+   ▼
+ ┌─ LangGraph StateGraph ─────────────────────────────────────────────────────────────┐
+ │ triage    run_triage(): pre-LLM deterministic rails on the raw question            │
+ │           hit → Decision(ESCALATE)  ·  small talk / hypothetical-only → CLARIFY    │
+ │ retrieve  Patient.valid_slice(now): Layer-1 approved + currently valid facts only  │
+ │           retrieve_relevant(): lexical ranker over that slice → grounding subset   │
+ │ reason    Reasoner.propose(question, grounding) → ClassifierProposal (Pydantic)    │
+ │ verify    Verifier.verify(question, proposal, FULL valid slice) → VerificationResult│
+ │           ⑤ live: OpenAI Responses API, responses.parse + text_format (strict       │
+ │             Pydantic schema), HTTPS/JSON, sync SDK call · keyless twins offline    │
+ │           any SDK error / refusal → ReasonerUnavailable → ESCALATE                 │
+ │ gate      run_gate_chain(): 5 gates + final danger-concept invariant → Decision    │
+ └─ answer | clarify | escalate (terminal nodes record the route) ────────────────────┘
+   │  ⑥ Decision (Pydantic: verdict, answer_text, citations, confidence, risk, trace)
+   ▼
+ QuestionService, after the decision
+   │  ⑦ ESCALATE → TelephonyPort.escalate(EscalationPayload)  ·  in-memory stub          [sync]
+   │  ⑧ AuditService.log_turn → in-memory read model under a lock, then write-through
+   │     to Mongo via pymongo replace_one; best effort (a storage error never fails
+   │     the turn)                                                                        [sync, same thread]
+   │  ⑨ online_monitor.record(...) → bounded ring buffers; sampled ANSWER turns go on a
+   │     bounded queue to a judge thread (LLM-as-judge or keyless twin)                  [async, background thread]
+   │  ⑩ Langfuse record_turn (when keys + obs extra) → SDK batches and flushes on its
+   │     own thread  ·  HTTPS/JSON  ·  patient id salted-hashed                          [async, background thread]
+   │  usage_recorder: per-call tokens / latency / $ (+ JSONL if CARELINE_USAGE_LOG)     [sync, in-process]
+   ▼
+ FastAPI → PatientAnswerOut JSON {verdict, answer_text, escalation_reason, citations}    [sync response]
+```
+
+| Hop | From → to | Sync / async | Protocol | Data format |
+|---|---|---|---|---|
+| ① | Browser → FastAPI | sync request/response | HTTPS, REST | JSON; JWT bearer (HS256, `role` claim) |
+| ② | Router → PatientRepository | async (awaited) | motor → MongoDB wire protocol, or in-memory | BSON → Pydantic `Patient` |
+| ③ | Router → QuestionService | sync on the threadpool | in-process call | Python objects |
+| ④ | QuestionService → graph | sync | in-process | `GraphState` (TypedDict) |
+| ⑤ | reason / verify → OpenAI | sync | HTTPS, OpenAI Responses API | JSON, structured output parsed into Pydantic DTOs |
+| ⑥ | gate → QuestionService | sync | in-process | `Decision` (Pydantic, frozen) |
+| ⑦ | QuestionService → telephony | sync | in-process port (stub) | `EscalationPayload` (Pydantic) |
+| ⑧ | AuditService → Mongo | sync, best effort | pymongo | BSON documents keyed by `(doctor_id, patient_id)` |
+| ⑨ | QuestionService → monitor → judge | enqueue sync; judge async on a thread | in-process; judge → OpenAI HTTPS | aggregate features only (no question text kept) |
+| ⑩ | tracer → Langfuse | async (SDK background flush) | HTTPS | JSON events |
+
+Design notes:
+
+- **Why sync plus a threadpool.** The domain spine is pure synchronous Python, and
+  the LLM SDK calls block. Every question route therefore hands the pipeline to
+  Starlette's threadpool, so one slow model call never stalls the event loop or
+  `/health`. That is enough for N5 at one process. An async LLM client would
+  matter only past the threadpool size (40 threads by default).
+- **One process.** The rate limiter, login lockout, online monitor and usage
+  buffer are in memory and per process. Running more than one replica needs a
+  shared store, which is noted as a scaling limit.
+- **Extraction is a separate path.** The extraction pipeline runs consultation
+  transcript → `POST /consultations/{id}/extract` (LLM extractor or regex twin) →
+  doctor approval → `apply_facts` on Layer 1 plus `MemoryProvider.index`. It
+  writes the facts that the question path later reads. It is not a graph node.
+
+## 2. The compiled graph
+
+This matches `build_default_graph().mermaid()` at this commit. The edge labels
+were added by hand to show the reason for each conditional route.
 
 ```mermaid
 graph TD;
@@ -22,16 +96,17 @@ graph TD;
     escalate(escalate)
     __end__([end]):::last
     __start__ --> triage;
-    triage -.->|red-flag / cross-condition| escalate;
+    triage -.->|red flag / acute / symptom report / multi-condition| escalate;
+    triage -.->|small talk / hypothetical-only danger| clarify;
     triage -.-> retrieve;
     retrieve --> reason;
     reason -.->|reasoner unavailable| escalate;
     reason -.-> verify;
     verify -.->|verifier unavailable| escalate;
     verify -.-> gate;
-    gate -.->|verdict == answer| answer;
-    gate -.->|verdict == clarify| clarify;
-    gate -.->|verdict == escalate| escalate;
+    gate -.->|verdict = answer| answer;
+    gate -.->|verdict = clarify| clarify;
+    gate -.->|verdict = escalate| escalate;
     answer --> __end__;
     clarify --> __end__;
     escalate --> __end__;
@@ -39,42 +114,122 @@ graph TD;
     classDef last fill:#bfb6fc
 ```
 
-(The diagram is generated from the compiled graph itself — see
-`CompiledBrainGraph.mermaid()`.)
+| Node | What it does | Code |
+|---|---|---|
+| `triage` | Pre-LLM rails on every question, in this order: red-flag rail (literal + structural + lexical paraphrase, Hinglish, typo normalisation) → acute-concern net → structural symptom-report layer → multi-condition tripwire → hypothetical-only danger (CLARIFY with the 112 line) → small talk | `domain/brain/triage.py::run_triage`, `domain/rails/*` |
+| `retrieve` | Layer-1 valid slice at `now`, then a lexical relevance ranker that narrows the reasoner's grounding. The gate and verifier still see the full slice | `Patient.valid_slice`, `domain/retrieval/ranker.py` |
+| `reason` | Proposes a scope, an answer and citations; fails closed | `Reasoner` port (`adapters/llm/openai_backend.py`, `anthropic_backend.py`, `heuristic.py`) |
+| `verify` | Independent veto against the full valid slice. Runs only when the proposal is answerable | `Verifier` port |
+| `gate` | Five gates (scope, which re-checks every emergency net for every scope; risk; cross-condition; confidence/staleness; independent verification). Gates only downgrade. A final invariant re-scans the question with all context guards off, so no question containing a danger concept ends in ANSWER | `domain/gates/chain.py::run_gate_chain` |
+| `answer` / `clarify` / `escalate` | Record the route and terminate. The escalation handoff itself runs in `QuestionService`, not in the node | `adapters/orchestration/graph.py` |
 
-## The agent nodes
+**"Seven roles", stated precisely.** The graph has **5 agent nodes** (triage,
+retrieve, reason, verify, gate) and **3 terminal nodes**. The escalation handoff
+is a service step (`QuestionService._deliver_escalation` → `TelephonyPort`).
+Extraction is a service (`ExtractionService`), not a graph node. Counting those
+two gives the seven roles named elsewhere. Only reason, verify, extraction and
+the online judge call an LLM, and each has a keyless twin.
 
-| Node | Agent | What it does | Delegates to |
+## 3. Brain and graph: one safety authority
+
+There are two engines. One is the headless `Brain.run_question`
+(`domain/brain/brain.py`), which the eval gate scores. The other is the compiled
+graph, which production serves through `QuestionService(graph=...)`. The graph
+does **not** call the Brain. It calls the same domain primitives in the same
+order. Two of those are literally shared functions: `run_triage` and
+`run_gate_chain`. The others (`valid_slice`, `retrieve_relevant`, the
+Reasoner/Verifier ports) are called identically.
+
+Because the gate scores the Brain and users are served by the graph, parity is
+what makes the gate's numbers apply to production:
+
+- `tests/brain/test_parity.py` and `test_parity_question_service.py` cover every
+  route and early exit, including narrowing. Brain ≡ graph ≡ service.
+- The adversarial-review and blind-battery tests (`test_review_round2.py`,
+  `test_blind1_battery.py`) assert Brain/graph parity on every probe.
+- A one-off check over all 339 eval items, run while writing this doc (it is not
+  a committed test), found 0 differences in verdict, citations or answer text.
+
+One known gap is configuration rather than code. The gate runs with a clarify
+budget of 2, while the web routes (`/patient/ask`, `/demo/ask`) use 0: a one-shot
+web turn goes to the doctor instead of asking the patient to rephrase. At budget
+0, 3 of 59 out-of-scope items escalate instead of redirecting (redirect accuracy
+0.949, still ≥ 0.90). The deviation is in the safe direction, and we disclose it
+instead of hiding it.
+
+## 4. Two-layer data, stated honestly
+
+- **Layer 1 (source of truth)** is MongoDB through motor, or in memory. Every fact
+  has a half-open validity window (`effective_from <= now < superseded_at`) and a
+  doctor-approval stamp. Every repository read is keyword-scoped by
+  `(doctor_id, patient_id)`, and there is no cross-patient read path (F4).
+  Superseded facts are structurally absent from `valid_slice` (F5).
+- **Layer 2 (`MemoryProvider`)** is written on approval (`index`) and erased on
+  DPDP deletion (`forget`). **It is not read on the decision path.** The
+  `retrieve` node ranks the Layer-1 valid slice directly. The idea that "memory
+  proposes, source of truth disposes" describes the designed seam. Today the
+  disposal side is the whole path. We kept it that way because per-patient
+  records are small and the decision path is synchronous; a vector lookup would
+  add latency and a second source of truth without improving groundedness.
+
+## 5. Release pipeline
+
+```
+ developer branch
+   │  test-first commit (failing probes)  →  rail change + policies/red-flags.vN.yaml
+   │  + manifest.yaml re-hash + changelog  →  gate report after-policy-vN.{json,md}
+   ▼
+ Pull request ──► GitHub Actions (ci.yml)
+                    ├─ Suite (keyless)               pytest, no secrets
+                    ├─ Eval gate (deterministic)     339 items; 8 absolute gates; per-case regression
+                    │                                vs after-policy-v5.json on shared ids; split
+                    │                                floors; fails → red check
+                    └─ LLM slice (optional)          push / dispatch only; gpt-4o-mini + judge;
+                                                     exit 2 = SKIPPED (no key), never a silent green
+   ▼
+ merge to main ──► Render blueprint (autoDeploy: true) builds backend/Dockerfile → /health check → live
+   ▼
+ rollback: Render "Rollback" to the previous deploy (immediate)  ·  git revert <release commit> → CI → redeploy
+```
+
+Gaps we disclose:
+
+- Branch protection on `main` is not enabled, so a red check does not physically
+  stop a merge yet.
+- Render's `autoDeploy: true` deploys on push without waiting for CI. The fix is
+  `autoDeployTrigger: checksPass` plus required checks.
+- No release tags exist yet. The README lists the exact commands.
+- The YAML policy files mirror the code constants (a test enforces this), but
+  they are not loaded at runtime. Rolling back means reverting the release
+  commit, not editing the manifest pin.
+
+## 6. Components and why
+
+| Component | Choice | Requirement it serves | Why this and not the alternative |
 |---|---|---|---|
-| `triage` | Triage | red-flag rail + multi-condition tripwire, **pre-LLM** | `domain/rails/red_flag.py` |
-| `retrieve` | Retrieval (RAG) | currently-valid slice for this patient + `now` | `Patient.valid_slice` |
-| `reason` | Reasoner | propose a grounded candidate (fail-closed) | `Reasoner` port |
-| `verify` | Verifier | independently veto an unsupported candidate (lazy) | `Verifier` port |
-| `gate` | Gatekeeper | 5-gate chain → final verdict | `domain/gates/chain.py` |
-| `answer` / `clarify` / `escalate` | — | record the route and terminate | — |
+| Pre-LLM rails | Deterministic regex, structural and lexical-paraphrase rules | F2, F3, N3, N6 | An emergency is caught before any model call, so it costs $0 and adds no model latency, and CI can measure it without a key. The ceiling (blind recall 84%) is disclosed |
+| Gate chain | 5 ordered gates that only downgrade, plus a final danger invariant | F3, F6, N8 | The model proposes and never routes. Every route is reviewable code that the gate can test |
+| Orchestration | LangGraph `StateGraph` | observability | Explicit agent nodes and per-node traces. Parity tests keep it equal to the Brain |
+| Reasoner + separate Verifier | Two structured LLM calls | F6 (no ungrounded answers) | An independent veto against the full slice catches answers the reasoner over-reached on. It costs about +50% $ per answered request (estimate $0.000101 per verifier call) |
+| Model | gpt-4o-mini (claude-haiku-4-5 as the alternative) | N6, N7 | Budget-first. Answers are short and grounded, and the gate never trusts the model's routing |
+| Structured outputs | Responses API `responses.parse` with Pydantic `text_format` | F1 | Every handoff is a validated object, never free text. Any parse failure fails closed |
+| Layer-1 store | MongoDB (motor) with temporal validity and approval stamps | F4, F5 | Validity is a property of the data, not of retrieval scoring |
+| API | FastAPI with the sync pipeline on the threadpool | N5 | Typed DTOs, and a slow LLM call never blocks the event loop |
+| Auth | Per-doctor pbkdf2 hashes; patient `{doctor_id, patient_id, pin}`; JWT `role` claim; login lockout | F4 | Fixes the review findings: password-less doctor tokens, cross-tenant portal login, PIN brute force |
+| Budget guard | Per-IP minute windows (spend and login separate), daily cap, rightmost-XFF client IP | N7 | Spend is capped by configuration, and a spoofed XFF cannot dodge the limit |
+| Eval gate | Keyless deterministic slice in CI | F2–F8, N1 | No secrets, so fork PRs are gated. Reproducible, and the 339 items run in seconds |
+| LLM slice | Live model + LLM-as-judge with an sqlite response cache | N2 | Measures what the keyless twin cannot (answer accuracy, faithfulness). Not run live yet |
+| Online monitor | In-process ring buffers and a sampled judge thread | N1, N4, N6 | Five monitoring categories with no extra infrastructure on a free tier. Per-process only |
+| Tracing | Langfuse (optional `obs` extra) | N4, N6 | Per-turn cost and latency traces. No project is configured yet |
+| Deploy | Render Docker blueprint, free tier | live URL | One file and fictional data. Not deployed yet |
 
-## The safety invariant: Brain is the authority, the graph delegates
+## 7. Failure behaviour (fail closed)
 
-There are two ways to run a question:
-
-- **Headless** — `Brain.run_question(...)` (`domain/brain/brain.py`).
-- **Multi-agent** — the compiled graph (`adapters/orchestration/graph.py`).
-
-Both run the **same** domain primitives in the same order: `check_red_flag` /
-`check_multi_condition`, `Patient.valid_slice`, the injected `Reasoner` / `Verifier`
-ports, and `run_gate_chain`. The graph adds explicit agent nodes and observability but
-re-implements **no** safety logic.
-
-This is enforced, not asserted: `tests/brain/test_parity.py` runs every route and
-early-exit through **both** engines and requires the identical verdict (and answer
-text / scope / citations). So adding the multi-agent presentation can never change a
-safety decision — the property the whole design depends on.
-
-## Composition
-
-`build_default_graph()` assembles the graph from the adapter factory: keyless heuristic
-twins by default (offline, no API key), or Anthropic / OpenAI via
-`CARELINE_LLM_BACKEND`. That single call is the entry point the API wires into
-`app.state`.
-
-— Ruthwik (Orchestration Lead) · tasks RU-1…RU-6
+| Failure | Behaviour |
+|---|---|
+| Reasoner or verifier unavailable (no SDK, API error, refusal, parse failure) | `ReasonerUnavailable` → ESCALATE, counted as fail-closed in `/monitoring` |
+| Unexpected exception in the pipeline | the error is counted in the monitor and traced, the exception propagates (HTTP 500 with no traceback in the body), and the patient is not answered |
+| Mongo audit write fails | the turn still returns (audit is best effort); the in-memory read model keeps the record |
+| Judge queue full or judge error | the sample is dropped and counted, never scored as faithful |
+| Dev-default secrets in production or public-demo mode | the app refuses to start |
+| Manifest hash mismatch | the registry fails closed and the gate does not run |

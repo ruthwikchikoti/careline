@@ -1,140 +1,173 @@
-# INTERFACE-CONTRACTS.md — Frozen Cross-Member Interfaces
+# Interface contracts
 
-> **Owner:** Naresh (scope `api`). Sign-off from interface owners before changing
-> any field listed here. The drift-guard tests in
-> `tests/brain/test_dpdp_service.py::TestInterfaceDriftGuard` enforce these shapes.
+These are the shapes other parts of the system depend on. Before you change a
+field listed here, tell the owner of that interface. Tests pin some of these
+shapes, but not all:
 
-Uncertainty always resolves toward **ESCALATE**. Never answer from a superseded
-fact. One patient per call — zero cross-patient reachability.
+- `tests/brain/test_dpdp_service.py::TestInterfaceDriftGuard` checks `QuestionIn`,
+  `AnswerOut` and `ErasureOut`.
+- The router tests under `tests/api/` check the HTTP bodies and status codes.
+- Nothing pins the other domain shapes (`Decision`, `MemoryHit`,
+  `EscalationPayload`) except their own unit tests.
+
+Every contract serves one rule: uncertainty always resolves toward **ESCALATE**.
+Never answer from a superseded fact. One patient per call, with zero
+cross-patient reachability.
 
 ---
 
-## 1. Layer-1 source of truth (Naga)
+## 1. Layer-1 source of truth
 
-### `ValidSlice` — `domain/model/patient.py`
+### `ValidSlice` (`domain/model/patient.py`)
 
 | Field | Type | Notes |
 |---|---|---|
-| `as_of` | `datetime` | Instant the slice was computed |
-| `facts` | `tuple[Fact, ...]` | Approved, currently-valid facts only |
+| `as_of` | `datetime` | the instant the slice was computed |
+| `facts` | `tuple[Fact, ...]` | approved facts that are valid now (`effective_from <= as_of < superseded_at`) |
 
-### `PatientRepository` — `domain/ports/repositories.py`
+### `PatientRepository` (`domain/ports/repositories.py`)
 
-Every method requires keyword-only `doctor_id`. Cross-tenant reads return `None`.
+Every method is keyword-only and tenant-scoped by `doctor_id`. A wrong-tenant
+read returns `None` or empty; it never raises a different error that would leak
+whether the record exists.
 
 | Method | Returns | Purpose |
 |---|---|---|
-| `get` | `Patient \| None` | Full aggregate |
-| `exists` | `bool` | Tenant-scoped existence |
-| `valid_slice` | `ValidSlice` | Grounding context for reasoning |
-| `history` | `tuple[Fact, ...]` | Retired facts for audit |
-| `add_facts` | `None` | Append without supersession |
-| `apply_facts` | `tuple[Fact, ...]` | §B.6 supersession write path |
-| `soft_delete` | `int` | DPDP erasure — null clinical text, keep skeleton |
-| `find_by_caller` | `PatientIdentity \| None` | Caller-id lookup |
-| `upsert_identity` | `None` | Register caller-id / pin_hmac |
+| `get(doctor_id, patient_id)` | `Patient \| None` | the full aggregate |
+| `exists(doctor_id, patient_id)` | `bool` | tenant-scoped existence check |
+| `valid_slice(doctor_id, patient_id, now)` | `ValidSlice` | grounding context for reasoning |
+| `history(doctor_id, patient_id, now)` | `tuple[Fact, ...]` | facts retired as of `now`, for audit and the record view |
+| `add_facts` | `None` | append without supersession |
+| `apply_facts` | `tuple[Fact, ...]` | the supersession write path (approval) |
+| `soft_delete(doctor_id, patient_id)` | `int` | DPDP erasure: null the clinical text, keep the skeleton |
+| `list_for_doctor(doctor_id)` | `list[(patient_id, approved_fact_count)]` | doctor console patient list |
+| `find_identity(doctor_id, patient_id)` | `PatientIdentity \| None` | portal login lookup. **Scoped by doctor**: `patient_id` is unique only within a doctor (MongoDB has a unique index on `(doctor_id, patient_id)`) |
+| `find_by_caller(...)` | `PatientIdentity \| None` | caller-id lookup for the voice path (doctor-scoped) |
+| `upsert_identity(identity)` | `None` | register a caller id and `pin_hmac` |
+
+The unscoped `find_by_patient_id` was removed. It let two doctors' patients with
+the same id reach each other through the portal.
 
 ---
 
-## 2. Layer-2 memory / RAG (Naga)
+## 2. Layer-2 memory seam
 
-### `MemoryProvider` — `domain/ports/memory.py`
+### `MemoryProvider` (`domain/ports/memory.py`)
 
-Namespace is always `(doctor_id, patient_id)` — no cross-patient retrieval path.
+The namespace is always `(doctor_id, patient_id)`. There is no cross-patient
+retrieval path.
 
-| Method | Purpose |
-|---|---|
-| `index` | Rebuild retrieval namespace from approved valid slice |
-| `retrieve` | Return up to `k` relevance hits for one patient |
-| `forget` | Drop entire namespace (DPDP erasure on Layer 2) |
+| Method | Purpose | Called from |
+|---|---|---|
+| `index` | rebuild the namespace from the approved valid slice | `ApprovalService` |
+| `retrieve` | up to `k` relevance hits for one patient | **not called on the decision path today.** The `retrieve` node ranks the Layer-1 valid slice directly (see `docs/architecture.md` §4) |
+| `forget` | drop the namespace (DPDP erasure) | `DpdpService` |
 
-### `MemoryHit`
-
-| Field | Type |
-|---|---|
-| `fact_id` | `str` |
-| `text` | `str` |
-| `score` | `float` |
-| `kind` | `FactKind \| None` |
+`MemoryHit` has these fields: `fact_id: str`, `text: str`, `score: float`,
+`kind: FactKind | None`.
 
 ---
 
-## 3. Reasoning ports (Srujan)
+## 3. Reasoning ports
 
-### `Reasoner` / `Verifier` — `domain/ports/reasoning.py`
+### `Reasoner` / `Verifier` (`domain/ports/reasoning.py`)
 
 | Port | Method | Input | Output |
 |---|---|---|---|
-| `Reasoner` | `propose` | `question`, `context: ValidSlice` | `ClassifierProposal` |
-| `Verifier` | `verify` | `question`, `context`, `proposal` | `VerificationResult` |
+| `Reasoner` | `propose` | `question`, `context: ValidSlice` (the ranked grounding subset) | `ClassifierProposal` |
+| `Verifier` | `verify` | `question`, `proposal`, `context: ValidSlice` (the **full** valid slice) | `VerificationResult` |
 
-**Fail-closed:** implementations MUST raise `ReasonerUnavailable` rather than
-return a guess. The API maps this to HTTP 503.
+**Fail closed.** An implementation must raise `ReasonerUnavailable` rather than
+return a guess, and the graph turns that into ESCALATE. Live adapters use the
+OpenAI Responses API (`responses.parse` with a strict Pydantic `text_format`) or
+Anthropic `messages.parse`. A refused or unparseable response raises
+`ReasonerUnavailable`.
 
 ---
 
-## 4. Decision handoff (Ruthwik / Priyanshu)
+## 4. Decision handoff
 
-### `Decision` — `domain/model/decision.py`
+### `Decision` (`domain/model/decision.py`)
 
 | Field | Type | Notes |
 |---|---|---|
 | `verdict` | `Verdict` | `answer` / `clarify` / `escalate` |
-| `answer_text` | `str \| None` | Answer or clarify prompt |
-| `escalation_reason` | `str \| None` | Required on ESCALATE |
+| `answer_text` | `str \| None` | the answer, or the clarify/redirect prompt. Every redirect and clarify ends with the emergency line |
+| `escalation_reason` | `str \| None` | required on ESCALATE |
 | `scope` | `ScopeCategory \| None` | |
 | `confidence` | `float` | `[0, 1]` |
 | `risk` | `float` | `[0, 1]` |
-| `citations` | `list[str]` | Fact ids supporting the answer |
-| `trace` | `ReasoningTrace` | Explainable pipeline steps |
+| `citations` | `list[str]` | fact ids supporting the answer |
+| `trace` | `ReasoningTrace` | ordered `TraceStep(name, status, spec_section, detail)` |
 
-Construct only via `Decision.answer()`, `.clarify()`, `.escalate()`.
-
-### `ReasoningTrace` / `TraceStep`
-
-| TraceStep field | Type |
-|---|---|
-| `name` | `str` |
-| `status` | `TraceStatus` |
-| `spec_section` | `str \| None` |
-| `detail` | `str \| None` |
+Construct a `Decision` only through `Decision.answer()`, `.clarify()` or
+`.escalate()`.
 
 ---
 
-## 5. Internal brain endpoint (Naresh ↔ Priyanshu)
+## 5. HTTP API
 
-### `POST /internal/run-question`
+All bodies are JSON. Request bodies reject unknown fields
+(`extra="forbid"`). Every JWT carries a `role` claim. A doctor route rejects any
+token whose role is not `doctor`, and the patient portal rejects doctor tokens.
 
-**Auth:** `X-Internal-Key` header (internal principal).
+### Auth
 
-### `QuestionIn` — `api/dto/brain.py`
+| Route | Auth | Request | Response | Errors |
+|---|---|---|---|---|
+| `POST /auth/token` | none | `{doctor_id, password}` | `{access_token, token_type: "bearer"}` | `422` missing field. `401 "invalid doctor id or password"` is returned identically for a wrong password, an unknown id, the reserved demo id or an id outside the allowlist. `429` with `Retry-After` while locked out |
+| `POST /patient/login` | none | `{doctor_id, patient_id, pin}` | `{access_token, token_type, patient_id, doctor_id}` | `422`. `401` is returned identically for an unknown doctor or patient, a reserved id or a wrong PIN. `429` with `Retry-After` while locked out (even with the correct PIN) |
 
-| Field | Type |
+Passwords are checked against per-doctor pbkdf2 hashes in
+`CARELINE_DOCTOR_CREDENTIALS`. The shared `CARELINE_DOCTOR_PASSWORD` is a
+development fallback that production and public-demo mode refuse.
+
+Lockout triggers after 5 failures per account (from any IP) or 20 per client IP
+(across all accounts), and lasts 900 s. Login routes also have their own per-IP
+minute window, separate from the spend window.
+
+### Patient portal (`Bearer` patient JWT; every route is scoped by the token's `(doctor_id, patient_id)`)
+
+| Route | Request | Response |
+|---|---|---|
+| `GET /patient/me` | none | `CarePlanOut {patient_id, as_of, facts: [FactOut]}` |
+| `POST /patient/ask` | `{question}` (1–2000 chars) | `PatientAnswerOut {verdict, answer_text, escalation_reason, citations}`. Runs on the threadpool with a clarify budget of 0. Counted as a spend route by the budget guard |
+| `GET /patient/questions` | none | `[PatientQuestionOut {turn_id, asked_at, question, verdict, answer_text, escalated, doctor_reply, replied_at}]` |
+| `DELETE /patient/history` | none | `204` |
+
+### Doctor console (`Bearer` doctor JWT; `doctor_id` always comes from the token)
+
+| Route | Purpose |
 |---|---|
-| `doctor_id` | `str` |
-| `patient_id` | `str` |
-| `call_id` | `str` |
-| `question` | `str` |
+| `POST /patients` | Register `{patient_id, caller_id, pin}` (PIN 4–12 characters; the seed generates 6 digits). Registering `demo-patient` returns `400` (reserved) |
+| `GET /patients`, `GET /patients/{id}`, `GET /patients/{id}/record` | Patient list, summary, and record (`PatientRecordOut {current, history}`) |
+| `DELETE /patients/{id}/data` | DPDP erasure → `ErasureOut {patient_id, layer1_nulled, layer2_dropped, audit_redacted}`. Audit redaction is scoped to the requesting doctor |
+| `POST /consultations`, `/{id}/consent`, `/{id}/extract`, `/{id}/approve`; `GET /consultations[/{id}]` | Extraction and approval workflow (HITL) |
+| `GET /audit`, `GET /audit/events`, `GET /escalations`, `POST /escalations/{turn_id}/resolve` | Audit and the escalation loop |
+| `GET /eval` | Live re-run of the eight T1–T8 gate-chain scenarios (not the 339-item gate) |
+| `GET /monitoring` | Online monitor snapshot: `{generated_at, operational, output, quality, drift, cost, alerts}`. Aggregate only, with no question text and no patient ids |
 
-### `AnswerOut` — `api/dto/brain.py`
+### Internal and demo
 
-| Field | Type |
-|---|---|
-| `verdict` | `Verdict` |
-| `answer_text` | `str \| None` |
-| `escalation_reason` | `str \| None` |
-| `confidence` | `float` |
-| `risk` | `float` |
-| `citations` | `list[str]` |
-| `trace` | `list[TraceStepOut]` |
+| Route | Auth | Request | Response |
+|---|---|---|---|
+| `POST /internal/run-question` | `X-Internal-Key` (service principal) | `QuestionIn {doctor_id, patient_id, call_id, question}` | `AnswerOut {verdict, answer_text, escalation_reason, confidence, risk, citations, trace: [TraceStepOut]}` |
+| `POST /demo/ask` | none (an optional doctor JWT lets it use a real `patient_id`) | `{question, patient_id?}` | `{verdict, answer_text, escalation_reason, confidence, risk, citations, trace}` |
+| `GET /demo/patient` | none | the bundled fictional demo patient |
+| `GET /health`, `GET /api/meta` | none | liveness, and the fictional-data banner |
 
-Priyanshu's `QuestionService.run_question()` is the application entry behind this route.
+`/demo/*` is mounted only when `CARELINE_ENVIRONMENT` is not `production`
+(public-demo mode keeps it).
+
+`/internal/run-question` is the one route that takes `doctor_id` from the
+body. Its caller is a trusted service holding the internal key (the voice
+path), not an end user.
 
 ---
 
-## 6. Telephony escalation sink (Priyanshu)
+## 6. Telephony escalation sink
 
-### `EscalationPayload` — `adapters/telephony/stub.py`
+### `EscalationPayload` (`adapters/telephony/stub.py`)
 
 | Field | Type |
 |---|---|
@@ -145,38 +178,32 @@ Priyanshu's `QuestionService.run_question()` is the application entry behind thi
 | `escalated_at` | `datetime` |
 | `terminal_gate` | `str \| None` |
 
-### `TelephonyPort`
-
-| Method | Purpose |
-|---|---|
-| `escalate(payload)` | Initiate live transfer to the doctor |
+`TelephonyPort.escalate(payload)` starts the transfer to the doctor. It is
+called by `QuestionService` on every ESCALATE. The implementation is an
+in-memory stub; voice is not wired.
 
 ---
 
-## 7. DPDP erasure (Naresh)
+## 7. DPDP erasure
 
-### `DELETE /patients/{patient_id}/data`
-
-**Auth:** Bearer JWT (`DoctorPrincipal`). `doctor_id` from principal only.
-
-### `ErasureOut` — `api/dto/patients.py`
-
-| Field | Type |
-|---|---|
-| `patient_id` | `str` |
-| `layer1_nulled` | `int` |
-| `layer2_dropped` | `bool` |
-| `audit_redacted` | `int` |
-
-`DpdpService.erase()` orchestrates: ownership check → `soft_delete` →
-`memory.forget` → `audit.redact_patient`.
+`DpdpService.erase()` runs four steps in order: ownership check → `soft_delete`
+(Layer 1) → `memory.forget` (Layer 2) → `audit.redact_patient(doctor_id,
+patient_id)`.
 
 ---
 
-## 8. API safety invariants (all routes)
+## 8. API safety invariants
 
-- `doctor_id` is **never** trusted from request bodies — always from the
-  authenticated principal.
-- Wrong-tenant requests return generic **404** (`not found`), never 403.
-- No `pin_hmac` or clinical payloads in any response DTO.
-- Unhandled errors return **500** with no traceback leakage.
+- On every **user-authenticated** route (doctor or patient JWT), `doctor_id` and
+  `patient_id` come from the token, never from the body. The one exception is
+  `/internal/run-question` (service principal, §5).
+- A wrong-tenant request gets a generic **404** (`not found`), never a 403.
+- Login failures get one generic **401**, so a response never reveals which ids
+  exist.
+- No response DTO contains `pin_hmac` or raw secrets.
+- An unhandled error returns **500** with no traceback in the body.
+  `ReasonerUnavailable` maps to **503** where it escapes the graph.
+- Spend routes (`/demo/ask`, `/internal/run-question`, `/patient/ask`) count
+  toward the per-IP minute limit and the daily cap. Client IP is the rightmost
+  trusted `X-Forwarded-For` hop (`CARELINE_TRUSTED_PROXY_HOPS`), never the
+  client-supplied leftmost entry.

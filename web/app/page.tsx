@@ -70,7 +70,7 @@ export default function LandingPage() {
       <section className="mx-auto max-w-4xl px-6 pb-10 pt-12 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted">
           <PhoneCall className="h-3.5 w-3.5 text-primary" />
-          Post-consultation AI voice agent
+          Post-consultation follow-up agent
         </span>
         <h1 className="mt-5 text-balance text-4xl font-semibold leading-tight tracking-tight text-ink sm:text-5xl">
           Follow-up answers your patients can trust —{" "}
@@ -80,7 +80,7 @@ export default function LandingPage() {
           After a consultation, patients call back with questions. CareLine answers only from
           that one patient&apos;s doctor-approved, currently-valid record — and hands the call
           straight to you the instant anything is serious, out-of-scope, stale, or uncertain.
-          It is a 7-agent system with a deterministic safety spine, not a chatbot.
+          Five LangGraph agent nodes run behind a deterministic safety spine — it is not a chatbot.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
@@ -97,9 +97,11 @@ export default function LandingPage() {
           </Link>
         </div>
         <p className="mt-3 text-xs text-muted">
-          Demo — doctor: <span className="font-medium text-ink">dr-asha</span> · patient:{" "}
-          <span className="font-medium text-ink">ravi-kumar</span> / PIN{" "}
-          <span className="font-medium text-ink">from your seed run</span> (set{" "}
+          Fictional demo data — doctor: <span className="font-medium text-ink">dr-asha</span>{" "}
+          (password from your deployment&apos;s credentials) · patient: clinic{" "}
+          <span className="font-medium text-ink">dr-asha</span> /{" "}
+          <span className="font-medium text-ink">ravi-kumar</span> / 6-digit PIN{" "}
+          <span className="font-medium text-ink">printed by your seed run</span> (set{" "}
           <code>CARELINE_DEMO_PIN</code> before seeding to fix it)
         </p>
       </section>
@@ -108,7 +110,7 @@ export default function LandingPage() {
       <section className="mx-auto max-w-4xl px-6 py-6">
         <div className="rounded-2xl border border-border bg-surface p-6 shadow-soft">
           <p className="mb-4 text-center text-xs font-semibold uppercase tracking-wide text-muted">
-            The 7-agent safety spine — every call follows the same route
+            The safety spine — every question follows the same route
           </p>
           <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
             {SPINE.map((node, i) => (
@@ -181,7 +183,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t border-border py-6 text-center text-xs text-muted">
-        CareLine · multi-agent clinical follow-up · answers ground in approved facts, uncertainty escalates
+        CareLine Ops · eval-gated prompt and safety releases · answers ground in approved facts, uncertainty escalates
       </footer>
     </div>
   );

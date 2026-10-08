@@ -1,6 +1,7 @@
 """End-to-end demo runner — offline/keyless sample inputs (VI-8).
 
-Runs the demo scenarios from the PRD §7 without API keys or Mongo.
+Runs four walkthrough scenarios (diet answer, discontinued med, cross-condition,
+red flag) plus the T1–T8 gate-chain re-run, without API keys or Mongo.
 Prints verdicts, reasoning traces, audit digests, and eval re-run summary.
 
 Usage::
