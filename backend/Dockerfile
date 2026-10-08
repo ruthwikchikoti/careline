@@ -18,7 +18,13 @@ COPY policies ./policies
 COPY evals ./evals
 COPY scripts ./scripts
 
-RUN pip install --no-cache-dir -e ".[api]"
+# api = FastAPI/uvicorn/JWT; llm = the OpenAI/Anthropic SDKs, so setting an
+# LLM key on the deploy actually reaches the live reasoner instead of failing
+# closed to ESCALATE on a missing SDK (REVIEW-7). Both are import-lazy: with no
+# key set the image still boots keyless on the deterministic spine.
+# TODO(lead): switch to ".[api,llm,obs]" once the llmops package's `obs` extra
+# (langfuse) lands in pyproject.toml — it is not defined on this branch yet.
+RUN pip install --no-cache-dir -e ".[api,llm]"
 
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 careline && chown -R careline:careline /app
