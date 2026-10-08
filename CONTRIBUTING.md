@@ -9,7 +9,7 @@ ownership. It is not an authorship record.
 
 | Member | Area | Owned paths |
 |---|---|---|
-| **Bhargav** | Problem framing & requirements; eval-set review *(confirm)* | none (reviews changes to `evals/cases/`) *(confirm)* |
+| **Bhargav** | Problem framing & requirements; eval-set review | none (reviews changes to `evals/cases/`) |
 | **Chikoti Ruthwik** | orchestration (`graph`, `brain`, `repo`) | `careline/adapters/orchestration/`, `careline/domain/brain/`, `careline/domain/model/decision.py`, `careline/domain/enums.py`; repo scaffold and top-level docs |
 | **Naga** | data (`data`) | `careline/adapters/mongo/`, `careline/adapters/memory/`, `careline/domain/model/{fact,temporal,patient,consent,consultation}.py`, `careline/domain/ports/{memory,repositories}.py` |
 | **Naresh** | API and LLMOps services (`api`, `services`) | `careline/api/`, `careline/adapters/auth/`, `careline/config.py`, `careline/services/*_service.py`, `careline/services/{eval_gate,llm_eval,online_monitor}.py`, `careline/adapters/observability/`, `scripts/`, `.github/workflows/`, `render.yaml`, `Dockerfile` |

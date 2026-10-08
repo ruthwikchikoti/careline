@@ -305,6 +305,16 @@ deployment's aggregates, not a per-tenant slice. The five category sections:
 The window is the last 1000 turns (`CARELINE_MONITOR_WINDOW`), held in memory in
 one process.
 
+**Dashboard.** The web app's **Monitoring** page (`/monitoring`, doctor sign-in;
+[`web/app/monitoring/page.tsx`](web/app/monitoring/page.tsx)) is the
+observability dashboard. It polls `GET /monitoring` every 5 s and renders the
+five sections above: latency p50/p95/p99 tiles plus a latency trend, error and
+fail-closed rate, throughput; verdict-mix bar and escalation rate; judge mode
+(keyless or LLM), judged samples and faithfulness rate; drift reference status,
+PSI, OOV rate and length shift; tokens and $ per request (mean, p95) and the
+window total. It shows the `scope` note and any `alerts[]`, and has empty states
+until the first turn. Langfuse traces remain optional.
+
 ### Cost and latency capture
 
 Every live adapter call records tokens, latency, cost and the active stamps in
@@ -461,7 +471,7 @@ timeout, 5 s connect timeout, 2 retries); no explicit timeout is set yet.
 |---|---|---|
 | Live public URL | **Pending** | The Render blueprint is ready but not deployed. A deploy needs the four secrets set in the dashboard, and the web app has no deploy target in the blueprint |
 | CI-gated deploy and merge | **Pending** | `render.yaml` has `autoDeploy: true` (deploys on push to `main`); `main` has no branch protection. Team action: `autoDeployTrigger: checksPass` plus required checks |
-| Observability dashboard or traces link | **Pending** | Langfuse is wired (`obs` extra), but no project or keys exist and the image does not install `obs`. `GET /monitoring` works locally |
+| Observability dashboard or traces link | **Done (in-app)** | The web app's **Monitoring** page (`/monitoring`) shows cost and latency per request, verdict mix, online-judge quality and input drift, polled live from `GET /monitoring`. Langfuse traces are optional: wired (`obs` extra), but no project or keys exist and the image does not install `obs` |
 | Live LLM slice, measured answer accuracy, measured cost, LLM-path p50/p99, LLM-path emergency safety | **Pending** | Implemented. Needs a valid `OPENAI_API_KEY`. Every cost figure here is an estimate |
 | Screenshot of a PR blocked by the gate | **Pending** | `main` has no branch protection and no PR has run CI yet |
 | Second-labeller agreement (Cohen's κ) | **Pending** | Labels have one author per split plus an AI-assisted audit. κ has not been computed |
@@ -479,7 +489,7 @@ claims.
 
 | Member | Area |
 |---|---|
-| Bhargav | Problem framing & requirements; eval-set review *(confirm)* |
+| Bhargav | Problem framing & requirements; eval-set review |
 | Chikoti Ruthwik | Orchestration: LangGraph graph, Brain, shared triage, parity |
 | Naga | Data: Layer-1 temporal source of truth (Mongo), Layer-2 memory seam, tenant isolation |
 | Naresh | API and LLMOps services: FastAPI, auth, eval gate, LLM slice, online monitor, review queue, Langfuse tracer, scripts |

@@ -376,6 +376,98 @@ export function runEval(): Promise<EvalRun> {
   return authFetch<EvalRun>("/eval");
 }
 
+// --- Online monitoring (GET /monitoring — process-wide, aggregate, no PHI) ---
+
+export interface MonitoringOperational {
+  requests_total: number;
+  window_size: number;
+  window_capacity: number;
+  latency_ms_p50: number;
+  latency_ms_p95: number;
+  latency_ms_p99: number;
+  errors: number;
+  error_rate: number;
+  fail_closed: number;
+  fail_closed_rate: number;
+  throughput_rpm_1m: number;
+  throughput_rps_window: number | null;
+  uptime_s: number;
+}
+
+export interface MonitoringOutput {
+  verdict_counts: Record<Verdict, number>;
+  verdict_rates: Record<Verdict, number>;
+  escalation_rate: number;
+  low_risk_escalation_rate: number;
+  low_risk_escalation_note: string;
+  scope_counts: Record<string, number>;
+}
+
+export interface MonitoringQuality {
+  /** Judge stamp: the keyless deterministic twin, or the LLM judge (judge@v1). */
+  judge: string;
+  sample_rate: number;
+  sampled: number;
+  judged: number;
+  faithful: number;
+  faithfulness_rate: number | null;
+  mean_score: number | null;
+  judge_errors: number;
+  dropped: number;
+  pending: number;
+}
+
+export type DriftStatus =
+  | "ok"
+  | "drift"
+  | "insufficient_data"
+  | "reference_not_ready"
+  | "reference_unavailable";
+
+export interface MonitoringDrift {
+  status: DriftStatus;
+  drifted: boolean;
+  reasons: string[];
+  error?: string;
+  samples?: number;
+  min_samples?: number;
+  scope_psi?: number;
+  scope_mix?: Record<string, number>;
+  reference_scope_mix?: Record<string, number>;
+  oov_rate?: number;
+  reference_oov_rate?: number;
+  mean_tokens?: number;
+  reference_mean_tokens?: number;
+  psi_threshold?: number;
+}
+
+export interface MonitoringCost {
+  basis: string;
+  includes: string;
+  requests_with_llm_calls: number;
+  total_tokens: number;
+  mean_tokens_per_request: number;
+  total_cost_usd: number;
+  mean_cost_usd_per_request: number | null;
+  p95_cost_usd_per_request: number | null;
+  requests_unknown_cost: number;
+}
+
+export interface MonitoringSnapshot {
+  scope: string;
+  generated_at: string;
+  operational: MonitoringOperational;
+  output: MonitoringOutput;
+  quality: MonitoringQuality;
+  drift: MonitoringDrift;
+  cost: MonitoringCost;
+  alerts: string[];
+}
+
+export function getMonitoring(): Promise<MonitoringSnapshot> {
+  return authFetch<MonitoringSnapshot>("/monitoring");
+}
+
 // --- Patient portal (patient-scoped session, separate token) ---
 
 export interface PatientLoginOut {
