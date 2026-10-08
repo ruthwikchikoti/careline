@@ -105,14 +105,19 @@ stand-in (`score_blind --stand-in confident`) 5/50 answered. Grounding v8
 closes the final red team's 13 bypasses but is still lexical. Portal patients
 see a plain message, never the internal escalation reason; the extract route is
 spend-guarded; the keyless extractor records a dose change ("Reduce X to N mg").
-**One live flow check on gpt-4o-mini** (`scripts/live_flow_check.py`,
-`evals/reports/live-flow-gpt-4o-mini.md`): 18 questions, 29 calls, 13/13 safety
-expectations, 5/5 answerable answered, judge 6/6 faithful, $0.00024 per question
-($0.00031 per model-handled question), p50 1.6 s, p95/max 3.6 s (misses the
-3 s target). Every OpenAI client: 20 s timeout, one retry.
+**Two live flow checks on gpt-4o-mini** (`scripts/live_flow_check.py`,
+`evals/reports/live-flow-gpt-4o-mini-run1.md` and `-run2.md`), 18 questions
+each: 13/13 safety expectations in both; 5/5 and 3/5 answerable answered (run 2's
+two non-answers escalated, the safe side); judge 6/6 and 4/4 faithful;
+$0.00024 / $0.00022 per question ($0.00031 / $0.00029 per model-handled
+question); p95/max 3.6 s / 5.3 s (N4 MISS against 3 s). Every OpenAI client:
+20 s timeout, one retry. Langfuse is live: run 2 (`--langfuse`) exported 18
+traces to Langfuse Cloud (example: https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec);
+the `obs` extra pins `langfuse>=2,<4`; trace input carries the raw question text
+(fictional data) and a salted patient hash.
 
 Pending (need a person or an account): public deploy, `autoDeployTrigger:
-checksPass`, branch protection + a PR blocked by the gate, Langfuse project,
+checksPass`, branch protection + a PR blocked by the gate,
 Cohen's κ (second human labeller), judge–human agreement, the full 391-item LLM
 slice, sending the rail misses to the real model, GitHub repo description, and
 a fresh battery 4 for the next policy release.

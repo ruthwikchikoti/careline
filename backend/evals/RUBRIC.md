@@ -136,10 +136,12 @@ answer unfaithful, a judge error counts as unfaithful, and a run that judged not
 Responses are cached in sqlite (`evals/.cache/`, git-ignored), keyed by model,
 artifact stamps, patient, question and payload.
 
-The full 391-item slice has not been run. One live end-to-end flow check on
-gpt-4o-mini has (2026-10-08, `reports/live-flow-gpt-4o-mini.md`): 18 portal
-questions, 5/5 answerable questions answered, the online judge scored 6/6
-answers faithful, $0.0052 for the run. That is a smoke test, not this slice. In
+The full 391-item slice has not been run. Two live end-to-end flow checks on
+gpt-4o-mini have (2026-10-08, `reports/live-flow-gpt-4o-mini-run1.md` and
+`-run2.md`): 18 portal questions each, 5/5 and 3/5 answerable questions
+answered (run 2's two non-answers escalated), the online judge scored 6/6 and
+4/4 answers faithful, $0.0052 and $0.0049 per run. That is a smoke test, not
+this slice. In
 CI the slice runs on push only and is `continue-on-error`. Without the
 `OPENAI_API_KEY` secret it exits 2, the job script then exits 0, so the job
 shows **green**; it writes SKIPPED to the job summary and raises a warning
@@ -161,8 +163,8 @@ judge gate counts, it should agree with a human-labelled subset.
 | In-scope answer accuracy (keyless twin) | any drop vs the baseline fails | **enforced** (regression-only, no absolute floor on the twin) |
 | Regression vs `evals/reports/after-policy-v8.json` | any enforced metric worse on the **shared case ids** fails; a deleted baseline case fails; a metric missing from either run fails | **enforced** |
 | Split floors | below the floor fails | **enforced** |
-| In-scope answer accuracy (LLM) | < 0.85 fails | implemented in the LLM slice; **full slice not run** (live flow check: 5/5, n = 5) |
-| Judge faithfulness (sampled) | < 0.90 fails | implemented in the LLM slice; **full slice not run** (live flow check: 6/6, n = 6) |
+| In-scope answer accuracy (LLM) | < 0.85 fails | implemented in the LLM slice; **full slice not run** (two live flow checks: 5/5 and 3/5 answered, the rest escalated, n = 5 each) |
+| Judge faithfulness (sampled) | < 0.90 fails | implemented in the LLM slice; **full slice not run** (two live flow checks: 6/6 and 4/4) |
 
 **Why the regression check compares shared cases.** Every metrics JSON carries
 a `per_case` map, and each enforced metric is recomputed over the ids present

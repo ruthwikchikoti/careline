@@ -5,7 +5,7 @@ This document has two parts:
 1. **LLMOps pipeline failure modes.** The release-pipeline work this project centres on: the eval gate, versioned policy releases, the online monitor, and the deploy and API hardening. These are failures we found (several by running adversarial reviews on ourselves) or designed against. Each has a detection mechanism, a mitigation, the test or command that pins it, and the risk that remains.
 2. **Agent-level bugs.** Three bugs in the system under test (our team's clinical follow-up agent), found earlier while running it end to end. They are kept here because they explain why the gate measures over-escalation as well as recall.
 
-All keyless numbers can be reproduced from `backend/` at the active policy `red_flags@v8+8dd13f40326f` (v7 and v8 change no committed eval verdict on earlier cases; see `evals/reports/after-policy-v8.md`). Releases are referenced by tag (`baseline-v0`, `release/red-flags-v2` … `-v8`; `-v6` and `-v7` both point to commit `1aed531`, because the two releases landed together); other commit hashes refer to `main` before any history rewrite. Live-model numbers come from one live end-to-end flow check on gpt-4o-mini (2026-10-08, `evals/reports/live-flow-gpt-4o-mini.md`, n = 18 questions); the full 391-item LLM slice has not been run.
+All keyless numbers can be reproduced from `backend/` at the active policy `red_flags@v8+8dd13f40326f` (v7 and v8 change no committed eval verdict on earlier cases; see `evals/reports/after-policy-v8.md`). Releases are referenced by tag (`baseline-v0`, `release/red-flags-v2` … `-v8`; `-v6` and `-v7` both point to commit `1aed531`, because the two releases landed together); other commit hashes refer to `main` before any history rewrite. Live-model numbers come from two live end-to-end flow checks on gpt-4o-mini (2026-10-08, `evals/reports/live-flow-gpt-4o-mini-run1.md` and `-run2.md`, n = 18 questions each); the full 391-item LLM slice has not been run.
 
 ---
 
@@ -20,7 +20,7 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
 | 3 | Eval-set overfitting | Blind batteries scored once per version | Protocol in `evals/blind/README.md`; tuned batteries become dev data | `scripts/score_blind.py` | n = 50; 88% at v6 and v7, 90% at v8 (battery 3); each battery is single-use |
 | 4 | Gate failing open (vacuous splits) | Split-floor check | Per-split minimum counts | `test_split_below_floor_fails`, `test_split_missing_entirely_fails` | None known |
 | 5 | LLM provider outage / timeout | `ReasonerUnavailable` → ESCALATE; `fail_closed_rate` on `/monitoring` | Fail closed; alert above 5% | `tests/brain/test_brain.py`, `test_graph.py`, `test_parity*.py` | 20 s client timeout, one retry: a hung call holds a threadpool worker ≤ ~40 s, then ESCALATE |
-| 6 | Judge self-bias / small sample | Judge errors counted, never scored faithful; alert only at n_judged ≥ 10 | Judge sees only the cited, currently valid facts; versioned `judge@v1` prompt | `tests/llmops/test_judge.py`, `test_online_monitor.py` | Same model family as the Reasoner; not calibrated against humans; run live once on 6 answers (6/6 faithful) |
+| 6 | Judge self-bias / small sample | Judge errors counted, never scored faithful; alert only at n_judged ≥ 10 | Judge sees only the cited, currently valid facts; versioned `judge@v1` prompt | `tests/llmops/test_judge.py`, `test_online_monitor.py` | Same model family as the Reasoner; not calibrated against humans; run live on 6 + 4 answers (all faithful) |
 | 7 | Cost runaway | Daily-cap 429s; cost section of `/monitoring`; usage JSONL | Per-IP spend window, daily cap, separate login window; red-flag turns make no LLM call; eval cache | `tests/api/test_rate_limit.py`, `tests/api/test_rate_limit_extract.py` | Counters are per process; no provider-side cap configured |
 | 8 | Input drift | PSI / OOV / length vs the eval reference | Alert on `/monitoring` | `tests/llmops/test_online_monitor.py` | Poll-only, no paging; the reference is our own eval set |
 | 9 | Cross-tenant leak (found in review) | Sev-0 repro test | Tenant-keyed audit queries + doctor-scoped portal login | `tests/api/test_patient_portal_isolation.py` | The Mongo sev-0 suite in `tests/data` skips without `mongomock_motor` |
@@ -28,7 +28,7 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
 | 11 | PIN brute force | Lockout counters | 5 per account / 20 per IP → 15 min lockout; exactly 6 digits enforced at registration; one distinct seed PIN per patient | `tests/api/test_login_lockout.py`, `test_seed_demo_pin.py`, `test_patient_pin_policy.py` | A known account can be deliberately locked out |
 | 12 | `X-Forwarded-For` spoofing of rate limits | Limiter tests | Key on the rightmost trusted hop; `--no-proxy-headers` | `tests/api/test_rate_limit.py`, `test_forwarded_proto.py` | A CDN in front would make clients share buckets (over-limits, never a bypass) |
 | 13 | Event-loop blocking by the sync pipeline | Loop-probe tests | Question routes run on the threadpool | `tests/api/test_event_loop_offload.py` | Extraction route still calls a sync LLM inside `async` |
-| 14 | Dead observability code (Langfuse) | Fake-client tests | `obs` extra; real model, latency and per-turn cost sent | `tests/llmops/test_usage_langfuse.py`, `test_wiring.py` | No Langfuse project or keys yet |
+| 14 | Dead observability code (Langfuse) | Fake-client tests | `obs` extra; real model, latency and per-turn cost sent | `tests/llmops/test_usage_langfuse.py`, `test_wiring.py`, `test_langfuse_env_names.py` | Live on Langfuse Cloud (18 traces from live run 2); trace input carries the question text; Docker image lacks `obs` |
 | 15 | Emergency rail misses fresh wording | Blind batteries | Danger-concept + body-state invariant; every redirect carries the 112 line; symptom redirects queued for doctor review | `tests/brain/test_review_round*.py`, `test_blind1_battery.py`, `tests/api/test_review_queue.py` | 5/50 (10%) of battery 3 redirected, not escalated, at v8 (6/50 at v6 and v7); at v6 only 1 of the 6 reached the review queue (not re-measured since) |
 | 16 | Deploy not gated by CI | Review of `render.yaml` | Documented; fix specified | — | `render.yaml` still has `autoDeploy: true` (deploys on push to `main`); not deployed yet |
 | 17 | Lost audit records under concurrency | Threaded tests | Re-entrant lock around every audit mutation | `tests/api/test_audit_concurrency.py` | A turn logged while the same history is cleared can reappear after restart |
@@ -52,7 +52,7 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
   - Artifacts are hash-stamped in `prompts/manifest.yaml`; a mismatch fails at import.
   - `tests/llm/test_prompt_registry.py` fails if the policy YAML and the domain constants diverge.
 - **Residual risk.**
-  - The keyless twins never execute prompt text, so a *prompt* edit passes the keyless slice. The LLM slice (`--mode llm`) would catch it, but **the full slice has not been run**. The one live flow check did catch a prompt bug (extractor v1 recorded "instead of 1000mg" as a second current fact; fixed in extractor v2), which is exactly the class the keyless slice misses.
+  - The keyless twins never execute prompt text, so a *prompt* edit passes the keyless slice. The LLM slice (`--mode llm`) would catch it, but **the full slice has not been run**. The first live flow check did catch a prompt bug (extractor v1 recorded "instead of 1000mg" as a second current fact; fixed in extractor v2), which is exactly the class the keyless slice misses.
   - `main` has no branch protection, so the check fails but does not block a direct push. **No PR has ever run CI.**
 
 ### 2. Baseline gaming
@@ -98,7 +98,7 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
 
 - **Detection.** The Reasoner and Verifier adapters raise `ReasonerUnavailable` on provider errors. The online monitor counts each such turn as `fail_closed`, and `GET /monitoring` alerts when `fail_closed_rate > 5%` or `error_rate > 1%`.
 - **Mitigation.** Fail closed: the turn escalates to the doctor, never a guess. Red-flag escalations need no LLM, so emergencies are unaffected by an outage.
-- **How it is measured.** As an error and fail-closed rate on `/monitoring`. We have **not** run an outage drill against the live provider. The one live run had 0 failed calls in 29.
+- **How it is measured.** As an error and fail-closed rate on `/monitoring`. We have **not** run an outage drill against the live provider. The two live runs had 0 failed calls (29 and 26).
 - **Fixed after the live flow check.** Every OpenAI client (`openai_backend.py`, `judge.py`, `extraction_backend.py`, `llm_eval.py`) is built by `openai_client_kwargs`: 20 s timeout (`CARELINE_LLM_TIMEOUT_S`, capped at 30 s) and one retry, replacing the SDK default (600 s, 2 retries, up to ~30 min worst case). A hung provider now fails closed to ESCALATE after ~40 s at worst. Pinned by `tests/llm/test_client_timeouts.py`.
 
 ### 6. Judge self-bias and small samples
@@ -113,7 +113,7 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
   - The judge is gpt-4o-mini, the same family as the Reasoner, so it may prefer its own phrasing.
   - It has not been calibrated against human labels.
   - 20% of a small demo's answers is a handful of turns.
-  - The live judge has run once: 6 answers in the live flow check, 6/6 faithful. n = 6 says nothing about its error rate.
+  - The live judge has run twice: 6/6 and 4/4 answers faithful in the two live flow checks. n = 10 says nothing about its error rate.
   - Plan: label a ~30-item subset by hand, measure judge–human agreement, and gate on judge faithfulness only once agreement is ≥ 0.8. Until then, gate on the deterministic metrics.
 
 ### 7. Cost runaway
@@ -188,7 +188,8 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
 - **What happened.** The Langfuse tracer was effectively dead: the SDK was not a dependency, and the call site sent `latency_ms=0.0` and a hardcoded model name.
 - **Mitigation.** An `obs` extra in `pyproject.toml`. The tracer now sends the resolved model, real latency and per-turn cost delta, and never raises into a clinical call.
 - **Pinned by.** `tests/llmops/test_usage_langfuse.py::test_v2_sends_real_model_latency_and_per_turn_cost`, `test_tracer_never_raises_on_broken_client`, `tests/llmops/test_wiring.py::test_langfuse_turn_gets_real_latency_usage_and_start`.
-- **Residual risk.** There is no Langfuse project or keys yet, so **there is no trace link to show**. The Docker image installs `.[api,llm]`, not `obs`.
+- **Now live.** Live run 2 exported 18 traces to Langfuse Cloud (ingestion confirmed by HTTP 200 from `/api/public/otel/v1/traces`); canonical public trace: https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec. Two fixes were needed on the way: the `obs` extra pins `langfuse>=2,<4` (SDK v4 dropped `start_generation`), and the tracer accepts Langfuse's standard `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL` names.
+- **Residual risk.** The trace input carries the raw question text (fictional data only; the patient id is salted-hashed), so traces are not PHI-free as configured. The Docker image installs `.[api,llm]`, not `obs`.
 
 ### 15. Emergency rail misses fresh wording
 

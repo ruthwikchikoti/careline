@@ -10,7 +10,7 @@ Every entry has the same five parts:
 
 **Constraints behind all of them.** About $20 of LLM spend in total. A free-tier deploy (Render free web service: 512 MB RAM, no GPU, one container). No real patient data: five fictional patients and one doctor. A fixed timeline. And the safety rule that outranks everything else: *uncertainty resolves to ESCALATE, never answer from a superseded fact, zero cross-patient reachability.*
 
-**Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` at the active policy `red_flags@v8+8dd13f40326f` (391 items, re-run 2026-10-08; `evals/reports/after-policy-v8.md`). Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Model-comparison costs are pre-run **estimates** from `python -m scripts.cost_report` (tokens counted as chars/4, priced from the versioned table in `careline/adapters/llm/usage.py`). Measured gpt-4o-mini numbers come from one live end-to-end flow check on 2026-10-08 (`evals/reports/live-flow-gpt-4o-mini.md`: 18 portal questions, 29 calls, $0.00024 per question, $0.00031 per model-handled question, p50 1.6 s, p95/max 3.6 s). The full 391-item LLM slice has not been run.
+**Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` at the active policy `red_flags@v8+8dd13f40326f` (391 items, re-run 2026-10-08; `evals/reports/after-policy-v8.md`). Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Model-comparison costs are pre-run **estimates** from `python -m scripts.cost_report` (tokens counted as chars/4, priced from the versioned table in `careline/adapters/llm/usage.py`). Measured gpt-4o-mini numbers come from two live end-to-end flow checks on 2026-10-08 (`evals/reports/live-flow-gpt-4o-mini-run1.md` and `-run2.md`, 18 portal questions each: $0.00024 / $0.00022 per question, $0.00031 / $0.00029 per model-handled question, p95/max 3.6 s / 5.3 s). The full 391-item LLM slice has not been run.
 
 | # | We chose | Over | Constraint that forced it |
 |---|---|---|---|
@@ -113,7 +113,7 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - Medication facts carry risk weight 0.9 (`domain/scoring/risk.py`). A medication question scores risk **0.78**, above the **0.75** ceiling (`domain/thresholds.py`).
   - "What is the dose of my paracetamol?" returns `escalate` with "Risk too high (0.78)". We reproduced this with `POST /demo/ask`.
   - Together with the twins' inability to paraphrase, this is why keyless in-scope accuracy is **0.167**. It is deliberate, not a bug.
-  - The LLM path uses the same blend (0.7 × fact-kind weight + 0.3 × the proposal's own risk), so a medication answer passes when the model reports risk ≤ 0.4. But the schema field defaults to **0.0** and the reasoner prompt never asks for it, so a model that omits it gets 0.63 and is answered. In the live run both dosing questions grounded in a current fact were answered (2/2). On the LLM path the risk ceiling does little for medication answers; the verifier, citation veto and answer-text grounding check bound them.
+  - The LLM path uses the same blend (0.7 × fact-kind weight + 0.3 × the proposal's own risk), so a medication answer passes when the model reports risk ≤ 0.4. But the schema field defaults to **0.0** and the reasoner prompt never asks for it, so a model that omits it gets 0.63 and is answered. In both live runs both dosing questions grounded in a current fact were answered (2/2). On the LLM path the risk ceiling does little for medication answers; the verifier, citation veto and answer-text grounding check bound them.
 - **Failure mode it creates.** Doctor-queue flooding trains clinicians to ignore escalations, which is itself a hazard.
 - **Mitigation.** Over-escalation is a hard gate (≤ 15%; 7.3% at v8). The online monitor tracks a low-risk-escalation proxy, and small talk and non-clinical questions are redirected rather than escalated (commit `7c8acf3`).
 
@@ -127,12 +127,12 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Constraint.** The safety rule. Cost pushed back the other way, and the price stayed acceptable.
 - **Evidence.**
   - Pre-run estimate: Reasoner ≈ $0.000197 per call and Verifier ≈ $0.000101 per call on gpt-4o-mini, so an answered request costs ≈ $0.000298, against ≈ $0.000197 for one call.
-  - Measured (live flow check): $0.00031 per model-handled question including the sampled judge; model-handled questions took 1.3–3.6 s end to end with the two sequential calls.
+  - Measured (two live flow checks): $0.00031 / $0.00029 per model-handled question including the sampled judge; model-handled questions took 1.3–5.3 s end to end with the two sequential calls.
   - The Verifier runs only when the Reasoner proposes an answer. Red-flag escalations make no LLM call at all ($0).
 - **Failure mode it creates.**
   1. Roughly 1.5× tokens and a second network round trip on answered turns, so higher p99.
   2. If both calls hit the same provider outage, there is no answer at all.
-- **Mitigation.** The second round trip only happens on the minority of turns that answer. On an outage both calls raise `ReasonerUnavailable` and the turn fails closed to ESCALATE, counted as `fail_closed_rate` on `/monitoring` with an alert above 5%. The cost is real: on the one live run the end-to-end p95/max was 3.6 s, which **misses** the 3 s p99 target (n = 18). Running the Verifier in parallel with a draft answer, skipping it for low-risk fact kinds, or streaming would be the next steps.
+- **Mitigation.** The second round trip only happens on the minority of turns that answer. On an outage both calls raise `ReasonerUnavailable` and the turn fails closed to ESCALATE, counted as `fail_closed_rate` on `/monitoring` with an alert above 5%. The cost is real: on the two live runs the end-to-end p95/max was 3.6 s and 5.3 s, which **misses** the 3 s p99 target (n = 18 each). Running the Verifier in parallel with a draft answer, skipping it for low-risk fact kinds, or streaming would be the next steps.
 
 ## 6. gpt-4o-mini over stronger models
 
@@ -234,7 +234,7 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Constraint.** Free-tier 512 MB, one container.
 - **Evidence.** A local run after a 20 s load test returned all five sections. It also raised a real alert, `input drift: scope-mix PSI 0.64 > 0.2`, because the load generator's six-question rotation looks nothing like the eval mix. That alert is correct behaviour, not noise.
 - **Failure mode it creates.** State is per process and lost on restart. There is no history, no paging, and alerts are only visible when someone polls.
-- **Mitigation.** The monitor's interface is the seam. At scale the counters move to an external store or exporter (see `docs/OPERATIONS.md` §6). Langfuse traces hold per-turn history once configured.
+- **Mitigation.** The monitor's interface is the seam. At scale the counters move to an external store or exporter (see `docs/OPERATIONS.md` §6). Langfuse traces hold per-turn history (live on Langfuse Cloud).
 
 ## 11. Langfuse over LangSmith
 
@@ -243,11 +243,11 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Alternatives rejected.**
   - *LangSmith.* Hosted SaaS on the plan we had, with no self-host option for us.
   - *Arize Phoenix.* Good, but a second new tool to learn for no extra coverage.
-- **Constraint.** PHI posture: the tracer sends a salted patient hash and never sends fact text.
+- **Constraint.** PHI posture: the tracer sends a salted patient hash and never sends fact text. It does send the raw question text as trace input, which is acceptable only on fictional demo data; real patients would need it redacted or dropped.
 - **Failure mode it creates.** An optional dependency fails silently.
   - In the first review the tracer was effectively dead code: the SDK was not installed and latency was hardcoded to 0.
   - That is fixed now: the `obs` extra exists, and the tracer has fake-client tests that assert the real model, latency and per-turn cost (`tests/llmops/test_usage_langfuse.py::test_v2_sends_real_model_latency_and_per_turn_cost`, `tests/llmops/test_wiring.py::test_langfuse_turn_gets_real_latency_usage_and_start`).
-- **Status: pending.** There is no Langfuse project and there are no keys yet, so we have **no trace link**. Until there is, `GET /monitoring` and the usage JSONL (`CARELINE_USAGE_LOG`) are the observability evidence.
+- **Status: done.** Traces export to Langfuse Cloud (SDK pinned to v3 via `langfuse>=2,<4`; v4 dropped `start_generation`). Live run 2 of the flow check exported 18 traces; canonical public trace: https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec. `GET /monitoring` (the in-app Monitoring page) and the usage JSONL (`CARELINE_USAGE_LOG`) remain the aggregate evidence.
 
 ## 12. Per-doctor hashed credentials over SSO for the demo
 

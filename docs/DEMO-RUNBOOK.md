@@ -16,7 +16,7 @@ Every command and expected output below was run on 8 Oct 2026 at `red_flags@v8+8
 | Lockout | 5 wrong logins per account, or 20 per IP, lock out for 15 min, and a correct PIN then gets 429. **Don't fat-finger the PIN on stage**; restart the backend to clear it (the lockout is in memory) |
 | Monitoring | Dashboard: web **Monitoring** page, `http://localhost:3000/monitoring` (doctor sign-in; polls every 5 s; five sections, alerts banner, scope note). Raw JSON: `GET /monitoring` with a doctor Bearer token. `scope` reads `"process-wide, aggregate, no PHI"` |
 | Review queue | `GET /escalations` → `review`, `review_waiting`; web: Escalations page, "Redirected — please review" |
-| Langfuse | Optional. No project or keys exist yet, so **do not promise a trace link** |
+| Langfuse | Optional live. Project exists on Langfuse Cloud; canonical public trace from live run 2: https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec. Open it in a browser tab before the talk (see §5) |
 
 ---
 
@@ -111,14 +111,16 @@ Needs `CARELINE_MONGO_URI` set in Terminal A (don't blank it) and `pip install -
 
 If Atlas is unreachable, skip this section entirely. The core content is §3.
 
-## 5. Langfuse (optional, only if a project exists by demo day)
+## 5. Langfuse (optional, live traces)
 
 ```bash
 pip install -e ".[obs]"
 export CARELINE_LANGFUSE_PUBLIC_KEY=pk-... CARELINE_LANGFUSE_SECRET_KEY=sk-... CARELINE_LANGFUSE_HOST=https://cloud.langfuse.com
-# restart Terminal A, ask one question, open the trace: model, latency, per-turn cost, artifact stamps, salted patient hash
+# (Langfuse's own LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL also work)
+export CARELINE_LANGFUSE_PUBLIC_TRACES=true   # demo data only: share links open without a login
+# restart Terminal A, ask one question, open the trace: model, latency, per-turn cost, artifact stamps, salted patient hash, question text
 ```
-Status today: **no project and no keys**. The one live run (gpt-4o-mini, 18 questions) is documented in `backend/evals/reports/live-flow-gpt-4o-mini.md`; point at that file if asked for measured cost and latency. If asked, say: "Langfuse is wired and tested with a fake client; we have no project yet, so the Monitoring dashboard page (`/monitoring`) and the usage JSONL are our evidence today."
+Status today: **live**. Live run 2 exported 18 traces to Langfuse Cloud (ingestion confirmed by HTTP 200 from `/api/public/otel/v1/traces`); the canonical public one is https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec. The two live runs (gpt-4o-mini, 18 questions each) are documented in `backend/evals/reports/live-flow-gpt-4o-mini-run1.md` and `-run2.md`; point at those if asked for measured cost and latency. If asked about PHI, say: "The patient id is a salted hash, but the trace input does carry the raw question text. That is fine for our fictional demo data; in production we would redact or drop it." The in-app Monitoring page (`/monitoring`) is the aggregate view; Langfuse is the per-turn view.
 
 ## 6. Fallbacks
 
