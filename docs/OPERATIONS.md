@@ -16,12 +16,12 @@ export CARELINE_MONGO_URI= OPENAI_API_KEY= ANTHROPIC_API_KEY= LANGSMITH_API_KEY=
 |---|---|---|
 | Packaging | One Docker image (`backend/Dockerfile`, Python 3.12-slim base, non-root uid 10001, no secrets baked in). Installs `.[api,llm]`. | In place |
 | Runtime | One uvicorn process: `uvicorn careline.api.app:create_app --factory --port 8000 --no-proxy-headers`. One process keeps the in-memory rate-limit, daily-cap and lockout counters meaningful. | In place |
-| Host | Render free web service from the `render.yaml` blueprint (Docker runtime, Singapore region, `healthCheckPath: /health`). | **Pending: blueprint ready, not deployed. No public URL.** |
+| Host | **Vercel** (free tier): API https://careline-api-nine.vercel.app as FastAPI on the Python runtime (entrypoint `careline.api.vercel_app:app`; `.vercelignore` keeps `.env`, `.venv` and tests out). Serverless, so the in-memory store, limiter counters and monitor are per instance. Alternative: Render free web service from the `render.yaml` blueprint (Docker, `healthCheckPath: /health`). | **Deployed on Vercel** (keyless, fictional data, public-demo hardening). Render blueprint ready, not used |
 | Model serving | **Hosted API, no self-hosted model.** The Reasoner, Verifier and judge call OpenAI gpt-4o-mini over HTTPS with structured output. The Anthropic backend is selectable via `CARELINE_LLM_BACKEND`. No GPU and no weights in the container (512 MB free tier). | Adapter in place. **Two live end-to-end flow checks** on 2026-10-08 (`evals/reports/live-flow-gpt-4o-mini-run1.md`: 18 questions, 29 calls, $0.0052, p95/max 3.6 s; `-run2.md`: 18 questions, 26 calls, $0.0049, p95/max 5.3 s). The full 391-item LLM slice has not been run |
 | Default mode | **Keyless.** With no `OPENAI_API_KEY`, the deterministic spine runs: pre-LLM rails, retrieval, offline heuristic Reasoner/Verifier twins, gate chain. It is safe because it fails closed: medication questions escalate (risk 0.78 > ceiling 0.75). | In place |
 | Secrets | `sync: false` dashboard values: `CARELINE_JWT_SECRET`, `CARELINE_INTERNAL_API_KEY`, `CARELINE_PIN_HMAC_SECRET`, `CARELINE_DOCTOR_CREDENTIALS`, optional `OPENAI_API_KEY`. `CARELINE_PUBLIC_DEMO=true` refuses to start with dev-default secrets or the shared dev doctor password. | In place (config) |
 | Budget guards | 6 spend-bearing requests/min per IP (spend routes: `/demo/ask`, `/internal/run-question`, `/patient/ask`, `POST /consultations/{id}/extract`), a separate login window of 10/min, a daily cap of 300 (UTC), and login lockout (5 per account / 20 per IP → 900 s). | In place (config) |
-| Web | Next.js app (`web/`), talks to the API over HTTPS/JSON. `CARELINE_ALLOWED_ORIGINS` sets CORS. | Local only |
+| Web | Next.js app (`web/`) on Vercel at https://careline-web.vercel.app, talks to the API over HTTPS/JSON. `CARELINE_ALLOWED_ORIGINS` locks CORS to the web origin. | **Deployed on Vercel** (the doctor console starts empty; the Live Console uses the built-in demo patient) |
 
 **Why keyless by default in a deployed demo.** The public URL must not spend money because a stranger clicked it, and the safety behaviour (rails, gates, fail-closed) is identical with or without a key. The key only buys better *answers*. The cost is that the keyless deploy answers few questions (keyless in-scope answer accuracy 0.167 on the 391-item set). That is the honest trade-off, stated on the demo, not hidden.
 
@@ -64,15 +64,15 @@ author change ─▶ PR ─▶ CI: Suite (keyless) + Eval gate (deterministic sl
                          │      └─ shared-case regression vs after-policy-vN.json
                          ├─ shadow_compare --a vN --b vN+1 (table pasted in PR)   ← by hand
                          └─ blind battery (fresh, once) for a policy release      ← by hand
-push to main ─▶ Render auto-deploy (autoDeploy: true)   ← runs in parallel with CI, NOT gated by it
-             └▶ optional: LLM slice (push only, continue-on-error)
+push to main ─▶ optional: LLM slice (push only, continue-on-error)
+CI green on main ─▶ manual `vercel deploy --prod` (API + web)   ← projects not Git-connected: a red push never deploys
 then: tag release/red-flags-vN+1
 ```
 
 **Target (after two pending team actions):** branch protection on `main` requires
-"Suite (keyless)" and "Eval gate (deterministic slice)", and `render.yaml` uses
-`autoDeployTrigger: checksPass` (Render's "deploy after checks pass"). Only then
-does a red gate stop a merge and a deploy.
+"Suite (keyless)" and "Eval gate (deterministic slice)", and the Vercel projects
+are Git-connected with deploy-after-checks. Only then does tooling (not a person)
+make a red gate stop a merge and a deploy.
 
 | Step | Command / mechanism | Status |
 |---|---|---|
@@ -82,17 +82,17 @@ does a red gate stop a merge and a deploy.
 | 4. New baseline | Commit `evals/reports/after-policy-vN+1.json` + `.md`, and point `ci.yml --baseline` at it **in a separate commit whose message names any regression accepted**. | Rule documented; not enforced by tooling |
 | 5. Merge | Human merge after green checks. | **Pending: `main` has no branch protection.** Required checks to configure: "Suite (keyless)", "Eval gate (deterministic slice)". Add CODEOWNERS on `backend/evals/reports/`, `backend/policies/`, `backend/prompts/`, `.github/workflows/`. |
 | 6. Tag | `git tag -a release/red-flags-vN <release commit> -m "red_flags@vN+<hash> — gate PASS vs vN-1, blind-3 …"` then `git push origin --tags`. | In place: annotated tags `baseline-v0`, `release/red-flags-v2` … `-v8`. **`-v6` and `-v7` both point to `1aed531`** (the two releases landed in one commit). |
-| 7. Deploy | Render builds the Docker image from `main` **on every push** (`autoDeploy: true`), in parallel with CI. | **Not deployed yet.** Pending team action: `autoDeployTrigger: checksPass` so a deploy waits for green checks. Until then CI does not gate deploy. |
+| 7. Deploy | `vercel deploy --prod` (API and web projects), run by hand from `main` after CI is green. | **In place (manual).** Vercel projects are not Git-connected, so a red push never deploys; the wait for green is a human step. Pending: Vercel Git integration with deploy-after-checks. |
 
 ## 4. Rollback
 
 Three levels, from fastest to most thorough. In a safety system a rollback is itself a release: it changes recall, so it goes through the gate too, against the *older* baseline.
 
-### 4a. Immediate: Render previous deploy (seconds, no build)
+### 4a. Immediate: Vercel Instant Rollback (seconds, no build)
 
-Render dashboard → `careline-demo` → **Events / Deploys** → choose the last good deploy → **Rollback**. This restores the previous image without touching git. Then do 4b, so `main` matches what is serving; otherwise the next push re-deploys the bad version.
+Vercel dashboard → the API project (and the web project if the web changed) → **Deployments** → the previous production deployment → **Instant Rollback**, or `vercel rollback` from the CLI. This serves the previous deployment again without touching git. Then do 4b, so `main` matches what is serving; otherwise the next `vercel deploy --prod` from `main` re-deploys the bad version. (On the Render alternative: dashboard → Deploys → **Rollback**.)
 
-*Status: available once deployed. Never exercised (not deployed).*
+*Status: available (deployed on Vercel). Not yet exercised.*
 
 ### 4b. Code: revert the release commit(s)
 
@@ -104,7 +104,7 @@ git revert --no-edit release/red-flags-v5 release/red-flags-v5~1   # v4 rails, v
 cd backend
 python -m pytest -q
 python -m careline.services.eval_gate --baseline evals/reports/after-policy-v4.json
-git push -u origin rollback/red-flags-v4  # open a PR; merge on green; Render redeploys
+git push -u origin rollback/red-flags-v4  # open a PR; merge on green; then vercel deploy --prod
 ```
 
 **From the current release, v8 → v7.** Revert the four v8 policy commits (two test-first, two release), newest first:
@@ -149,7 +149,7 @@ Then run the gate and redeploy.
 
 This does **not** work for the red-flag policy. That YAML mirrors code, and moving its pointer alone fails `tests/llm/test_prompt_registry.py` (YAML/code sync) by design. Use 4b for policy releases.
 
-**Time-to-rollback.** Not measured on a live deploy. Locally, the gate takes about 1.7 s and the suite about 50 s (1,692 passed, 2 skipped). Render's deploy time is unknown until we deploy.
+**Time-to-rollback.** Not measured on a live deploy. Locally, the gate takes about 1.7 s and the suite about 50 s (1,692 passed, 2 skipped). Vercel Instant Rollback switches deployments without a build; its time and the `vercel deploy --prod` build time have not been measured.
 
 ## 5. Monitoring plan (all five categories)
 

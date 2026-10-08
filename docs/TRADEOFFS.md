@@ -8,7 +8,7 @@ Every entry has the same five parts:
 4. the evidence, with the command or committed report it comes from;
 5. the failure mode the decision creates, and how we mitigate it.
 
-**Constraints behind all of them.** About $20 of LLM spend in total. A free-tier deploy (Render free web service: 512 MB RAM, no GPU, one container). No real patient data: five fictional patients and one doctor. A fixed timeline. And the safety rule that outranks everything else: *uncertainty resolves to ESCALATE, never answer from a superseded fact, zero cross-patient reachability.*
+**Constraints behind all of them.** About $20 of LLM spend in total. A free-tier deploy (Vercel Hobby: serverless FastAPI on the Python runtime plus the Next.js web app, no GPU; Render's free 512 MB container is the documented alternative). No real patient data: five fictional patients and one doctor. A fixed timeline. And the safety rule that outranks everything else: *uncertainty resolves to ESCALATE, never answer from a superseded fact, zero cross-patient reachability.*
 
 **Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` at the active policy `red_flags@v8+8dd13f40326f` (391 items, re-run 2026-10-08; `evals/reports/after-policy-v8.md`). Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Model-comparison costs are pre-run **estimates** from `python -m scripts.cost_report` (tokens counted as chars/4, priced from the versioned table in `careline/adapters/llm/usage.py`). Measured gpt-4o-mini numbers come from two live end-to-end flow checks on 2026-10-08 (`evals/reports/live-flow-gpt-4o-mini-run1.md` and `-run2.md`, 18 portal questions each: $0.00024 / $0.00022 per question, $0.00031 / $0.00029 per model-handled question, p95/max 3.6 s / 5.3 s). The full 391-item LLM slice has not been run.
 
@@ -22,7 +22,7 @@ Every entry has the same five parts:
 | 6 | gpt-4o-mini | Stronger or pricier models | Cost ($20) |
 | 7 | Shared-case regression vs a committed baseline | A moving baseline | Data growth (the set went 250 → 391) |
 | 8 | Blind batteries | Self-written probes | Honest generalisation numbers |
-| 9 | Render free tier | Fly.io / HF Spaces | Cost ($0), blueprint-as-code |
+| 9 | Vercel free tier (Render blueprint kept as the alternative) | Fly.io / HF Spaces | Cost ($0), FastAPI + Next.js in one account, no Docker build |
 | 10 | In-process monitor (`GET /monitoring`) | Prometheus + Grafana | 512 MB, one container |
 | 11 | Langfuse | LangSmith | PHI posture (self-hostable), open source |
 | 12 | Per-doctor hashed credentials | SSO / OIDC | Demo scope, no IdP |
@@ -200,9 +200,9 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Failure mode it creates.** Small n. With 50 emergencies the Wilson 95% interval is wide: 45/50 gives 79–96%, 44/50 gives 76–94%, 42/50 gives 72–92%, 34/40 gives 71–93%. Each battery is single-use, and all three were written by LLM evaluator agents, so their wording may be correlated.
 - **Mitigation.** We quote each battery number with its n and the version it was blind to. We do not read the similar numbers across batteries as robustness: they show a lexical rail that moves a few points per release on unseen wording.
 
-## 9. Render free tier over Fly.io / Hugging Face Spaces
+## 9. Vercel free tier (Render blueprint as the alternative) over Fly.io / Hugging Face Spaces
 
-**We chose** a Render Docker web service defined as code in `render.yaml` (free plan, Singapore region, `/health` check, secrets as `sync: false` dashboard values, public-demo hardening on) **over** Fly.io or HF Spaces, **because** it costs $0, deploys the same Dockerfile we test locally, and keeps the deploy config reviewable in the repo.
+**We first chose** a Render Docker web service defined as code in `render.yaml` (free plan, Singapore region, `/health` check, secrets as `sync: false` dashboard values, public-demo hardening on) **over** Fly.io or HF Spaces, **because** it costs $0, deploys the same Dockerfile we test locally, and keeps the deploy config reviewable in the repo.
 
 - **Alternatives rejected.**
   - *Fly.io.* It needs a payment method on the org; we did not want a card attached to a public demo.
@@ -210,11 +210,13 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - *Self-hosting a model (vLLM).* No GPU, and no accuracy gain at this scale.
 - **Constraint.** Cost ($0 hosting), and the free tier's 512 MB RAM and single instance.
 - **Failure mode it creates.**
-  - **Cold start.** Render's free web services spin down when idle and the first request after that is slow. We have not measured it, because the service is not deployed yet.
+  - **Cold start.** Render's free web services spin down when idle and the first request after that is slow. We have not measured it (the live demo runs on Vercel, where serverless cold starts apply instead; also unmeasured).
   - Single instance, so no redundancy.
   - Ephemeral disk, so the usage JSONL and the in-process monitor reset on restart.
 - **Mitigation.** We warm the URL before a demo (`curl /health`). The keyless local fallback gives identical behaviour (see `docs/DEMO-RUNBOOK.md`). The monitor and limiter state limits are documented in `docs/OPERATIONS.md`.
-- **Status: not deployed.** The blueprint is ready, and no public URL exists today.
+- **Where we ended up: Vercel.** The live demo runs on Vercel (web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app; FastAPI on the Python runtime, entrypoint `careline.api.vercel_app:app`), **because** the free tier hosts both the FastAPI API (Python runtime) and the Next.js web app in one account with no Docker build. `render.yaml` and the Dockerfile remain the documented alternative host.
+  - *What it changes.* The API is serverless, so the in-memory store, rate-limit/daily-cap counters and monitor are per instance and reset on cold start: the doctor console starts empty, and the Live Console uses the built-in demo patient. Deploys are a manual `vercel deploy --prod` after CI is green (the projects are not Git-connected, so a red push never deploys); rollback is Vercel Instant Rollback.
+- **Status: deployed on Vercel** (keyless, fictional data, public-demo hardening on). Pending: Vercel Git integration with deploy-after-checks, plus branch protection.
 
 ## 10. In-process monitor over Prometheus + Grafana
 

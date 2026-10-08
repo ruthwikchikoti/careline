@@ -203,18 +203,19 @@ instead of hiding it.
                                                      shows GREEN, with SKIPPED in the job summary and
                                                      a warning annotation (it has never run in CI)
    ▼
- push to main ──► Render blueprint (autoDeploy: true) builds backend/Dockerfile → /health check → live
-                  (runs in parallel with CI; a red check does not stop it)
+ CI green on main ──► manual `vercel deploy --prod` (API + web; Vercel projects are not Git-connected,
+                      so a red push never deploys) → /health check → live
    ▼
- rollback: Render "Rollback" to the previous deploy (immediate)  ·  git revert <release commits> → CI → redeploy
+ rollback: Vercel Instant Rollback / `vercel rollback` (immediate)  ·  git revert <release commits> → re-gate → redeploy
 ```
 
 Gaps we disclose:
 
-- **Deploy happens on push to `main`.** Render's `autoDeploy: true` does not
-  wait for CI, and `main` has no branch protection, so a red check stops neither
-  the merge nor the deploy. Pending team actions: `autoDeployTrigger:
-  checksPass` (Render's "deploy after checks pass") plus branch protection
+- **Deploy is manual, after green CI.** The Vercel projects are not
+  Git-connected, so a push never deploys; a person runs `vercel deploy --prod`
+  once CI is green. That wait is a habit, not tooling, and `main` has no branch
+  protection, so a red check does not block a merge. Pending team actions:
+  Vercel Git integration with deploy-after-checks plus branch protection
   requiring the two CI checks.
 - Release tags `baseline-v0` and `release/red-flags-v2` … `-v8` exist. `-v6`
   and `-v7` point to the same commit (`1aed531`): those two releases landed
@@ -243,7 +244,7 @@ Gaps we disclose:
 | Online monitor | In-process ring buffers and a sampled judge thread | N1, N4, N6 | Five monitoring categories with no extra infrastructure on a free tier. Per-process only |
 | Human feedback | Patient 👍/👎 (`POST /patient/feedback`) and doctor correct/incorrect review (`POST /audit/turns/{id}/review`), stored tenant-scoped in the audit store; aggregates in `/monitoring` `human_feedback` | N2 | Online evaluation uses LLM-as-judge **and user feedback**: the judge scores faithfulness automatically, humans score usefulness and correctness. No real-user volume yet; exercised by tests |
 | Tracing | Langfuse Cloud (optional `obs` extra, SDK v3) | N4, N6 | Per-turn cost and latency traces, live: run 2 of the live flow check exported 18 ([example trace](https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec)). Trace input includes the question text (fictional data); the patient id is salted-hashed |
-| Deploy | Render Docker blueprint, free tier | live URL | One file and fictional data. Not deployed yet |
+| Deploy | Vercel free tier (FastAPI on the Python runtime + Next.js); Render Docker blueprint as the alternative | live URL | Live: https://careline-web.vercel.app, API https://careline-api-nine.vercel.app. Keyless, fictional data, in-memory store per instance |
 
 ## 7. Failure behaviour (fail closed)
 

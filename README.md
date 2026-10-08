@@ -1,8 +1,9 @@
 # CareLine Ops — eval-gated prompt and safety releases for a clinical AI agent
 
 A release pipeline for CareLine, our team's clinical follow-up agent: every
-prompt and safety-policy change is a versioned, hash-stamped artifact that has
-to pass a 391-item labelled safety eval in CI before it merges.
+prompt and safety-policy change is a versioned, hash-stamped artifact scored by
+a 391-item labelled safety eval in CI, and a regression turns the build red
+(merge-blocking branch protection is still a pending team action).
 
 CareLine is the system under test. A patient asks a question after a
 consultation. CareLine answers only from that one patient's doctor-approved,
@@ -56,7 +57,7 @@ Targets are fixed. The measured column is from the commands in [Numbers](#number
 | F6 | Never answer without grounding | 0 ungrounded ANSWERs | 0 | pass |
 | F7 | Never comply with a prompt injection | 0 answered | 0/30 | pass |
 | F8 | Redirect out-of-scope asks rather than escalate | redirect accuracy ≥ 0.90 | 1.000 at the gate's clarify budget (2); 0.938 (61/65) at the web's budget (0) | pass |
-| N1 | Over-escalation (benign items that escalate) | ≤ 15% | committed set 10/137 = 7.3%; **blind battery 3 benign near-misses: 5/50 = 10%** at v6 and v7 (battery 2 at v5 was 13/50 = 26%) | pass |
+| N1 | Over-escalation (benign items that escalate) | ≤ 15% | committed set 10/137 = 7.3%; **blind battery 3 benign near-misses: 5/50 = 10%** at v6, v7 and v8 (battery 2 at v5 was 13/50 = 26%) | pass |
 | N2 | In-scope answer accuracy, LLM path | ≥ 0.85 | **Two live flow checks (gpt-4o-mini, 2026-10-08): 5/5 and 3/5 answerable questions answered, every answer grounded; the 2 non-answers in run 2 escalated to the doctor (safe side); online judge 6/6 and 4/4 faithful** ([run 1](backend/evals/reports/live-flow-gpt-4o-mini-run1.md), [run 2](backend/evals/reports/live-flow-gpt-4o-mini-run2.md), n=5 each — a smoke test, not the eval-set measurement). The full 391-item LLM slice (`eval_gate --mode llm`) has not been run. Keyless twin: 0.167 by design | partial (small n) |
 | N3 | Spine latency, in-process | p99 < 50 ms | p99 ≈ 11 ms (11.35 ms in `after-policy-v8.md`, 391 items) | pass |
 | N4 | End-to-end latency, LLM path | p99 < 3 s | two live flow checks, 18 portal questions each: run 1 p50 1.6 s, p95/max 3.6 s; run 2 p50 1.7 s, p95/max 5.3 s (rail-caught emergencies 2–16 ms; LLM questions 1.3–5.3 s, two sequential calls: reasoner + verifier) | **miss** (p95 3.6 s / 5.3 s; two live runs, n=18 each) |
@@ -111,17 +112,18 @@ browser ──HTTPS/JSON, Bearer JWT──► FastAPI ──threadpool (sync)─
         pytest             391 items, 8 absolute gates              nothing blocks the merge yet)
                            + per-case regression vs after-policy-v8.json
                            + split floors
- push to main ─► Render auto-deploy (autoDeploy: true)  — runs in parallel with CI, NOT gated by it
-            └──► LLM slice (optional, push only; without the key secret it exits 0 — green — and
+ push to main ─► LLM slice (optional, push only; without the key secret it exits 0 — green — and
                  writes SKIPPED to the job summary)
- rollback: Render "rollback to previous deploy" (immediate) · git revert of the release commits (durable)
+ CI green on main ─► manual `vercel deploy --prod` (API + web; Vercel projects are not Git-connected)
+ rollback: Vercel Instant Rollback / `vercel rollback` (immediate) · git revert of the release commits + re-gate (durable)
 ```
 
-Read that diagram literally. **Deploy happens on push to `main`.** CI does not
-gate the deploy, and a red check does not block a merge, until two pending team
-actions are done: branch protection on `main` requiring "Suite (keyless)" and
-"Eval gate (deterministic slice)", and Render's "deploy after checks pass"
-(`autoDeployTrigger: checksPass` in `render.yaml`). No PR has run CI yet.
+Read that diagram literally. **Deploy is a manual `vercel deploy --prod` after CI
+is green on `main`.** The Vercel projects are not Git-connected, so a red push
+never deploys, but the "wait for green" step is a human habit, not tooling, and a
+red check does not block a merge. Pending team actions: branch protection on
+`main` requiring "Suite (keyless)" and "Eval gate (deterministic slice)", and
+Vercel Git integration with deploy-after-checks. No PR has run CI yet.
 
 The headless `Brain` and the LangGraph graph run the same domain primitives.
 They share one `run_triage` function and one `run_gate_chain`, and parity tests
@@ -402,8 +404,9 @@ traffic for a canary to measure recall.
 4. Run the gate with `--baseline` set to the previous accepted report.
 5. Score a fresh blind battery once against the candidate.
 6. Commit `after-policy-vN.{json,md}` and point `ci.yml` at it.
-7. Push to `main`. **Today Render deploys on that push** (`autoDeploy: true`),
-   whether or not CI is green.
+7. Push to `main`, wait for CI to go green, then deploy by hand with
+   `vercel deploy --prod` (the Vercel projects are not Git-connected, so a push
+   alone never deploys).
 8. Tag the release (`release/red-flags-vN`) and push the tag.
 
 **Release tags.** `baseline-v0` (b8476c9), `release/red-flags-v2`,
@@ -414,9 +417,10 @@ it, so there is no committed tree that holds v6 without v7, and v7 → v6 is not
 a separately revertible step.
 
 **Rollback.**
-- **Immediate:** Render dashboard → service → Deploys → "Rollback" on the last
-  good deploy. The previous image is redeployed with no rebuild. Then do the
-  durable step, or the next push redeploys the bad version.
+- **Immediate:** Vercel Instant Rollback (dashboard → project → Deployments →
+  previous production deployment → "Instant Rollback", or `vercel rollback`).
+  The previous deployment serves again with no rebuild. Then do the durable step,
+  or the next `vercel deploy --prod` from `main` redeploys the bad version.
 - **Durable:** revert the release commit(s) together with their test-first
   commits, on a branch, then re-gate against the older baseline and open a PR.
   A rollback lowers recall, so it is gated like any release.
@@ -455,10 +459,10 @@ a separately revertible step.
   The full runbook is in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 - **Why not just change the pin:** the manifest pin does not switch the runtime
   rails, and the registry test fails if the pin and the code disagree.
-- **Pending team actions:** set `autoDeployTrigger: checksPass` in `render.yaml`
-  (Render's "deploy after checks pass"), and enable branch protection on `main`
-  requiring "Suite (keyless)" and "Eval gate (deterministic slice)". Until both
-  are on, CI does not gate the deploy.
+- **Pending team actions:** enable branch protection on `main` requiring
+  "Suite (keyless)" and "Eval gate (deterministic slice)", and connect the Vercel
+  projects to Git with deploy-after-checks. Until then, deploy waits for green CI
+  only because a person runs `vercel deploy --prod` after checking it.
 
 ## Quickstart
 
@@ -552,10 +556,10 @@ now fails closed to ESCALATE in well under a minute.
 | Item | Status | Reason |
 |---|---|---|
 | Live public URL (deploy) | **Done** | Vercel: web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app (FastAPI on the Python runtime, entrypoint `careline.api.vercel_app:app`; `.vercelignore` keeps `.env`, `.venv` and tests out). Keyless (no LLM spend from a public URL), in-memory store (the doctor console starts empty; the Live Console uses the built-in demo patient). `render.yaml` remains an alternative |
-| CI-gated deploy | **Pending** | `render.yaml` has `autoDeploy: true`, so a deploy would run on every push to `main`, in parallel with CI. Team action: `autoDeployTrigger: checksPass` |
+| CI-gated deploy | **Pending (manual today)** | Vercel projects are not Git-connected: deploys are a manual `vercel deploy --prod` after CI is green, so a red push never deploys, but no tooling enforces the wait. Team action: Vercel Git integration with deploy-after-checks, plus branch protection |
 | Branch protection / PR merge blocked by the gate | **Pending** | `main` has no branch protection and no CODEOWNERS, and no PR has ever run CI (every run so far is a push). Team action: require "Suite (keyless)" and "Eval gate (deterministic slice)", then open a PR from [`demo/blocked-by-eval-gate`](https://github.com/ruthwikchikoti/careline/tree/demo/blocked-by-eval-gate) and screenshot the blocked merge |
 | CI failing an eval regression | **Done (evidence, on push)** | Branch `demo/blocked-by-eval-gate` drops the v6/v7 rail families; its CI run [fails the eval gate](https://github.com/ruthwikchikoti/careline/actions/runs/37785663116) (missed_emergencies 0 → 23) while [`main` passes](https://github.com/ruthwikchikoti/careline/actions/runs/37785648690) |
-| Observability dashboard | **Done (in-app, local)** | The web app's **Monitoring** page (`/monitoring`) shows cost and latency per request, verdict mix, online-judge quality and input drift, polled live from `GET /monitoring`. It runs locally; with no deploy there is no public link |
+| Observability dashboard | **Done (in-app, local and deployed)** | The web app's **Monitoring** page (`/monitoring`) shows cost and latency per request, verdict mix, online-judge quality and input drift, polled live from `GET /monitoring`. Also on the deployed web app (https://careline-web.vercel.app/monitoring, doctor sign-in); the API is serverless with an in-memory monitor, so the live numbers are per instance and reset on cold start |
 | Langfuse project / trace link | **Done** | Traces export to Langfuse Cloud (ingestion confirmed: HTTP 200 from `/api/public/otel/v1/traces`); live run 2 produced 18, e.g. [this public trace](https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec). The in-app `/monitoring` page is the second view. Caveats: the trace input carries the raw question text (fictional data only; the patient id is salted-hashed), and the Docker image does not install `obs` yet |
 | Full LLM slice over the eval set | **Not run** | `eval_gate --mode llm` is implemented but the 391-item slice has not been run. Two live end-to-end flow checks ran on gpt-4o-mini (18 questions each; $0.0052 and $0.0049; reports linked in Numbers). LLM-path emergency safety beyond the rails is measured only with stand-ins: none of battery 3's rail misses has been sent to the real model. In CI the LLM-slice job shows green when skipped (see LLMOps) |
 | Human labelling check (Cohen's κ) | **Kit ready, human labels pending** | Labels have one author per split, written with AI assistance plus an AI-assisted audit. Blind 60-item stratified sample + scorer in [`backend/evals/human/`](backend/evals/human/README.md). **AI second labeller (not human):** a separate model, blind to our labels, agreed on 60/60 (κ 1.00 on EMERGENCY / ANSWER / OTHER; 0 missed emergencies, 0 unsafe answers) — a consistency check, not independent validation ([`agreement.md`](backend/evals/human/agreement.md)). Human κ is reported once teammates commit `labels-<name>.csv` |
@@ -583,8 +587,8 @@ claims.
 ## Resume line
 
 > Built an eval-gated release pipeline for a clinical AI agent: every versioned
-> prompt and safety-policy change must pass a 391-item labelled safety eval
-> in GitHub Actions (0 missed emergencies, 0 cross-patient leaks). Measured
+> prompt and safety-policy change is scored by a 391-item labelled safety eval
+> in GitHub Actions CI (0 missed emergencies, 0 cross-patient leaks). Measured
 > generalisation on blind red-team batteries (90% emergency recall on the latest)
 > and added shadow comparison, online drift and LLM-judge monitoring, and
 > per-request cost capture (about $0.0003 per model-handled question on
@@ -608,5 +612,5 @@ backend/
 web/                      Next.js doctor console and patient portal
 docs/                     architecture, interface contracts, trade-offs, failure analysis, runbook
 .github/workflows/ci.yml  suite + eval gate (+ optional LLM slice)
-render.yaml               public-demo blueprint (not deployed)
+render.yaml               alternative public-demo blueprint (Render); the live demo runs on Vercel
 ```

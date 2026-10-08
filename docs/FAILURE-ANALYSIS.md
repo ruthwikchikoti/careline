@@ -30,7 +30,7 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
 | 13 | Event-loop blocking by the sync pipeline | Loop-probe tests | Question routes run on the threadpool | `tests/api/test_event_loop_offload.py` | Extraction route still calls a sync LLM inside `async` |
 | 14 | Dead observability code (Langfuse) | Fake-client tests | `obs` extra; real model, latency and per-turn cost sent | `tests/llmops/test_usage_langfuse.py`, `test_wiring.py`, `test_langfuse_env_names.py` | Live on Langfuse Cloud (18 traces from live run 2); trace input carries the question text; Docker image lacks `obs` |
 | 15 | Emergency rail misses fresh wording | Blind batteries | Danger-concept + body-state invariant; every redirect carries the 112 line; symptom redirects queued for doctor review | `tests/brain/test_review_round*.py`, `test_blind1_battery.py`, `tests/api/test_review_queue.py` | 5/50 (10%) of battery 3 redirected, not escalated, at v8 (6/50 at v6 and v7); at v6 only 1 of the 6 reached the review queue (not re-measured since) |
-| 16 | Deploy not gated by CI | Review of `render.yaml` | Documented; fix specified | — | `render.yaml` still has `autoDeploy: true` (deploys on push to `main`); not deployed yet |
+| 16 | Deploy not gated by CI | Review of `render.yaml` | Mitigated by process (manual deploy after green CI) | — | Live on Vercel; projects not Git-connected, so a red push never deploys, but the wait for green is a human step, not tooling |
 | 17 | Lost audit records under concurrency | Threaded tests | Re-entrant lock around every audit mutation | `tests/api/test_audit_concurrency.py` | A turn logged while the same history is cleared can reappear after restart |
 | 18 | Answer cites a fact outside the valid slice (superseded, mangled, duplicate) | Citation veto in `run_gate_chain` (v6) | CLARIFY, or ESCALATE with a danger concept or spent clarify budget; Brain = graph | `tests/brain/test_review_round4.py` | Answer-text grounding (v7, hardened in v8) catches added doses, numbers, drug names, dose-change words and reversed take/stop instructions; a wrong claim with none of those is still the verifier's and judge's job |
 | 19 | Rail miss answered on the LLM path | Final danger + present-body-state invariant (v6) | Stand-in reasoner/verifier tests | `tests/brain/test_review_round4.py` | Worst-case stand-in answers all of battery 3's rail misses (6/50 at v6 and v7, 5/50 at v8); none of them has been sent to the real model |
@@ -209,10 +209,10 @@ All keyless numbers can be reproduced from `backend/` at the active policy `red_
 ### 16. Deploy not gated by CI
 
 - **Status.**
-  - `render.yaml` still sets `autoDeploy: true`, so once the service is deployed, Render would deploy every push to `main` in parallel with CI, not after it.
-  - **Fix specified:** `autoDeployTrigger: checksPass`, plus branch protection requiring "Suite (keyless)" and "Eval gate (deterministic slice)".
-  - Both are pending team actions; see `docs/OPERATIONS.md` §3. Until they are done, deploy happens on push to `main` and CI does not gate it.
-  - The service is not deployed today, so no un-gated deploy has happened.
+  - The demo is deployed on Vercel (web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app). The Vercel projects are **not Git-connected**: a deploy is a manual `vercel deploy --prod` run after CI is green on `main`, so a red push never deploys.
+  - The remaining gap: waiting for green is a human step, not enforced by tooling, and `main` has no branch protection.
+  - **Target (pending team actions):** Vercel Git integration with deploy-after-checks, plus branch protection requiring "Suite (keyless)" and "Eval gate (deterministic slice)"; see `docs/OPERATIONS.md` §3.
+  - `render.yaml` (the alternative host) still sets `autoDeploy: true`; if it is ever used, set `autoDeployTrigger: checksPass` first.
 
 ### 17. Lost audit records under concurrency
 
