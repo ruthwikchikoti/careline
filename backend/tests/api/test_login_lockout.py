@@ -81,9 +81,10 @@ def test_success_resets_the_account_failure_count(throttled_client):
     for _ in range(4):
         _login(throttled_client, "p1", "000000", ip="198.51.100.1")
     assert _login(throttled_client, "p1", _PIN, ip="198.51.100.1").status_code == 200
+    # Second batch from another IP (the per-IP count is deliberately NOT reset).
     for _ in range(4):
-        _login(throttled_client, "p1", "000000", ip="198.51.100.1")
-    assert _login(throttled_client, "p1", _PIN, ip="198.51.100.1").status_code == 200
+        _login(throttled_client, "p1", "000000", ip="198.51.100.2")
+    assert _login(throttled_client, "p1", _PIN, ip="198.51.100.2").status_code == 200
 
 
 def test_per_ip_limit_stops_spraying_across_patient_ids(throttled_client):

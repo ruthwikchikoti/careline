@@ -125,10 +125,11 @@ def _load_seed() -> tuple[dict[str, Patient], datetime]:
 def load_cases(*, heldout_only: bool = False) -> list[dict]:
     cases: list[dict] = []
     for file in sorted(_CASES_DIR.glob("*.jsonl")):
-        for line in file.open(encoding="utf-8"):
-            line = line.strip()
-            if line:
-                cases.append(json.loads(line))
+        with file.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    cases.append(json.loads(line))
     if heldout_only:
         cases = [c for c in cases if c["held_out"]]
     return cases

@@ -24,10 +24,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from careline.adapters.auth.principals import PatientPrincipal
 from careline.api.deps import get_current_patient
 from careline.api.dto.patients import FactOut
+from careline.api.login_throttle import guard_login, record_login
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision
 from careline.services.auth_service import is_reserved_doctor_id, is_reserved_patient_id
@@ -106,18 +108,27 @@ async def patient_login(body: PatientLoginIn, request: Request) -> PatientLoginO
     Unknown doctor, unknown patient, reserved demo id and wrong PIN are the same
     401 — no oracle that distinguishes them. The identity lookup is tenant-scoped,
     so a PIN only ever opens the patient registered under the named doctor.
+    Failed attempts are counted per (doctor, patient) and per client IP; past the
+    threshold every attempt is a 429 for the lockout window (REVIEW-4).
     """
     settings = request.app.state.settings
     unauthorized = HTTPException(status_code=401, detail="invalid patient id or PIN")
-    if is_reserved_doctor_id(body.doctor_id) or is_reserved_patient_id(body.patient_id):
-        raise unauthorized
-    identity = await request.app.state.patient_repo.find_identity(
-        doctor_id=body.doctor_id, patient_id=body.patient_id
-    )
-    if identity is None or identity.doctor_id != body.doctor_id:
-        raise unauthorized
+    account = f"patient:{body.doctor_id}:{body.patient_id}"
+    ip = guard_login(request, account=account)
+
+    identity = None
+    if not (is_reserved_doctor_id(body.doctor_id) or is_reserved_patient_id(body.patient_id)):
+        identity = await request.app.state.patient_repo.find_identity(
+            doctor_id=body.doctor_id, patient_id=body.patient_id
+        )
     provided = hash_pin(pin=body.pin, secret=settings.pin_hmac_secret)
-    if not hmac.compare_digest(provided, identity.pin_hmac):
+    ok = (
+        identity is not None
+        and identity.doctor_id == body.doctor_id
+        and hmac.compare_digest(provided, identity.pin_hmac)
+    )
+    record_login(request, account=account, ip=ip, ok=ok)
+    if not ok or identity is None:
         raise unauthorized
     token = request.app.state.auth_svc.issue_patient_token(
         patient_id=identity.patient_id, doctor_id=identity.doctor_id
@@ -166,8 +177,14 @@ async def patient_ask(
         doctor_id=principal.doctor_id,
         max_clarify_turns=0,
     )
-    decision: Decision = request.app.state.question_svc.run_question(
-        question=body.question, patient=patient, session=session, now=now
+    # The pipeline is synchronous (graph + possible blocking LLM call + audit
+    # write): run it on the threadpool so it never blocks the event loop.
+    decision: Decision = await run_in_threadpool(
+        request.app.state.question_svc.run_question,
+        question=body.question,
+        patient=patient,
+        session=session,
+        now=now,
     )
     return PatientAnswerOut(
         verdict=decision.verdict.value,

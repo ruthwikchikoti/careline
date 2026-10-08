@@ -164,6 +164,18 @@ def test_client_ip_helper_takes_the_trusted_hop():
     assert client_ip_from_scope(scope(None), trusted_hops=1) == "10.9.9.9"
 
 
+def test_dockerfile_installs_the_llm_extra():
+    """A deploy with an LLM key must have the SDKs installed (REVIEW-7)."""
+    from pathlib import Path
+
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    install = next(
+        line for line in dockerfile.splitlines() if line.startswith("RUN pip install")
+    )
+    extras = install[install.index("[") + 1 : install.index("]")].split(",")
+    assert {"api", "llm"} <= {e.strip() for e in extras}
+
+
 def test_dockerfile_does_not_trust_every_forwarded_ip():
     from pathlib import Path
 

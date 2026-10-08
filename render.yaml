@@ -17,13 +17,28 @@ services:
         value: "6" # per IP, spend-bearing POSTs
       - key: CARELINE_DAILY_REQUEST_CAP
         value: "300" # process-wide, resets at UTC midnight
+      # Render's proxy APPENDS the client IP to X-Forwarded-For; per-IP guards
+      # key on that rightmost hop, never the client-controlled leftmost entry.
+      - key: CARELINE_TRUSTED_PROXY_HOPS
+        value: "1"
+      # Login brute-force lockout (defaults shown; per account + per IP):
+      - key: CARELINE_LOGIN_MAX_FAILURES
+        value: "5"
+      - key: CARELINE_LOGIN_LOCKOUT_SECONDS
+        value: "900"
       - key: CARELINE_ALLOWED_ORIGINS
         sync: false # set to your deployed web origin(s), comma-separated
       # Secrets (set in the dashboard, not here):
       - key: CARELINE_ENV
-        value: development # keeps the demo console mounted; still non-production secrets
+        value: development # keeps the demo console mounted
+      # Public-demo hardening: startup REFUSES the dev-default JWT / internal-key /
+      # PIN-HMAC secrets and the default doctor password — set all four below.
+      - key: CARELINE_PUBLIC_DEMO
+        value: "true"
       - key: CARELINE_JWT_SECRET
         sync: false
+      - key: CARELINE_DOCTOR_PASSWORD
+        sync: false # doctor console login credential (>= 12 chars)
       - key: CARELINE_INTERNAL_API_KEY
         sync: false
       - key: CARELINE_PIN_HMAC_SECRET

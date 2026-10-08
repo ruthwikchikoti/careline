@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = Environment.DEVELOPMENT
+    public_demo: bool = Field(
+        default=False,
+        description=(
+            "CARELINE_PUBLIC_DEMO: a publicly reachable demo deploy. Keeps the "
+            "/demo/* console mounted (non-production) but applies the production "
+            "secret guard at startup (REVIEW-6)."
+        ),
+    )
 
     confidence_floor: float = Field(
         default=DEFAULT_THRESHOLDS.confidence_floor,
@@ -119,11 +127,41 @@ class Settings(BaseSettings):
             ">$20 budget guard. 0 = off (dev default; the public deploy sets it)."
         ),
     )
+    trusted_proxy_hops: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        description=(
+            "Number of trusted reverse proxies that APPEND to X-Forwarded-For "
+            "(1 on Render). Per-IP guards key on the N-th entry from the right; "
+            "0 = ignore XFF and use the socket peer (dev/tests)."
+        ),
+    )
+    login_max_failures: int = Field(
+        default=5,
+        ge=1,
+        description="Failed logins per account before lockout (patient PIN / doctor).",
+    )
+    login_max_failures_per_ip: int = Field(
+        default=20,
+        ge=1,
+        description="Failed logins per client IP (any account) before lockout.",
+    )
+    login_lockout_seconds: int = Field(
+        default=900,
+        ge=1,
+        description="Lockout window after too many failed logins (seconds).",
+    )
 
     @property
     def is_production(self) -> bool:
         """True when running in the production environment."""
         return self.environment is Environment.PRODUCTION
+
+    @property
+    def requires_hardened_config(self) -> bool:
+        """True for production and for a public demo — any internet-facing deploy."""
+        return self.is_production or self.public_demo
 
     @property
     def doctor_id_allowlist(self) -> frozenset[str]:
@@ -146,14 +184,17 @@ class Settings(BaseSettings):
         )
 
     def assert_prod_safe(self) -> None:
-        """Reject production configs that weaken the default safety thresholds.
+        """Reject internet-facing configs that are unsafe to serve.
 
+        Runs for production *and* public-demo mode (:attr:`requires_hardened_config`).
         Uncertainty must always resolve toward ESCALATE.  Lowering
         ``confidence_floor`` or raising ``risk_ceiling`` beyond the baked-in
         defaults would let the agent answer when it should clarify or escalate.
         ``max_clarify_turns`` is unconstrained — lowering it is always safer.
+        The published dev-default secrets and doctor password are refused, since
+        anyone reading the repo could forge tokens or sign in with them.
         """
-        if not self.is_production:
+        if not self.requires_hardened_config:
             return
 
         if self.confidence_floor < DEFAULT_THRESHOLDS.confidence_floor:
@@ -194,6 +235,18 @@ class Settings(BaseSettings):
         if len(self.pin_hmac_secret.encode()) < _MIN_SECRET_BYTES:
             raise ValueError(
                 f"pin_hmac_secret must be at least {_MIN_SECRET_BYTES} bytes in production"
+            )
+
+        if self.uses_default_doctor_password:
+            raise ValueError(
+                "doctor_password must be set (CARELINE_DOCTOR_PASSWORD) — the dev "
+                "default is refused in production / public demo"
+            )
+
+        if len(self.doctor_password) < _MIN_DOCTOR_PASSWORD_CHARS:
+            raise ValueError(
+                f"doctor_password must be at least {_MIN_DOCTOR_PASSWORD_CHARS} "
+                "characters in production / public demo"
             )
 
 

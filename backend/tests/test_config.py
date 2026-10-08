@@ -53,6 +53,8 @@ def test_assert_prod_safe_passes_with_defaults_in_production(monkeypatch):
     monkeypatch.setenv("CARELINE_JWT_SECRET", "prod-jwt-secret-at-least-32-bytes-long!!")
     monkeypatch.setenv("CARELINE_INTERNAL_API_KEY", "prod-internal-api-key-32bytes-min!!")
     monkeypatch.setenv("CARELINE_PIN_HMAC_SECRET", "prod-pin-hmac-secret-32bytes-min!!")
+    # Production also requires a non-default doctor login credential (REVIEW-6).
+    monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", "prod-doctor-password-long")
     settings = Settings()
     settings.assert_prod_safe()
 

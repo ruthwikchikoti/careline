@@ -17,6 +17,7 @@ from careline.adapters.orchestration.graph import build_default_graph, resolve_l
 from careline.adapters.memory.local import LocalMemoryProvider
 from careline.adapters.mongo.supersession import plan_supersession
 from careline.api.errors import register_exception_handlers
+from careline.api.login_throttle import LoginThrottle
 from careline.api.routers import (
     auth_router,
     brain_router,
@@ -201,7 +202,9 @@ class _InMemoryPatientRepository(PatientRepository):
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    if settings.is_production:
+    # Production AND the public demo refuse dev-default secrets at startup
+    # (fail closed: an internet-facing deploy never boots on published secrets).
+    if settings.requires_hardened_config:
         settings.assert_prod_safe()
 
     mongo_client = None
@@ -256,6 +259,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     dpdp_svc = DpdpService(patient_repo=patient_repo, memory=memory, audit=audit)
 
     app.state.settings = settings
+    app.state.login_throttle = LoginThrottle(
+        max_failures=settings.login_max_failures,
+        lockout_seconds=settings.login_lockout_seconds,
+        max_failures_per_ip=settings.login_max_failures_per_ip,
+    )
     app.state.audit = audit
     app.state.auth_svc = auth_svc
     app.state.patient_lookup_svc = patient_lookup_svc
@@ -292,6 +300,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
             BudgetGuardMiddleware,
             per_minute=cfg.rate_limit_per_minute,
             daily_cap=cfg.daily_request_cap,
+            trusted_proxy_hops=cfg.trusted_proxy_hops,
         )
 
     # CORS: localhost for dev; the public deploy sets CARELINE_ALLOWED_ORIGINS.
