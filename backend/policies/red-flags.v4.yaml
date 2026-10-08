@@ -8,7 +8,15 @@ description: 'Emergency rail policy. v4 = v3 + round-1 adversarial-review fixes 
   whole packs, child ingestion of non-food, airway swelling, chest tightness, blood from gut/lungs, wound
   bleeding/dehiscence, fever + confusion, rigid abdomen, sudden neuro deficit, reduced fetal movement,
   cyanosis, transliterated Hindi/Hinglish terms; (4) typo normalisation for the highest-risk tokens. Pinned
-  by tests/brain/test_review_round1.py (post-fix regression probes, not independent generalisation evidence).'
+  by tests/brain/test_review_round1.py (post-fix regression probes, not independent generalisation evidence).
+  Round 2 (same unreleased v4): (5) sev-0 fix -- ''when/whenever/if/should + I/my X + have/get/feel''
+  is a RECURRING report, no longer a hypothetical marker; only explicit future framing (''if I ever'',
+  ''in case I ever'', ''what should I do if'', ''what happens if'', ''if I were to'') softens, and only
+  to a CLARIFY carrying the emergency line; (6) structural first-person / care-recipient current-symptom-report
+  layer (context.symptom_report) -> ESCALATE, risk 0.85; (7) final gate-chain invariant: any danger concept,
+  suppressed or not, never ends in ANSWER; (8) animal-subject segments dropped from the live text, impersonal
+  definitional clauses suppress suppressible rail concepts, ''heart attack risk'' is not an event. Round-2
+  lexicon was driven by DEV probes (tests/brain/test_review_round2.py) -- a fit, not generalisation evidence.'
 patterns:
 - chest\s+pain
 - difficulty\s+breathing
@@ -23,7 +31,7 @@ patterns:
 - heavy\s+bleeding
 - suicid
 - self[- ]?harm
-- heart\s+attack
+- heart\s+attack(?!\s+risk\b)
 - stroke\s+symptom
 - anaphyla
 - choking
@@ -94,7 +102,7 @@ patterns:
 - \b(?:khoon|khun)\s+(?:ki|ka|wali)\s+ult(?:i|ee|iyan|iyaan)\b|\bult(?:i|ee)\s+(?:me|mein|mai)\s+(?:khoon|khun)\b
 - \bdaur[ae]\s+(?:pad|pada|padna|padne|aa|aaya|aya)\w*|\bmirgi\b
 pattern_concepts:
-  heart\s+attack: cardiac_signs
+  heart\s+attack(?!\s+risk\b): cardiac_signs
   stroke\s+symptom: stroke
   head\s+injury: head_injury
   chest\s+pain: chest_pain_cardiac
@@ -296,8 +304,10 @@ semantic:
     - red streaks spreading from my wound
 context:
   scope: 'clause-scoped: split at [.;!?], before but/however/although/though/whereas/except, and before
-    a fresh ''now''; a clause is suppressed only if it carries a history/hypothetical (or, for the acute
-    net, definitional) marker AND no present marker'
+    a fresh ''now''; a clause is suppressed only if it carries a history/explicit-hypothetical (or, for
+    the acute net, definitional; for the rail, definitional with no human subject) marker AND no present
+    marker; inside a live clause, comma/dash segments whose only subject is an animal are dropped. A hit
+    carried ONLY by an explicit-hypothetical clause is softened to CLARIFY + emergency line, never ANSWER.'
   history_suppressible_concepts:
   - cardiac_signs
   - chest_pain_cardiac
@@ -342,9 +352,11 @@ context:
   - nearly\s+(?:fainted?|collapsed|passed\s+out)
   - almost\s+(?:fainted?|collapsed|passed\s+out)
   hypothetical_markers:
-  - \b(?:if|when|whenever|in\s+case|should)\s+(?:i|my\s+\w+|he|she|they)\s+(?:ever\s+)?(?:feel|feels|get|gets|have|has|develop\w*|start\w*|notice\w*|become\w*|experience\w*)\b
-  - \bif\s+i\s+ever\b
-  - \bwhat\s+if\b
+  - \bif\s+(?:i|we|my\s+\w+|he|she|they|someone)\s+ever\b
+  - \bin\s+case\s+(?:i|we|my\s+\w+|he|she|they|someone)\s+ever\b
+  - \bif\s+(?:i|we|my\s+\w+|he|she|they|someone)\s+(?:were|was)\s+to\b
+  - \bwhat\s+(?:should|do|would|must|can)\s+(?:i|we)\s+do\s+if(?:\s+(?:i|we|my\s+\w+|he|she|they|someone)(?:\s+ever)?(?:\s+(?:feel|feels|get|gets|have|has|develop\w*|start\w*|notice\w*|become\w*|experience\w*|faint|collapse|pass\s+out))?)?\b
+  - \bwhat\s+happens\s+if(?:\s+(?:i|we|my\s+\w+|he|she|they|someone)(?:\s+ever)?(?:\s+(?:feel|feels|get|gets|have|has|develop\w*|start\w*|notice\w*|become\w*|experience\w*|faint|collapse|pass\s+out))?)?\b
   present_markers:
   - \b(?:right\s+)?now\b
   - \btoday\b
@@ -365,6 +377,8 @@ context:
   - \bnot\s+going\s+to\s+(?:hurt|kill|end|harm)\s+(?:my\s*self|my\s+(?:own\s+)?life|it\s+all)\b
   - \bno\s+(?:plans?|intention|thoughts?)\s+(?:to|of)\s+(?:harm\w*|end\w*|kill\w*|hurt\w*)\s+(?:my\s*self|my\s+(?:own\s+)?life|it\s+all)\b
   - \b(?:not|never)\s+(?:self[- ]?harm\w*|harm(?:ed|ing)?\s+my\s*self)\b
+  non_human_subject_markers:
+  - \b(?:my|our|the|his|her|their|a)\s+(?:pet\s+|little\s+|old\s+)?(?:cats?|kittens?|kitty|dogs?|pupp(?:y|ies)|pups?|pets?|parrots?|birds?|budgies?|hamsters?|rabbits?|bunn(?:y|ies)|goldfish|fish|horses?|cows?|goats?|tortoises?|turtles?|guinea\s+pigs?)\b
   acute_concern:
     note: first-person + acute-distress term in a live (non-suppressed) clause -> escalate; v4 runs it
       pre-LLM on every question (domain/brain/triage.py) and re-checks it in the scope gate for every
@@ -389,6 +403,79 @@ context:
       cyanosis: \b(?:turned|turning|is|look\w*)\s+(?:blue|bluish|grey|gray)\b
       wrong_medication: \btook\b.{0,40}\binstead\s+of\s+(?:my|mine)\b|\bby\s+(?:mistake|accident)\b|\baccidentally\s+(?:took|swallowed|drank|ate|had)\b|\bwrong\s+(?:tablet|medicine|dose|bottle)\b
       bp_crisis: \b(?:1[7-9]\d|2\d\d)\s*(?:over|/)\s*1[0-4]\d\b
+  symptom_report:
+    note: 'structural fail-closed layer (domain/rails/symptom_report.py): subject reference (caller or
+      care-recipient) AND a symptom/body lexicon hit in the live text, with general-knowledge framing
+      stripped before the subject check -> ESCALATE (scope red_flag). A mild qualifier directly before
+      a SOFT symptom does not fire. Runs pre-LLM in triage and in the scope gate for every scope. Lexicon
+      driven by DEV probes.'
+    risk: 0.85
+    subject_patterns:
+    - \b(?:i|i'?m|im|i'?ve|ive|i'?d|i'?ll|me|my|mine|myself)\b
+    - \b(?:he|she|him|her|his|hers|he'?s|she'?s|himself|herself|we|us|our)\b
+    - \b(?:the|this)\s+(?:baby|child|kid|toddler|infant)\b
+    - \b\d{1,2}[\s-]+(?:year|yr|month)s?[\s-]+old\b
+    - \b(?:mummy|mum|mom|mommy|mama|maa|papa|daddy|dad|nana|nani|nanna|dadi|granny|grandma|grandmother|grandad|grandpa|grandfather|husband|wife|partner|son|daughter|uncle|aunt|auntie|brother|sister)\b
+    - \b(?:the|this)\s+(?:wound|dressing|bandage|incision|stitches|scar|drain|cut|stoma|stoma\s+bag|catheter|catheter\s+bag|line)\b
+    - \b(?:operation|surgery|surgical|op)\s+(?:site|wound|area)\b
+    - \b(?:mujhe|mujhko|mujh|mera|meri|mere|hamein|humein|humko|usko|unko|unhe|unhein)\b
+    general_knowledge_patterns:
+    - \b(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell|explain\s+to|remind|send|show|give)\s+me\b
+    - \b(?:tell|let|remind|show|give|send|call|text|email|help)\s+me\s+(?:about|know|more|what|how|if|whether)\b
+    - \bexplain\s+to\s+me\b
+    - \bwhat\s+(?:is|are|causes?|happens)\b
+    - \bhow\s+(?:does|do|is|are)\b
+    - \bis\s+it\s+normal\s+for\s+(?:people|someone|anyone|patients|everyone)\b
+    - \bin\s+general\b|\bgenerally\b
+    symptom_patterns:
+      chest: \b(?:pain\w*|ache|aching|hurt\w*|tight\w*|pressure|weight|crush\w*|squeez\w*|heav\w*|burning|discomfort|band)\b[^.]{0,30}\b(?:chest|breastbone|sternum|ribs|ribcage)\b|\b(?:chest|breastbone|sternum|ribs|ribcage)\b[^.]{0,30}\b(?:pain\w*|ache|aching|hurt\w*|tight\w*|pressure|weight|crush\w*|squeez\w*|heav\w*|burn\w*|discomfort)\b|\bbeing\s+crushed\b|\bcrushing\s+(?:pain|feeling|sensation|weight|pressure)\b|\belephant\s+(?:is\s+)?(?:sitting|standing)\s+on\b
+      heart_distress: \bheart\b[^.]{0,30}\b(?:explod\w*|burst\w*|going\s+to\s+stop|stopp\w*|jump\w*\s+out)\b|\b(?:heart|pulse)\b[^.]{0,20}\b(?:racing|pounding|hammering|thumping|galloping)\b[^.]{0,60}\b(?:faint\w*|pass\w*\s+out|dizz\w*|collaps\w*|sweat\w*|breath\w*|chest)\b
+      sweating: \b(?:drenched|soaked|pouring|dripping)\s+(?:in|with)\s+(?:sweat|perspiration)\b|\bcold\s+sweats?\b|\bclammy\b
+      bleeding: \bbleed\w*|\bh(?:a)?emorrhag\w*|\bgush\w*|\bspurt\w*|\bclots?\b|\bpool\s+of\b|\b(?:filling|full|filled)\s+(?:up\s+)?with\s+(?:bright\s+)?(?:red|blood)\b|\bsoak(?:ed|ing)\s+(?:through|in)\b|\bred\s+(?:right\s+)?through\b|\bblood\b(?!\s*-?\s*(?:tests?|pressure|sugars?|reports?|work|group|count|counts|levels?|readings?|results?|donation|draw|samples?|thinners?|bank|type|glucose|vessels?|cells?)\b)
+      gi_bleed: \b(?:black|tarry|tar[\s-]like|maroon)\b[^.]{0,25}\b(?:stools?|poo\w*|motions?|faeces|feces)\b|\b(?:stools?|poo\w*|motions?)\b[^.]{0,30}\b(?:black|tarry|like\s+tar|maroon)\b|\bcoffee[\s-]grounds?\b
+      breathing: (?<!bad )(?<!deep )\bbreath\w*\b(?!\s+(?:exercises?|tests?|freshener|mints?))|\bwheez\w*|\bgasp\w*|\bchok\w*|\bsuffocat\w*|\b(?:short\s+of|out\s+of|gasping\s+for|struggling\s+for|fighting\s+for|can'?t\s+get\s+(?:any\s+|enough\s+)?)\s*air\b|\bgurgl\w*|\brattl\w*\s+(?:breath|chest|noise)|\bribs\s+(?:are\s+)?suck\w*\s+in\b|\bsaa?ns\b
+      cyanosis: \b(?:lips?|face|fingers?|fingertips|nails?|skin|tongue)\b[^.]{0,20}\b(?:blue|bluish|grey|gray|greyish|grayish|purple|ashen)\b
+      consciousness: \bfaint(?:ed|ing|s)?\b(?!\s+(?:rash|line|mark|smell|taste|sound|scar|red|pink))|\bpass(?:ed|ing|es)?\s+out\b|\bcollaps\w*|\bslump\w*|\bkeel\w*\s+over\b|\bblack(?:ed|ing)\s+out\b|\bwon'?t\s+wake\b|\bcan'?t\s+(?:keep\s+\w+\s+awake|wake\s+(?:him|her|them|me|up))\b|\bnodding\s+off\b|\b(?:can'?t|cannot|couldn'?t|unable\s+to|hard\s+to)\s+(?:rouse|wake|stir)\b|\bunresponsive\b|\bunconscious\b|\b(?:not|isn'?t|is\s+not|won'?t|doesn'?t|does\s+not|can'?t|stopped)\s+(?:respond\w*|answer\w*|react\w*)\b|\bout\s+of\s+it\b|\b(?:not|isn'?t|stopped)\s+(?:moving|getting\s+up|waking)\b|\blying\s+(?:on\s+the\s+)?(?:ground|floor)\b|\bstopped\s+making\s+sense\b|\b(?:doesn'?t|does\s+not|didn'?t)\s+(?:know|recogni[sz]e)\s+(?:where|who|me|us|her|him)\b|\b(?:talking|speaking)\s+(?:gibberish|nonsense|rubbish)\b|\bgibberish\b|\bnot\s+making\s+(?:any\s+)?sense\b|\b(?:everything|it\s+all|the\s+world)\s+went\s+(?:black|dark|white)\b|\b(?:i'?m|i\s+am|he'?s|she'?s|lying|found\s+\w+)\s+on\s+the\s+floor\b|\b(?:can'?t|cannot|can\s+barely|can\s+hardly|unable\s+to)\s+(?:stand(?:\s+up)?|walk|get\s+up|stay\s+awake|keep\s+awake)\b(?!\s+(?:the|it|this|that)\b)|\bbehosh\w*|\b(?:is|was|seems?|looks?|became|becoming|getting|gone|got|went)\s+(?:very\s+|really\s+|so\s+|suddenly\s+|all\s+)?(?:confused|disoriented|delirious)\b(?!\s+(?:about|by|with|over|regarding|whether|which|what|how|why|when))|\bconfusion\b
+      neuro: \bnumb\w*|\bparaly\w*|\bdroop\w*|\bslurr\w*|\bgarbled\b|\b(?:seeing|see|saw)\s+double\b|\bdouble\s+vision\b|\b(?:vision|eyesight|sight)\b[^.]{0,20}\b(?:went|gone|going|lost|black|double|dark)\b|\b(?:lost|losing|loss\s+of)\s+(?:my\s+|his\s+|her\s+)?(?:vision|sight|speech|balance)\b|\b(?:can'?t|cannot|couldn'?t|unable\s+to)\s+(?:move|feel|lift|raise|grip|use)\s+(?:my\s+|his\s+|her\s+|the\s+)?(?:left\s+|right\s+)?(?:arms?|legs?|hands?|foot|feet|face|side|fingers?|body)\b|\b(?:went|gone|goes|going|feels?|felt)\s+(?:all\s+)?(?:heavy|dead|floppy|limp)\b|\b(?:side|arm|leg|face|hand)\b[^.]{0,15}\b(?:heavy|limp|floppy|dangl\w*)\b|\bfloppy\b|\b(?:legs?|arms?)\s+(?:won'?t|wouldn'?t|don'?t|doesn'?t|can'?t)\s+(?:work|move|hold)\b|\blopsided\b|\b(?:mouth|face|smile|lip)\b[^.]{0,20}\b(?:twisted|crooked|uneven|to\s+one\s+side)\b|\b(?:speech|words|talking|voice)\b[^.]{0,20}\b(?:muddled|jumbled|mixed\s+up|confused|strange|weird)\b|\b(?:can'?t|cannot|couldn'?t)\s+see\s+out\s+of\b|\bdropping\s+things\b|\b(?:face|arm|leg|hand|side|mouth|eye)\b[^.]{0,10}\b(?:won'?t|wouldn'?t|can'?t|doesn'?t)\s+move\b|\b(?:legs?|knees?)\s+(?:gave|give|giving)\s+way\b|\b(?:can'?t|cannot|couldn'?t)\s+feel\s+(?:them|it|anything)\b
+      seizure: \bseizur\w*|\bconvuls\w*|\bjerk(?:ing|ed|s)\b|\b(?:had|having|has|have|in|threw|getting|get|gets|got)\s+(?:a\s+|another\s+|some\s+(?:kind|sort)\s+of\s+|what\s+looked\s+like\s+a\s+)?fits?\b|\bfitting\b|\beyes\s+(?:rolled|rolling)\s+(?:back|up)\b|\b(?:went|gone|go(?:es|ing)|turned)\s+(?:all\s+)?(?:stiff|rigid)\b|\bdaur[ae]\b|\bmirgi\b
+      face_swelling: \b(?:lips?|eyes?|eyelids?|tongue|throat|face|mouth)\b[^.]{0,25}\b(?:swell\w*|swollen|blew\s+up|blown\s+up|balloon\w*|clos\w*\s+up)\b|\b(?:swell\w*|swollen)\s+(?:up\s+)?(?:of\s+)?(?:my\s+|his\s+|her\s+|the\s+)?(?:lips?|eyes?|eyelids?|tongue|throat|face)\b
+      fever_rash: \b(?:fever\w*|temperature|burning\s+up|bukhar)\b[^.]{0,40}\b(?:rash\w*|spots|stiff\s+neck|purple)\b|\b(?:rash\w*|stiff\s+neck)\b[^.]{0,40}\b(?:fever\w*|temperature|burning\s+up|bukhar)\b
+      pregnancy: \b(?:pregnan\w*|\d{1,2}\s+weeks|expecting)\b[^.]{0,40}\b(?:bleed\w*|blood|spotting|not\s+moving|no\s+movements?|isn'?t\s+moving|stopped\s+moving|waters?\s+(?:broke|broken))\b|\b(?:bleed\w*|spotting|not\s+moving|isn'?t\s+moving|stopped\s+moving|no\s+movements?)\b[^.]{0,40}\b(?:pregnan\w*|\d{1,2}\s+weeks)\b
+      wound_open: \b(?:wound|incision|stitches|scar|cut|stoma|staples?)\b[^.]{0,25}\b(?:split|burst|opened|open\s+up|gaping|came\s+apart|come\s+apart|pulled\s+apart|see\s+inside)\b
+      headache_red_flag: \b(?:worst|sudden\w*|thunderclap|exploding|splitting|pounding|severe|blinding)\b[^.]{0,30}\b(?:head\w*|migraine)\b[^.]{0,60}\b(?:light|neck|vomit\w*|sick|pregnan\w*|weeks|vision|flashing|confus\w*|seeing)\b|\b(?:head\w*)\b[^.]{0,20}\b(?:worst|never\s+had)\b|\b(?:pregnan\w*|\d{1,2}\s+weeks)\b[^.]{0,60}\b(?:headache|flashing\s+lights|blurr\w*\s+vision|swollen\s+(?:face|hands))\b
+      cardiac_radiation: \b(?:pain\w*|ach\w*|heav\w*)\b[^.]{0,25}\b(?:jaw\b[^.]{0,15}\barm|arm\b[^.]{0,15}\bjaw)\b
+      no_urine: \b(?:haven'?t|have\s+not|hasn'?t|has\s+not|not|no)\s+(?:peed|wee'?d|weed|urinated|passed\s+(?:any\s+)?urine|passing\s+urine)\b
+      tearing_pain: \b(?:tearing|ripping|stabbing|sharp)\b[^.]{0,20}\bpain\b[^.]{0,30}\b(?:back|through|between\s+(?:my|the)\s+shoulder)
+      infant_unwell: \b(?:baby|infant|newborn)\b[^.]{0,40}\b(?:floppy|won'?t\s+(?:feed|wake)|not\s+(?:feeding|waking)|refus\w*\s+(?:to\s+)?feed|temperature|fever\w*|rash|blue|limp|grunting)\b
+      ingestion_quantity: \b(?:swallow\w*|drank|drunk|gulp\w*|downed|popped|chugged|overdos\w*|took|taken|ate|eaten|consumed)\b[^.]{0,25}\b(?:whole|entire|handful|bottle|strip|pack\w*|box|a\s+lot\s+of|lots\s+of|loads\s+of|a\s+load\s+of|a\s+bunch\s+of|half\s+(?:a|the)|dozens?|the\s+rest\s+of|too\s+many|so\s+many|many|every|all\s+(?:of\s+)?(?:the|my|his|her|their|those|these)?)\b[^.]{0,30}\b(?:tablets?|pills?|capsules?|tabs|caps|meds|medicines?|medication|painkillers?|sleeping|sleepers|paracetamol|ibuprofen|insulin|syrup|doses?|anti\w+|\w+(?:pam|zepam|pine|line|mol|fen|cin|ide|one|ate))\b(?![^.]{0,20}\b(?:as\s+(?:prescribed|advised|directed)|on\s+time|correctly|regularly)\b)
+      ingestion_substance: \b(?:swallow\w*|drank|drunk|gulp\w*|ate|eaten|chew\w*|licked|got\s+into)\b[^.]{0,30}\b(?:bleach|cleaner|detergent|kerosene|petrol|diesel|batter(?:y|ies)|magnets?|acid|pesticide|insecticide|poison\w*|rat\s+\w+|antifreeze|phenyl|sanitis\w*|sanitiz\w*|nail\s+polish|mothballs?|naphthalene|camphor|lighter\s+fluid|paint|glue|washing\s+(?:pods?|powder|liquid|up\s+liquid)|dishwasher\s+\w+|laundry\s+\w+|cleaning\s+\w+|chemicals?|button\s+batter(?:y|ies)|e-?cig\w*|vape\s+liquid)\b|\bgot\s+into\b[^.]{0,30}\b(?:tablets?|pills?|medicine\w*|meds|bottle|cupboard|cabinet)\b
+      ideation: \b(?:want(?:ed)?|wanna|going|plan\w*|ready|wish)\s+(?:to\s+)?(?:die|be\s+dead|end\s+it|disappear\s+forever)\b|\bkill\w*\s+my\s*self\b|\bend(?:ing)?\s+(?:my\s+(?:own\s+)?life|it\s+all)\b|\b(?:hurt|harm|cut)\w*\s+my\s*self\b|\bself[\s-]?harm\w*|\bsuicid\w*|\bno\s+(?:reason|point)\s+(?:to|in)\s+(?:live|living|going\s+on)\b|\bbetter\s+off\s+dead\b
+      hinglish_pain: \b(?:seene?|chhati|chaati)\b[^.]{0,20}\b(?:dard|dabav|dabaav|jalan|bhaari|bhari)\b|\b(?:khoon|khun)\b
+    soft_symptom_patterns:
+      dizziness: \bdizz\w*|\bwoozy\b|\blight[\s-]?headed\w*|\bchakkar\b|\broom\s+(?:is\s+|keeps\s+)?(?:spinning|tilting|moving|swaying)\b
+      drowsiness: \bdrows\w*|\bcan'?t\s+keep\s+(?:my\s+)?eyes\s+open\b
+      weakness: \bweak(?:ness)?\b(?!\s+(?:tea|coffee|signal|wifi|password|point))
+      vomiting: \bvomit\w*|\bthrowing\s+up\b|\bthrew\s+up\b|\bthrow\s+up\b|\bpuk\w*|\bult(?:i|ee)\b|\bbeing\s+sick\b|\b(?:bringing|brought|bring)\s+up\b|\bcan'?t\s+keep\s+(?:anything|any\s+food|food|water|fluids?)\s+down\b|\bspew\w*
+      tingling: \btingl\w*|\bpins\s+and\s+needles\b
+      rigors: \bshiver\w*|\brigou?rs\b|\bshaking\s+(?:chills|all\s+over)\b
+      wound_leak: \b(?:wound|incision|stitches|scar|dressing|bandage|drain)\b[^.]{0,30}\b(?:drip\w*|seep\w*|ooz\w*|pus|smell\w*|stink\w*|hot|red\s+streak\w*)\b
+    mild_qualifiers:
+    - a\s+(?:little\s+)?bit(?:\s+of)?
+    - a\s+little
+    - little
+    - slight(?:ly)?
+    - mild(?:ly)?
+    - somewhat
+    - kind\s+of
+    - kinda
+    - sort\s+of
+    - bit
+    - halka
+    - thoda
+    - thodi
+  danger_concept_invariant: 'gates/chain.py: before ANSWER, every net runs with ALL context guards off
+    (symptom_report.mentions_danger_concept); any hit -> CLARIFY + emergency line (ESCALATE when the clarify
+    budget is spent). Every scope; Brain and graph alike.'
 typo_normalisation:
   method: optimal-string-alignment distance; tokens >= 5 letters snap to a canonical token at distance
     <= 1 (<= 2 for canonical tokens >= 10 letters); rails scan the original AND the normalised text

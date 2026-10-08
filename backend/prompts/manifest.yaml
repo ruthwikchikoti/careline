@@ -20,26 +20,42 @@ policies:
   red_flags:
     version: v4
     file: policies/red-flags.v4.yaml
-    sha256_12: 6c537c25b08c
+    sha256_12: cb141d91b062
 changelog:
 - artifact: red_flags
   version: v4
   note: 'round-1 adversarial review fixes. (1) red-flag rail AND acute-concern net run pre-LLM
-    on every question (one triage function shared by Brain and graph) and the scope gate
-    re-checks both for every scope -- v3 ran the acute net only on out-of-scope, so emergencies
-    mixed into in-scope/administrative questions were answered. (2) history/hypothetical/denial
-    context is clause-scoped, never suppresses a present-tense clause, drops the bare "at NN"
-    age marker, and a denial strips only the denied phrase. (3) structural patterns (ideation
-    families, not breathing, ingestion counts/whole packs, child ingestion, airway swelling,
-    chest tightness, blood from gut/lungs, wound bleeding/dehiscence, fever+confusion, rigid
-    abdomen, sudden neuro deficit, reduced fetal movement, cyanosis), transliterated Hindi/Hinglish
-    terms, typo normalisation for the highest-risk tokens; acute "pass out" regex bug fixed. (4)
-    every redirect/clarify ends with the 112 emergency line. Eval set grown 250 -> 287 (em-061..084
-    + 13 benign near-misses, all held_out=false, written AFTER the fix, so not blind). On the
-    287-item set: v3 recall 74/84 (10 missed) -> v4 84/84; over-escalation v3 12/109 (11.0%) ->
-    v4 8/109 (7.3%); on the original 250 items v4 holds 60/60 and over-escalation 9.4% -> 8.3%.
-    The review battery (tests/brain/test_review_round1.py) is a post-fix regression set, not
-    generalisation evidence.'
+    on every question (one triage function shared by Brain and graph) and the scope gate re-checks
+    both for every scope -- v3 ran the acute net only on out-of-scope, so emergencies mixed into
+    in-scope/administrative questions were answered. (2) history/hypothetical/denial context is
+    clause-scoped, never suppresses a present-tense clause, drops the bare "at NN" age marker,
+    and a denial strips only the denied phrase. (3) structural patterns (ideation families, not
+    breathing, ingestion counts/whole packs, child ingestion, airway swelling, chest tightness,
+    blood from gut/lungs, wound bleeding/dehiscence, fever+confusion, rigid abdomen, sudden neuro
+    deficit, reduced fetal movement, cyanosis), transliterated Hindi/Hinglish terms, typo normalisation
+    for the highest-risk tokens; acute "pass out" regex bug fixed. (4) every redirect/clarify
+    ends with the 112 emergency line. ROUND 2 (same unreleased v4): (5) sev-0 fix -- the v4 draft''s
+    hypothetical markers "(if|when|whenever|in case|should) (I|my X|he|she|they) (feel|get|have...)"
+    silenced recurring reports ("When I have chest pain is my review still in 2 weeks?" was ANSWERED);
+    now only explicit future framing (if I ever / in case I ever / what should I do if / what
+    happens if / if I were to) softens, and only to a CLARIFY carrying the emergency line. (6)
+    structural current-symptom-report layer (subject or care-recipient + broad symptom lexicon,
+    general-knowledge framing excluded) -> ESCALATE, scope red_flag, risk 0.85. (7) gate-chain
+    final invariant: any danger concept, suppressed or not, never ends in ANSWER (CLARIFY + emergency
+    line; ESCALATE once the clarify budget is spent), every scope, Brain and graph. (8) animal-subject
+    segments dropped; impersonal definitional clauses ("what causes chest pain in general?") no
+    longer fire; "heart attack risk" is not an event. The round-2 lexicon was driven by DEV probes
+    (tests/brain/test_review_round2.py) and by three self-authored phrasing sets that were then
+    tuned on -- all dev data, not generalisation evidence. Untuned measurement before each tuning
+    round (self-authored, so correlated with the lexicon author): HEAD-v4 43/110 vs round-2 65/110
+    (59%) emergency recall; a final untuned set after the last tuning: 12/20 (HEAD-v4 10/20),
+    benign 14/15 both. The phrase-list ceiling is lifted, not removed. Eval set grown 287 -> 329
+    (em-085..112 = 8 sev-0 regression + 20 dev probes; ins-087..092 and oos-048..055 = 14 benign
+    near-misses; all held_out=false, written AFTER the fix). Full 329: missed emergencies HEAD-v4
+    19 -> 0; over-escalation 9/123 (7.3%) -> 10/123 (8.1%). Original 250 ids: recall 60/60 held;
+    over-escalation 8/96 (8.3%) -> 9/96 (9.4%), the extra one being ins-064 "How many puffs of
+    the reliever when I feel breathless?" (recurring breathlessness now escalates by rule; label
+    says answer -- a known, accepted conflict).'
 - artifact: red_flags
   version: v3
   note: 'red-team hardening: history/denial context suppression, acute-concern fail-closed

@@ -23,7 +23,12 @@ negatives are not.  Err on the side of inclusion.
 
 Policy v4 (round-1 adversarial review, 2026-10-08) adds structural patterns
 (``_V4_PATTERNS``), clause-scoped history/denial context, and typo
-normalisation (``normalise.py``); see ``policies/red-flags.v4.yaml``.
+normalisation (``normalise.py``); see ``policies/red-flags.v4.yaml``. Round 2
+(same unreleased v4): ``soften_hypothetical`` / ``context`` switches for the
+triage's hypothetical-only probe and the gate's danger-concept invariant,
+impersonal definitional clauses suppress suppressible concepts, and "heart
+attack risk" is not an event. The structural backstop for phrasings no list
+anticipates is ``symptom_report.py``.
 
 Owner: Priyanshu (scope ``safety``).
 """
@@ -65,7 +70,8 @@ RED_FLAG_PATTERNS: tuple[str, ...] = (
     r"heavy\s+bleeding",
     r"suicid",                  # matches suicide, suicidal
     r"self[- ]?harm",
-    r"heart\s+attack",
+    # v4 round 2: "my heart attack risk score" is a record lookup, not an event.
+    r"heart\s+attack(?!\s+risk\b)",
     r"stroke\s+symptom",
     r"anaphyla",                # anaphylaxis, anaphylactic
     r"choking",
@@ -169,7 +175,7 @@ RED_FLAG_PATTERNS = RED_FLAG_PATTERNS + tuple(p for _, p in _V4_PATTERNS)
 # (history/denial markers in acute_concern.py). Default pseudo-concept is the
 # pattern's own slug.
 _PATTERN_CONCEPTS: dict[str, str] = {
-    r"heart\s+attack": "cardiac_signs",
+    r"heart\s+attack(?!\s+risk\b)": "cardiac_signs",
     r"stroke\s+symptom": "stroke",
     r"head\s+injury": "head_injury",
     r"chest\s+pain": "chest_pain_cardiac",
@@ -255,7 +261,22 @@ def _score(q_tokens: frozenset[str], q_tri: Counter, p_tokens: frozenset[str], p
     return 0.6 * coverage + 0.4 * _cosine(q_tri, p_tri)
 
 
-def semantic_red_flag(question: str) -> tuple[str, float] | None:
+def _views(question: str, *, soften_hypothetical: bool, context: bool) -> tuple[str, str]:
+    """(live, undenied) texts. ``live`` drops history (+ explicit-hypothetical
+    when softening) clauses, impersonal definitional clauses ("What causes
+    chest pain in general?") and animal-subject segments; ``context=False``
+    returns the question untouched for both (the danger-concept view)."""
+    if not context:
+        return question, question
+    live = unsuppressed_text(
+        question, hypothetical=soften_hypothetical, impersonal_definitional=True
+    )
+    return live, strip_denials(question)
+
+
+def semantic_red_flag(
+    question: str, *, soften_hypothetical: bool = True, context: bool = True
+) -> tuple[str, float] | None:
     """Score the question against the danger-phrase library.
 
     Returns ``(concept, score)`` for the best-scoring phrase above
@@ -273,11 +294,12 @@ def semantic_red_flag(question: str) -> tuple[str, float] | None:
     """
     if not question:
         return None
+    live, undenied = _views(question, soften_hypothetical=soften_hypothetical, context=context)
     views: dict[str, tuple[frozenset[str], Counter]] = {}
     for key, text in (
         ("full", question),
-        ("live", unsuppressed_text(question)),
-        ("undenied", strip_denials(question)),
+        ("live", live),
+        ("undenied", undenied),
     ):
         norm = _normalize(text)
         views[key] = (_content_tokens(norm), _trigrams(norm) if norm else Counter())
@@ -299,9 +321,8 @@ def semantic_red_flag(question: str) -> tuple[str, float] | None:
     return None
 
 
-def _check_one(text: str) -> str | None:
-    live = unsuppressed_text(text)
-    undenied = strip_denials(text)
+def _check_one(text: str, *, soften_hypothetical: bool, context: bool) -> str | None:
+    live, undenied = _views(text, soften_hypothetical=soften_hypothetical, context=context)
     for pattern, concept in _COMPILED_PATTERNS:
         if concept in SUPPRESSIBLE_REGEX_CONCEPTS:
             target = live
@@ -312,13 +333,15 @@ def _check_one(text: str) -> str | None:
         match = pattern.search(target)
         if match is not None:
             return match.group(0)
-    semantic = semantic_red_flag(text)
+    semantic = semantic_red_flag(text, soften_hypothetical=soften_hypothetical, context=context)
     if semantic is not None:
         return f"semantic:{semantic[0]}"
     return None
 
 
-def check_red_flag(question: str) -> str | None:
+def check_red_flag(
+    question: str, *, soften_hypothetical: bool = True, context: bool = True
+) -> str | None:
     """Return the matched red-flag signal if found, else ``None``.
 
     Two nets, both deterministic and pre-LLM: the literal/structural regexes
@@ -329,11 +352,15 @@ def check_red_flag(question: str) -> str | None:
     phrase. Both the original and the typo-normalised question are scanned
     (normalisation can only add matches). A match means the turn goes
     straight to ESCALATE without ever invoking the Reasoner.
+
+    ``soften_hypothetical=False`` keeps explicit-hypothetical clauses live
+    (the triage's "is the danger only hypothetical?" probe); ``context=False``
+    disables every context guard (the danger-concept invariant's view).
     """
     if not question:
         return None
     for text in text_variants(question):
-        hit = _check_one(text)
+        hit = _check_one(text, soften_hypothetical=soften_hypothetical, context=context)
         if hit is not None:
             return hit
     return None

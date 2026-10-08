@@ -13,10 +13,11 @@ START → triage → retrieve → reason → verify → gate ─┬─ answer   
 
 The crucial design rule (and the project's core IP): **the graph re-implements no
 safety logic.** Every node calls the exact same domain primitive the Brain calls —
-the shared ``run_triage`` (red-flag rail, acute-concern net, multi-condition
-tripwire, small talk) in *triage*, ``patient.valid_slice``
-in *retrieve*, the injected ``Reasoner`` / ``Verifier`` ports in *reason* / *verify*,
-and ``run_gate_chain`` in *gate*. So the graph's verdict is identical to the Brain's
+the shared ``run_triage`` (red-flag rail, acute-concern net, symptom-report layer,
+multi-condition tripwire, hypothetical-only danger → CLARIFY, small talk) in *triage*,
+``patient.valid_slice`` in *retrieve*, the injected ``Reasoner`` / ``Verifier`` ports in
+*reason* / *verify*, and ``run_gate_chain`` (including its final "a danger concept never
+ends in ANSWER" invariant) in *gate*. So the graph's verdict is identical to the Brain's
 by construction — a property the parity test (RU-5) locks down. Adding the graph can
 never change a safety decision; it only adds the agent decomposition and observability.
 

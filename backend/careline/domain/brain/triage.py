@@ -2,7 +2,8 @@
 
 Every question passes through here before retrieval or any model call:
 
-    red-flag rail → acute-concern net → multi-condition tripwire → small talk
+    red-flag rail → acute-concern net → symptom-report layer
+    → multi-condition tripwire → hypothetical-only danger (CLARIFY) → small talk
 
 Policy v4 (round-1 adversarial review) moved the acute-concern net here. At
 v3 it ran only inside the scope gate's OUT_OF_SCOPE branch, so an emergency
@@ -11,6 +12,14 @@ want to die", "billing question: my child swallowed my tablets") reached the
 Reasoner, matched a diet or follow-up fact, and was ANSWERED or CLARIFIED.
 Now both nets run on the raw question for EVERY turn, before small talk and
 before the Reasoner; any hit is a terminal ESCALATE.
+
+Round 2 (still v4, unreleased) adds the structural symptom-report layer
+(``rails/symptom_report.py``: subject + symptom lexicon, not a phrase list)
+and narrows hypothetical softening: only EXPLICIT future framing ("if I
+ever", "what should I do if", …) softens, and only to a CLARIFY carrying the
+emergency line — "when I have chest pain …" is a recurring report and
+escalates. The gate chain's final invariant then guarantees that no message
+containing a danger concept, suppressed or not, is ever ANSWERED.
 
 Why a shared function: the Brain and the LangGraph ``triage`` node both call
 :func:`run_triage`, so the two engines cannot drift apart here — the parity
@@ -27,13 +36,15 @@ from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.rails.acute_concern import check_acute_concern
 from careline.domain.rails.conversational import is_small_talk
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
+from careline.domain.rails.symptom_report import SYMPTOM_REPORT_RISK, check_symptom_report
 
 
 def run_triage(question: str, trace: ReasoningTrace) -> Decision | None:
     """Run the pre-LLM rails; return a terminal ``Decision`` or ``None`` to continue.
 
-    Order matters: both emergency nets run before the small-talk rail, so
-    "hey, I have chest pain" still escalates.
+    Order matters: every emergency net runs before the small-talk rail, so
+    "hey, I have chest pain" still escalates; every ESCALATE runs before the
+    hypothetical-only CLARIFY (gates only downgrade).
     """
     # -- Red-flag rail (literal + structural + semantic) ------------------
     matched = check_red_flag(question)
@@ -68,6 +79,25 @@ def run_triage(question: str, trace: ReasoningTrace) -> Decision | None:
             trace=trace,
         )
 
+    # -- Structural symptom-report layer (v4, round 2) ---------------------
+    # Subject + broad symptom lexicon: the fail-closed net for phrasings no
+    # phrase list anticipated. Deliberately trades over-escalation for recall.
+    report = check_symptom_report(question)
+    if report is not None:
+        trace.record(
+            "symptom_report_rail",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=f"current symptom report ({report}) by the caller or someone they care for",
+        )
+        return Decision.escalate(
+            "Your message may describe an urgent symptom — transferring to your "
+            f"doctor. {EMERGENCY_LINE}",
+            scope=ScopeCategory.RED_FLAG,
+            risk=SYMPTOM_REPORT_RISK,
+            trace=trace,
+        )
+
     # -- Multi-condition tripwire -----------------------------------------
     is_cross, groups = check_multi_condition(question)
     if is_cross:
@@ -81,6 +111,34 @@ def run_triage(question: str, trace: ReasoningTrace) -> Decision | None:
             "Question spans multiple clinical conditions — transferring to your doctor.",
             scope=ScopeCategory.CROSS_CONDITION,
             risk=0.95,
+            trace=trace,
+        )
+
+    # -- Danger carried ONLY by an explicit future-hypothetical clause -----
+    # "what should I do if I ever get chest pain?" — not happening now, so not
+    # an escalation, but never an ANSWER either: CLARIFY with the emergency
+    # line. Recurring "when I have …" never reaches here (it is a live report).
+    hypothetical = (
+        check_red_flag(question, soften_hypothetical=False)
+        or check_acute_concern(question, soften_hypothetical=False)
+        or check_symptom_report(question, soften_hypothetical=False)
+    )
+    if hypothetical is not None:
+        trace.record(
+            "hypothetical_danger_rail",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=(
+                f"danger concept ({hypothetical}) only in explicit future-hypothetical "
+                "framing — clarify with the emergency line, never answer"
+            ),
+        )
+        return Decision.clarify(
+            "That sounds like a question about what to do if a serious symptom "
+            "happens. Your doctor can give you a plan for that — I can pass the "
+            "question on, or help with your approved medicines, diet and care "
+            f"instructions. {EMERGENCY_LINE}",
+            scope=ScopeCategory.RED_FLAG,
             trace=trace,
         )
 
