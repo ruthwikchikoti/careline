@@ -22,7 +22,7 @@ Constraints (false positives are safe, but not free):
   "chest" snaps to "pain", the token after "heart" snaps to "attack", and the
   run-together forms "chestpain" / "heartattack" are split.
 
-Mirrored into ``backend/policies/red-flags.v4.yaml`` (``typo_normalisation``;
+Mirrored into ``backend/policies/red-flags.v5.yaml`` (``typo_normalisation``;
 sync enforced by ``tests/llm/test_prompt_registry.py``).
 
 Owner: Priyanshu (scope ``safety``).

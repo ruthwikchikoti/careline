@@ -18,10 +18,37 @@ prompts:
     sha256_12: f7f494360114
 policies:
   red_flags:
-    version: v4
-    file: policies/red-flags.v4.yaml
-    sha256_12: cb141d91b062
+    version: v5
+    file: policies/red-flags.v5.yaml
+    sha256_12: d7897fb5e5ab
 changelog:
+- artifact: red_flags
+  version: v5
+  note: 'blind battery 1. A blind battery (40 emergencies + 40 benign, written by an agent that had
+    never seen the code) measured v4 at 34/40 emergency recall and 4/40 false escalations. The ten
+    failures DROVE v5 and are DEV data from here on (tests/brain/test_blind1_battery.py; eval em-113..118
+    and oos-056..059, held_out=false, notes "blind-1 battery, dev data at v5"), so passing them is a
+    fit, not generalisation evidence; the neighbouring-phrasing probes in the same test file were
+    written alongside the fix and are dev data too. Structural mechanisms, not string pastes: (a)
+    intent-to-overdose / stockpiling ideation families (saving up / hoarding / stockpiling pills, take
+    them all / the whole strip, tonight is the night, don''t see the point anymore), denial-stripped;
+    (b) a TAKEN overdose quantity (>= 8 or a number word; units excluded) with a medicine noun (generic,
+    Indian brand, drug-suffix family) is literal on the whole message -- a denial never suppresses an
+    ingestion; (c) Indian-English progressive pain verbs (chest is paining, paining a lot) + an implicit
+    body-part subject in the symptom-report layer; (d) Hinglish limb/speech/face deficits (haath/pair
+    kaam nahi kar raha, sun/sunn, bol nahi pa rahi, chehra tedha, ek side, achanak, lakwa) and
+    chest/seene/dil mein ... dard with up to 3 intervening tokens; (e) child + insulin pen/syringe,
+    third-person self-injection, someone else''s medicine, insulin + hypoglycaemia signs; (f) precision:
+    media/third-party framing stripped as a SPAN (never a whole clause), transient-and-resolved framing
+    suppresses only mild labels (dizzy, fever, dizziness) never a red flag, "donate/give blood" is not
+    bleeding. Danger-concept invariant unchanged (the 4 benign items CLARIFY, never ANSWER). Measured:
+    the 10 battery items v4 0/6 escalated + 4/4 falsely escalated -> v5 6/6 + 0/4 (dev fit; the other 70
+    battery items were not available to re-run). Committed eval set 329 -> 339: zero verdict changes on
+    the 329 shared ids vs after-policy-v4 (recall 112/112, over-escalation 10/123 = 8.1% held); full
+    339: recall 118/118, over-escalation 10/127 (7.9%; v4 code on the same 339 would be 14/127, 11.0%),
+    redirect 1.000, no_answer 1.000. Gate PASS vs after-policy-v4. Known limits: ''take them all'' and
+    ''been saving my tablets'' can fire on benign logistics phrasing (accepted: fail closed); a fresh
+    blind battery is needed to measure generalisation.'
 - artifact: red_flags
   version: v4
   note: 'round-1 adversarial review fixes. (1) red-flag rail AND acute-concern net run pre-LLM

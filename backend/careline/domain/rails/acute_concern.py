@@ -36,8 +36,13 @@ mode, and the red team measured 19% benign FPs without them):
   ideation rail; v4 strips only the denied phrase (:func:`strip_denials`),
   so a second, undenied ideation phrase or an overdose count still fires.
 
+* **Third-party / media framing** (v5) — "a movie where someone had a heart
+  attack" is removed from the live text as a SPAN, never a whole clause.
+* **Transient-and-resolved framing** (v5) — "it passes in a second", "it's
+  gone now" suppress only the MILD labels (dizziness, fever), never a red flag.
+
 Deterministic, keyless, pure — mirrored into ``backend/policies/
-red-flags.v4.yaml`` and enforced in sync by ``tests/llm/test_prompt_registry.py``.
+red-flags.v5.yaml`` and enforced in sync by ``tests/llm/test_prompt_registry.py``.
 
 Owner: Priyanshu (scope ``safety``).
 """
@@ -192,6 +197,57 @@ DENIAL_MARKERS: tuple[str, ...] = (
     r"\b(?:not|never)\s+(?:self[- ]?harm\w*|harm(?:ed|ing)?\s+my\s*self)\b",
 )
 
+# v5 (blind battery 1): media / fiction / third-party framing. "I watched a
+# movie where someone had a heart attack, what are the warning signs?" is
+# general knowledge, not a report. Each marker matches a SPAN — from the media
+# noun through the third-party relative clause, ending at clause punctuation
+# or before a connector that re-introduces the caller ("and since then my
+# chest hurts", "but now I …") — and only that span is removed from the live
+# text, never the whole clause. The caller doing the watching ("I was
+# watching a movie when I got chest pain") is not framing: the relative
+# clause must name a third party. The danger-concept invariant still sees the
+# span, so such a message is never ANSWERED.
+_MEDIA_NOUN = (
+    r"(?:movie|film|show|series|episode|documentary|video|clip|reel|serial|drama|programme"
+    r"|program|article|book|novel|story|news\s+(?:report|story|item)|news)"
+)
+_THIRD_PARTY = (
+    r"(?:someone|somebody|a\s+(?:man|woman|guy|girl|boy|lady|character|person|patient|kid|child"
+    r"|player|actor|actress)|the\s+(?:hero|heroine|actor|actress|character|man|woman|guy|lady"
+    r"|villain|patient|player|kid|child)|an\s+(?:actor|actress|old\s+man|old\s+woman)|he|she"
+    r"|they|people|everyone)"
+)
+_SPAN_END = (
+    r"[^,.;!?]*?(?=\s*[,.;!?]|\s+(?:and|but|so|then|now)\s+(?:i|i'?m|i'?ve|my|me|since|now"
+    r"|today)\b|$)"
+)
+THIRD_PARTY_FRAMING_MARKERS: tuple[str, ...] = (
+    rf"\b(?:a|an|the|this|that|some)\s+{_MEDIA_NOUN}\s+(?:where|in\s+which|about|when|that\s+showed)\s+{_THIRD_PARTY}\b{_SPAN_END}",
+    rf"\bon\s+(?:tv|television|the\s+news|youtube|netflix|instagram|social\s+media)\b[^,.;!?]{{0,20}}?\b{_THIRD_PARTY}\b{_SPAN_END}",
+    rf"\b(?:a|the)\s+character\b{_SPAN_END}",
+)
+
+# v5 (blind battery 1): transient-and-resolved framing. "it passes in a
+# second", "it's gone now", "he's playing normally" — when present ANYWHERE in
+# the message, these suppress only the MILD labels below (dizziness, fever).
+# They NEVER suppress a red-flag label: "I had chest pain but it's gone now",
+# "he had a fit, he's playing normally now", "I fainted but it passed" all
+# still escalate. Applied only with context on (the danger-concept invariant
+# ignores it, so the message is still never ANSWERED).
+RESOLVED_MARKERS: tuple[str, ...] = (
+    r"\b(?:it|this|that|which)\s+(?:usually\s+|always\s+|just\s+|then\s+)?(?:passes|passed|goes\s+away|went\s+away|settles|settled|clears|cleared|wears\s+off|wore\s+off)\b",
+    r"\b(?:passes|goes\s+away|settles|clears)\s+(?:in|after|within)\s+(?:a\s+|one\s+|\d+\s+)?(?:few\s+)?(?:seconds?|moments?|minutes?|mins?)\b",
+    r"\b(?:it'?s|it\s+is|it\s+has|it'?s\s+all|(?:the\s+)?(?:fever|temperature)\s+(?:is|has))\s+(?:now\s+)?(?:gone|settled|resolved|passed|come\s+down|normal)\b",
+    r"\b(?:he'?s|he\s+is|she'?s|she\s+is|i'?m|i\s+am|they'?re|they\s+are)\s+(?:now\s+)?(?:fine|ok|okay|better|normal|back\s+to\s+normal)\s+now\b",
+    r"\bnow\s+(?:he'?s|he\s+is|she'?s|she\s+is|i'?m|i\s+am|they'?re|they\s+are)\s+(?:fine|ok|okay|better|normal|back\s+to\s+normal)\b",
+    r"\b(?:playing|eating|running\s+around)\s+(?:normally|as\s+usual|happily)\b",
+    r"\bback\s+to\s+(?:normal|his\s+usual|her\s+usual|my\s+usual)\b",
+    r"\bwas\b[^.;!?]{0,40}\bbut\s+(?:is\s+|she'?s\s+|he'?s\s+|i'?m\s+|it'?s\s+)?(?:now\s+)?(?:fine|ok|okay|better|normal|gone)\b",
+)
+#: The only labels resolution may suppress: acute-net ``dizzy``/``fever`` and
+#: the symptom-report soft label ``dizziness``.
+MILD_RESOLVABLE_LABELS: frozenset[str] = frozenset({"dizzy", "fever", "dizziness"})
+
 # A segment (split at commas and dashes inside a clause) whose subject is an
 # animal and which names no human subject is dropped from the live text:
 # "My cat passed out on the sofa after dinner, so cute — when is my
@@ -229,6 +285,10 @@ _DENIAL_RE = re.compile("|".join(f"(?:{p})" for p in DENIAL_MARKERS), re.IGNOREC
 _NON_HUMAN_RE = re.compile(
     "|".join(f"(?:{p})" for p in NON_HUMAN_SUBJECT_MARKERS), re.IGNORECASE
 )
+_THIRD_PARTY_RE = re.compile(
+    "|".join(f"(?:{p})" for p in THIRD_PARTY_FRAMING_MARKERS), re.IGNORECASE
+)
+_RESOLVED_RE = re.compile("|".join(f"(?:{p})" for p in RESOLVED_MARKERS), re.IGNORECASE)
 
 _CLAUSE_SPLIT = re.compile(
     r"[.;!?\n]+"
@@ -338,7 +398,7 @@ def unsuppressed_text(
             impersonal_definitional=impersonal_definitional,
         ):
             continue
-        c = _drop_non_human_segments(c)
+        c = _drop_non_human_segments(_THIRD_PARTY_RE.sub(" ", c)).strip()
         if c:
             live.append(c)
     return ". ".join(live)
@@ -347,6 +407,12 @@ def unsuppressed_text(
 def strip_denials(question: str) -> str:
     """The question with only the explicitly denied self-harm phrases removed."""
     return _DENIAL_RE.sub(" ", question or "")
+
+
+def resolved_transient(question: str) -> bool:
+    """True when the message frames a symptom as transient and resolved (v5).
+    Callers may use it to skip only :data:`MILD_RESOLVABLE_LABELS`."""
+    return bool(_RESOLVED_RE.search(question or ""))
 
 
 def history_suppressed(question: str) -> bool:
@@ -389,7 +455,10 @@ def check_acute_concern(
         )
         if not live:
             continue
+        resolved = context and resolved_transient(text)
         for label, rx in _ACUTE_RES:
+            if resolved and label in MILD_RESOLVABLE_LABELS:
+                continue
             if rx.search(live):
                 return label
     return None
@@ -400,6 +469,9 @@ __all__ = [
     "HISTORY_MARKERS",
     "HYPOTHETICAL_MARKERS",
     "NON_HUMAN_SUBJECT_MARKERS",
+    "THIRD_PARTY_FRAMING_MARKERS",
+    "RESOLVED_MARKERS",
+    "MILD_RESOLVABLE_LABELS",
     "PRESENT_MARKERS",
     "DENIAL_MARKERS",
     "SUPPRESSIBLE_CONCEPTS",
@@ -410,5 +482,6 @@ __all__ = [
     "unsuppressed_text",
     "strip_denials",
     "history_suppressed",
+    "resolved_transient",
     "denial_suppressed",
 ]
