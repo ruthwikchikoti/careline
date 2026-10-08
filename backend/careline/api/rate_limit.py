@@ -1,7 +1,8 @@
 """Budget guard middleware — per-IP rate limit + hard daily cap for the public demo.
 
 Every POST to a spend-bearing endpoint (/demo/ask, /internal/run-question,
-/patient/ask) is a paid LLM call on a public URL. This ASGI middleware enforces
+/patient/ask, and /consultations/{id}/extract — the LLM extractor) is a paid
+LLM call on a public URL. This ASGI middleware enforces
 independent guards before the request reaches the router:
 
 * **per-minute, per-IP** sliding window (``CARELINE_RATE_LIMIT_PER_MINUTE``) on
@@ -31,6 +32,7 @@ Owner: Naresh (scope ``api``).
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -64,6 +66,8 @@ class BudgetGuardMiddleware:
             "/internal/run-question",
             "/patient/ask",
         ),
+        # Spend routes with a path parameter, matched as full paths.
+        spend_patterns: tuple[str, ...] = (r"/consultations/[^/]+/extract/?",),
         limit_only_prefixes: tuple[str, ...] = ("/patient/login", "/auth/token"),
         trusted_proxy_hops: int = 0,
         login_per_minute: int | None = None,
@@ -72,6 +76,7 @@ class BudgetGuardMiddleware:
         self.per_minute = per_minute
         self.daily_cap = daily_cap
         self.spend_prefixes = spend_prefixes
+        self._spend_patterns = tuple(re.compile(p) for p in spend_patterns)
         self.limit_only_prefixes = limit_only_prefixes
         self.trusted_proxy_hops = trusted_proxy_hops
         # Login window: its own limit (None = mirror the spend limit) and its own
@@ -83,7 +88,10 @@ class BudgetGuardMiddleware:
         self._daily_count = 0
 
     def _is_spend(self, method: str, path: str) -> bool:
-        return method == "POST" and any(path.startswith(p) for p in self.spend_prefixes)
+        return method == "POST" and (
+            any(path.startswith(p) for p in self.spend_prefixes)
+            or any(p.fullmatch(path) for p in self._spend_patterns)
+        )
 
     def _is_limit_only(self, method: str, path: str) -> bool:
         return method == "POST" and any(

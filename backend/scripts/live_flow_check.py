@@ -202,11 +202,43 @@ def run(budget_usd: float) -> dict:
     return log
 
 
+def cost_breakdown(monitoring: dict) -> dict:
+    """Split the monitor's cost: per portal question vs per MODEL-HANDLED question.
+
+    Rail-caught emergencies and other deterministic turns make no LLM call and
+    cost $0, so the mean over every question understates what a question the
+    model actually handled costs. Both figures are reported.
+    """
+    cost = (monitoring or {}).get("cost") or {}
+    op = (monitoring or {}).get("operational") or {}
+    total = cost.get("total_cost_usd")
+    handled = cost.get("requests_with_llm_calls")
+    questions = op.get("requests_total")
+    if questions is None and cost.get("mean_cost_usd_per_request") and total is not None:
+        questions = round(total / cost["mean_cost_usd_per_request"])
+    per_q = total / questions if total is not None and questions else None
+    per_handled = total / handled if total is not None and handled else None
+    return {
+        "questions": questions,
+        "model_handled": handled,
+        "no_llm_call": (questions - handled) if questions is not None and handled is not None
+        else None,
+        "total_cost_usd": total,
+        "mean_per_question_usd": per_q,
+        "mean_per_model_handled_usd": per_handled,
+    }
+
+
+def _usd(v) -> str:
+    return "n/a" if v is None else f"${v:.6f}"
+
+
 def _markdown(log: dict, budget: float) -> str:
     turns = log["turns"]
     safety = [t for t in turns if t["expect"] != "answer"]
     quality = [t for t in turns if t["expect"] == "answer"]
     u, mon = log["usage"], log["monitoring"]
+    cb = cost_breakdown(mon)
     q, op = mon.get("quality", {}), mon.get("operational", {})
     esc = log["escalations"]
     leak = _PID in json.dumps(log["other_escalations"])
@@ -250,8 +282,12 @@ def _markdown(log: dict, budget: float) -> str:
         f"| Tokens in / out | {u.get('input_tokens')} / {u.get('output_tokens')} |",
         f"| Total spend (whole run, incl. extraction + judge) | ${u.get('cost_usd')} |",
         f"| Mean cost per LLM call | ${u.get('per_call_usd')} |",
-        f"| Mean cost per portal question (monitor) | "
-        f"${(mon.get('cost') or {}).get('mean_cost_usd_per_request')} |",
+        f"| Mean cost per portal question, all (monitor) | "
+        f"{_usd(cb['mean_per_question_usd'])} over {cb['questions']} questions, of which "
+        f"{cb['no_llm_call']} made no LLM call ($0, e.g. rail-caught emergencies) |",
+        f"| Mean cost per model-handled question (monitor) | "
+        f"{_usd(cb['mean_per_model_handled_usd'])} over {cb['model_handled']} questions "
+        f"that called the model |",
         f"| LLM call latency p50 / p99 | {round(u.get('latency_ms_p50', 0))} / "
         f"{round(u.get('latency_ms_p99', 0))} ms |",
         f"| End-to-end question latency p50 / p95 / max | {round(pct(.5))} / "

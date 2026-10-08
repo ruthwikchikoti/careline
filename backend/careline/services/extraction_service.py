@@ -149,6 +149,25 @@ _MEDICATION_RE = re.compile(
     r"(?:\s+(\d+\s*mg))?"
     r"(?:\s+(twice daily|once daily|three times daily|every\s+\d+\s+hours))?"
 )
+# A dose change ("Reduce Metformin to 500mg twice daily", "Lower the metformin
+# dose to 500 mg", "Change Paracetamol from 1000mg to 500mg") -> ONE medication
+# fact with the NEW dose only, so approval supersedes the old fact by name
+# (keyless supersession). "Switch warfarin to apixaban" names no dose: not matched.
+_DOSE_UNIT = r"\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?)\b"
+_FREQUENCY = (
+    r"twice daily|once daily|three times daily|four times daily|twice a day|once a day"
+    r"|three times a day|every\s+\d+\s+hours|at night|at bedtime|in the morning"
+)
+_DOSE_CHANGE_RE = re.compile(
+    r"(?i)\b(?:reduce|reduced|reducing|lower|lowered|lowering|decrease|decreased|decreasing"
+    r"|increase|increased|increasing|raise|raised|raising|change|changed|changing|switch"
+    r"|switched|switching|adjust|adjusted|adjusting|titrate|titrated)\s+"
+    r"(?:the\s+|his\s+|her\s+|your\s+|their\s+)?(?:dose\s+of\s+|dosage\s+of\s+)?"
+    r"([A-Za-z][A-Za-z0-9-]*)(?:\s+(?:dose|dosage))?\s+"
+    rf"(?:from\s+{_DOSE_UNIT}\s+)?to\s+({_DOSE_UNIT})"
+    rf"(?:\s+({_FREQUENCY}))?"
+)
+_NOT_A_DRUG = frozenset({"it", "this", "that", "them", "dose", "dosage", "the", "her", "his"})
 _INSTRUCTION_RE = re.compile(
     r"(?i)(?:patient should|advised to|must|should"
     r"|follow|stick to|continue to|maintain)\s+(.+?)(?:\.|$)"
@@ -187,6 +206,27 @@ class HeuristicExtractor(Extractor):
 
         facts: list[ExtractedFactDTO] = []
         seen: set[str] = set()
+
+        # Dose changes first: the NEW dose wins over any restated old dose.
+        for match in _DOSE_CHANGE_RE.finditer(stripped):
+            name = match.group(1)
+            if name.lower() in _NOT_A_DRUG:
+                continue
+            key = f"med:{name.lower()}"
+            if key in seen:
+                continue
+            seen.add(key)
+            dose = match.group(2).strip()
+            frequency = match.group(3).strip() if match.group(3) else None
+            facts.append(
+                ExtractedFactDTO(
+                    kind=FactKind.MEDICATION,
+                    summary=" ".join(p for p in (name, dose, frequency) if p),
+                    name=name,
+                    dose=dose,
+                    frequency=frequency,
+                )
+            )
 
         for match in _MEDICATION_RE.finditer(stripped):
             name = match.group(1)

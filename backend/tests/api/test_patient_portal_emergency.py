@@ -4,7 +4,9 @@ The portal used to discard the decision text and render every escalated turn as
 "Sent to your doctor", so a patient reporting crushing chest pain was never shown
 the emergency guidance. ``PatientAnswerOut`` / ``PatientQuestionOut`` now carry
 ``patient_message`` (the decision's patient-facing text) and ``emergency``
-(scope RED_FLAG) so the web page can show a prominent call-112 banner.
+(scope RED_FLAG) so the web page can show a prominent call-112 banner. Since
+the final evaluator pass the message for an ESCALATE is a fixed plain text
+(``careline.api.patient_text``), never the internal gate reason.
 
 Owner: Naresh (scope ``api``).
 """
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from careline.api.patient_text import PATIENT_EMERGENCY_MESSAGE, PATIENT_ESCALATION_MESSAGE
 from tests.api.conftest import doctor_headers
 
 _DOC = "dr-portal"
@@ -44,8 +47,9 @@ def test_red_flag_turn_is_marked_emergency_with_its_message(client: TestClient):
     body = ask.json()
     assert body["verdict"] == "escalate"
     assert body["emergency"] is True
-    assert body["patient_message"] == body["escalation_reason"]
-    assert body["patient_message"]
+    # A fixed plain emergency message (112 first) — never the internal reason.
+    assert body["patient_message"] == PATIENT_EMERGENCY_MESSAGE
+    assert body["escalation_reason"] is None
 
     (turn,) = client.get("/patient/questions", headers=portal).json()
     assert turn["emergency"] is True
@@ -60,7 +64,7 @@ def test_non_emergency_turn_is_not_flagged_and_carries_its_text(client: TestClie
     assert ask.status_code == 200, ask.text
     body = ask.json()
     assert body["emergency"] is False
-    expected = body["answer_text"] or body["escalation_reason"]
+    expected = body["answer_text"] if body["verdict"] != "escalate" else PATIENT_ESCALATION_MESSAGE
     assert body["patient_message"] == expected
 
     (turn,) = client.get("/patient/questions", headers=portal).json()
