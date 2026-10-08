@@ -91,9 +91,9 @@ class TestAuditRedaction:
             decision=Decision.answer("Paracetamol 500mg.", confidence=0.9),
             logged_at=_NOW,
         )
-        count = audit.redact_patient("p-1")
+        count = audit.redact_patient("p-1", doctor_id="dr-1")
         assert count >= 1
-        turn = audit.turns_for_patient("p-1")[0]
+        turn = audit.turns_for_patient(doctor_id="dr-1", patient_id="p-1")[0]
         assert turn.redacted
         assert turn.question is None
         assert turn.answer_text is None
