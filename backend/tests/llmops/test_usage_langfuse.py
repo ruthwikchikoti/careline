@@ -192,15 +192,20 @@ class _FakeV2:
 
 class _FakeGen:
     def __init__(self, kw):
+        import time as _time
+
         self.kw = kw
         self.updates = []
         self.ended = False
+        self.started_ns = _time.time_ns()  # v3 spans start when created
+        self.end_time = None
 
     def update(self, **kw):
         self.updates.append(kw)
 
-    def end(self, **kw):
+    def end(self, *, end_time=None):
         self.ended = True
+        self.end_time = end_time
 
 
 class _FakeV3:
@@ -299,3 +304,69 @@ def test_tracer_noop_without_keys(monkeypatch):
     assert langfuse_tracer.record_turn(
         question="q", patient_id="p", model="m", verdict="answer", scope="s", latency_ms=1.0
     ) is False
+
+
+# -- real start/end time on both SDK shapes ------------------------------------------
+
+
+def test_v3_generation_opened_at_turn_start_spans_the_real_turn():
+    import time
+
+    fake = _FakeV3()
+    trace = langfuse_tracer.begin_turn(client=fake)
+    time.sleep(0.03)  # the turn's work
+    turn = _turn()
+    assert langfuse_tracer.record_turn(
+        question="q", patient_id="p", verdict="answer", scope="in_scope",
+        latency_ms=30.0, turn_usage=turn, client=fake, trace=trace,
+    )
+    assert len(fake.gens) == 1  # the generation opened at turn start is the one reported
+    g = fake.gens[0]
+    assert isinstance(g.end_time, int)  # explicit end, ns since epoch
+    assert (g.end_time - g.started_ns) / 1e6 >= 25.0  # spans the real work
+    final = g.updates[-1]
+    assert final["model"] == "gpt-4o-mini"
+    assert final["usage_details"] == {"input": 300, "output": 30, "total": 330}
+    assert final["cost_details"]["total"] == pytest.approx(turn.cost_usd)
+    assert g.ended
+
+
+def test_v3_without_a_begun_turn_still_ends_with_an_explicit_end_time():
+    fake = _FakeV3()
+    assert langfuse_tracer.record_turn(
+        question="q", patient_id="p", verdict="answer", scope="in_scope",
+        latency_ms=50.0, turn_usage=_turn(), client=fake,
+    )
+    g = fake.gens[0]
+    assert isinstance(g.end_time, int) and g.ended
+    # The SDK cannot back-date a span start, so the real window is in metadata.
+    meta = g.kw["metadata"]
+    assert meta["latency_ms"] == 50.0 and meta["start_time"] < meta["end_time"]
+
+
+def test_v2_uses_the_turns_real_start_time():
+    import time
+
+    fake = _FakeV2()
+    trace = langfuse_tracer.begin_turn(client=fake)
+    time.sleep(0.02)
+    langfuse_tracer.record_turn(
+        question="q", patient_id="p", verdict="answer", scope="in_scope",
+        latency_ms=20.0, turn_usage=_turn(), client=fake, trace=trace,
+    )
+    g = fake.generations[0]
+    assert g["start_time"] == trace.start_time
+    assert (g["end_time"] - g["start_time"]).total_seconds() >= 0.015
+
+
+def test_begin_turn_never_raises_and_is_a_noop_without_keys(monkeypatch):
+    monkeypatch.delenv("CARELINE_LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("CARELINE_LANGFUSE_SECRET_KEY", raising=False)
+    trace = langfuse_tracer.begin_turn()
+    assert trace.generation is None
+
+    class _Broken:
+        def start_generation(self, **kw):
+            raise RuntimeError("down")
+
+    assert langfuse_tracer.begin_turn(client=_Broken()).generation is None

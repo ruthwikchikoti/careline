@@ -73,6 +73,8 @@ def test_pass_with_oracle_client(cases, cache_path, tmp_path):
     assert metrics["mode"] == "llm"
     assert metrics["model"] == "gpt-4o-mini"
     assert metrics["artifacts"]["judge"].startswith("judge@v1+")
+    # Per-case outcomes, so a later LLM run is compared on shared ids only.
+    assert len(metrics["per_case"]) == metrics["n"]
 
 
 def test_unfaithful_judge_trips_faithfulness_gate(cases, cache_path, tmp_path):

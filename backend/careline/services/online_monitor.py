@@ -16,14 +16,27 @@ bounded ring buffers (``CARELINE_MONITOR_WINDOW`` turns, default 1000):
     no key this is the deterministic keyless judge twin; with
     ``OPENAI_API_KEY`` the real judge (prompt ``judge@v1``). Judge errors are
     counted, never scored faithful; a full queue drops (counted), never blocks.
+    The judge runs inside a copy of the sampled turn's context
+    (``contextvars.copy_context``), so its usage lands in THAT turn's usage
+    scope and therefore in the turn's per-request cost below.
 (d) **input drift** — the live question distribution vs the eval-set
     reference: PSI over the scope-category mix, out-of-vocabulary token rate
     vs the eval vocabulary (baseline = held-out cases vs dev vocabulary), and
     mean-length shift. Flagged when PSI > ``CARELINE_DRIFT_PSI`` (0.2), OOV
     rate exceeds the baseline by > 0.15, or length shifts > 50 %, once at
-    least 30 turns are in the window.
+    least 30 turns are in the window. The reference (a keyless run of the
+    whole eval set) is built OFF the request path: the API lifespan calls
+    :meth:`OnlineMonitor.warm_reference` on a background thread at startup.
+    Until it is ready drift reports ``reference_not_ready``; a failed build is
+    cached and logged once (``reference_unavailable``) — never retried per
+    request.
 (e) **cost** — tokens and estimated $ per request from the usage turn scope
-    (reasoner + verifier [+ judge] calls of that one turn).
+    (reasoner + verifier [+ the sampled judge] calls of that one turn; the
+    judge's share appears once it has run).
+
+Ops knobs (``CARELINE_MONITOR_WINDOW``, ``CARELINE_JUDGE_SAMPLE_RATE``,
+``CARELINE_DRIFT_PSI``) are parsed defensively: a malformed or out-of-range
+value falls back to the default with one warning, never a crash.
 
 PHI stance: the monitor never stores question text — only aggregate features
 (token count, OOV count, scope). Answer + cited-fact text are held only in the
@@ -37,6 +50,8 @@ Owner: Naresh (scope ``services``).
 
 from __future__ import annotations
 
+import contextvars
+import logging
 import math
 import os
 import queue
@@ -62,16 +77,45 @@ _PSI_EPS = 1e-4
 _SAFETY_SCOPES = frozenset({ScopeCategory.RED_FLAG, ScopeCategory.CROSS_CONDITION})
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
+_log = logging.getLogger(__name__)
+
 
 def _tokens(text: str) -> list[str]:
     return _TOKEN_RE.findall((text or "").lower())
 
 
-def _env_float(name: str, default: float) -> float:
-    try:
-        return float(os.environ.get(name, default))
-    except (TypeError, ValueError):
+def _env_float(
+    name: str, default: float, *, lo: float | None = None, hi: float | None = None
+) -> float:
+    """Float env knob; malformed / non-finite / out-of-range -> default + warning."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
         return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or (lo is not None and value < lo) or (
+        hi is not None and value > hi
+    ):
+        _log.warning("%s=%r is invalid; using the default %s", name, raw, default)
+        return default
+    return value
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    """Int env knob; malformed or below ``minimum`` -> default + warning."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = minimum - 1
+    if value < minimum:
+        _log.warning("%s=%r is invalid; using the default %s", name, raw, default)
+        return default
+    return value
 
 
 def _pct(sorted_values: list[float], q: float) -> float:
@@ -168,10 +212,18 @@ class _Turn:
     fail_closed: bool
     low_risk_escalation: bool
     n_tokens: int
-    n_oov: int
+    n_oov: int | None          # None = drift reference was not ready yet
     llm_calls: int
     tokens: int
     cost_usd: float | None
+    usage: Any = None          # the turn's live TurnUsage (judge spend lands later)
+
+    def cost(self) -> tuple[int, int, float | None]:
+        """(llm calls, tokens, $) — read live from the turn's usage scope."""
+        if self.usage is not None:
+            u = self.usage
+            return u.calls, u.total_tokens, u.cost_usd
+        return self.llm_calls, self.tokens, self.cost_usd
 
 
 @dataclass(frozen=True)
@@ -211,16 +263,25 @@ class OnlineMonitor:
         seed: int | None = None,
         judge_queue_size: int = 100,
     ) -> None:
-        self._window = int(window or os.environ.get("CARELINE_MONITOR_WINDOW", DEFAULT_WINDOW))
+        self._window = (
+            int(window)
+            if window is not None and int(window) > 0
+            else _env_int("CARELINE_MONITOR_WINDOW", DEFAULT_WINDOW)
+        )
         rate = (
             judge_sample_rate
             if judge_sample_rate is not None
-            else _env_float("CARELINE_JUDGE_SAMPLE_RATE", DEFAULT_JUDGE_SAMPLE_RATE)
+            else _env_float(
+                "CARELINE_JUDGE_SAMPLE_RATE", DEFAULT_JUDGE_SAMPLE_RATE, lo=0.0, hi=1.0
+            )
         )
         self._sample_rate = min(1.0, max(0.0, rate))
         self._judge = judge
         self._reference = reference
-        self._psi_threshold = _env_float("CARELINE_DRIFT_PSI", DRIFT_PSI_THRESHOLD)
+        self._reference_error: str | None = None
+        self._reference_lock = threading.Lock()
+        self._reference_started = reference is not None
+        self._psi_threshold = _env_float("CARELINE_DRIFT_PSI", DRIFT_PSI_THRESHOLD, lo=0.0)
         self._rng = random.Random(seed)
         self._lock = threading.Lock()
         self._turns: deque[_Turn] = deque(maxlen=self._window)
@@ -249,8 +310,8 @@ class OnlineMonitor:
         """Record one completed turn. ``cost`` is a usage ``TurnUsage`` or a float."""
         try:
             tokens = _tokens(question)
-            ref = self._get_reference()
-            n_oov = sum(t not in ref.vocab for t in tokens) if ref is not None else 0
+            ref = self._get_reference()  # never builds inline (see warm_reference)
+            n_oov = sum(t not in ref.vocab for t in tokens) if ref is not None else None
             fail_closed = _is_fail_closed(decision)
             verdict = decision.verdict
             low_risk = (
@@ -259,10 +320,12 @@ class OnlineMonitor:
                 and decision.scope not in _SAFETY_SCOPES
                 and decision.risk < 0.5
             )
+            live_usage = None
             if isinstance(cost, (int, float)):
                 llm_calls, tok, usd = 0, 0, float(cost)
             elif cost is not None:
                 llm_calls, tok, usd = cost.calls, cost.total_tokens, cost.cost_usd
+                live_usage = cost  # read live: a sampled judge's spend joins later
             else:
                 llm_calls, tok, usd = 0, 0, None
             turn = _Turn(
@@ -277,6 +340,7 @@ class OnlineMonitor:
                 llm_calls=llm_calls,
                 tokens=tok,
                 cost_usd=usd,
+                usage=live_usage,
             )
             with self._lock:
                 self._turns.append(turn)
@@ -313,7 +377,13 @@ class OnlineMonitor:
             with self._lock:
                 self._judged.append(_Judged(False, 0.0))
             return
-        item = (decision.answer_text or "", [(fid, valid[fid]) for fid in cited])
+        # The judge runs in a COPY of this turn's context, so the judge's usage
+        # record joins this turn's usage scope (per-request cost includes it).
+        item = (
+            contextvars.copy_context(),
+            decision.answer_text or "",
+            [(fid, valid[fid]) for fid in cited],
+        )
         try:
             self._queue.put_nowait(item)
         except queue.Full:
@@ -342,18 +412,18 @@ class OnlineMonitor:
             if item is None:
                 self._queue.task_done()
                 break
-            answer, facts = item
+            ctx, answer, facts = item
             try:
                 if self._judge is None:
                     self._judge = _default_judge()
-                verdict = self._judge.judge(answer=answer, facts=facts)
+                verdict = ctx.run(self._judge.judge, answer=answer, facts=facts)
                 with self._lock:
                     self._judged.append(_Judged(bool(verdict.faithful), float(verdict.score)))
             except Exception:
                 with self._lock:
                     self._judge_errors += 1
             finally:
-                del item, answer, facts  # PHI: nothing outlives the judgement
+                del item, ctx, answer, facts  # PHI: nothing outlives the judgement
                 self._queue.task_done()
 
     def flush(self, timeout: float = 5.0) -> bool:
@@ -375,12 +445,38 @@ class OnlineMonitor:
     # -- reporting ----------------------------------------------------------
 
     def _get_reference(self) -> DriftReference | None:
-        if self._reference is None:
-            try:
-                self._reference = build_reference()
-            except Exception:
-                return None
+        """The drift reference if it is ready — NEVER built on the caller's thread."""
         return self._reference
+
+    def warm_reference(self, *, background: bool = False) -> threading.Thread | None:
+        """Build the drift reference once (the API lifespan calls this at startup).
+
+        ``background=True`` builds on a daemon thread and returns it. A failed
+        build is cached and logged ONCE — later calls are no-ops, so a broken
+        eval set can never become a per-request retry storm. Never raises.
+        """
+        with self._reference_lock:
+            if self._reference_started:
+                return None
+            self._reference_started = True
+        if not background:
+            self._build_reference()
+            return None
+        thread = threading.Thread(
+            target=self._build_reference, name="careline-drift-reference", daemon=True
+        )
+        thread.start()
+        return thread
+
+    def _build_reference(self) -> None:
+        try:
+            self._reference = build_reference()
+        except Exception as exc:
+            self._reference_error = f"{type(exc).__name__}: {exc}"
+            _log.warning(
+                "online monitor: drift reference build failed (%s); input drift is "
+                "disabled for this process (not retried)", self._reference_error,
+            )
 
     def _judge_stamp(self) -> str:
         if self._judge is None:
@@ -455,18 +551,21 @@ class OnlineMonitor:
         # (d) input drift
         drift = self._drift(decided)
 
-        # (e) cost
-        priced = [t for t in turns if t.cost_usd is not None]
-        total_cost = sum(t.cost_usd for t in priced)
+        # (e) cost — read live, so a sampled judge's spend is in its turn
+        costs = [t.cost() for t in turns]
+        priced = [usd for _calls, _tok, usd in costs if usd is not None]
+        total_cost = sum(priced)
+        total_tokens = sum(tok for _calls, tok, _usd in costs)
         cost = {
             "basis": "estimate (provider token counts × versioned price table)",
-            "requests_with_llm_calls": sum(t.llm_calls > 0 for t in turns),
-            "total_tokens": sum(t.tokens for t in turns),
-            "mean_tokens_per_request": (sum(t.tokens for t in turns) / n) if n else 0.0,
+            "includes": "reasoner + verifier + the sampled async judge, per turn",
+            "requests_with_llm_calls": sum(calls > 0 for calls, _tok, _usd in costs),
+            "total_tokens": total_tokens,
+            "mean_tokens_per_request": (total_tokens / n) if n else 0.0,
             "total_cost_usd": round(total_cost, 6),
             "mean_cost_usd_per_request": (total_cost / len(priced)) if priced else None,
             "p95_cost_usd_per_request": (
-                round(_pct(sorted(t.cost_usd for t in priced), 0.95), 6) if priced else None
+                round(_pct(sorted(priced), 0.95), 6) if priced else None
             ),
             "requests_unknown_cost": n - len(priced),
         }
@@ -494,7 +593,10 @@ class OnlineMonitor:
     def _drift(self, decided: list[_Turn]) -> dict:
         ref = self._get_reference()
         if ref is None:
-            return {"status": "reference_unavailable", "drifted": False, "reasons": []}
+            if self._reference_error is not None:
+                return {"status": "reference_unavailable", "drifted": False, "reasons": [],
+                        "error": self._reference_error}
+            return {"status": "reference_not_ready", "drifted": False, "reasons": []}
         n = len(decided)
         if n < DRIFT_MIN_SAMPLES:
             return {
@@ -508,7 +610,10 @@ class OnlineMonitor:
         live_mix = {k: v / n for k, v in mix.items()}
         psi = _psi(live_mix, ref.scope_mix)
         tokens = sum(t.n_tokens for t in decided)
-        oov = (sum(t.n_oov for t in decided) / tokens) if tokens else 0.0
+        # OOV only over turns recorded after the reference was ready.
+        with_oov = [t for t in decided if t.n_oov is not None]
+        oov_tokens = sum(t.n_tokens for t in with_oov)
+        oov = (sum(t.n_oov for t in with_oov) / oov_tokens) if oov_tokens else 0.0
         mean_len = tokens / n
         shift = abs(mean_len - ref.mean_tokens) / ref.mean_tokens if ref.mean_tokens else 0.0
         reasons = []
@@ -590,6 +695,14 @@ def snapshot() -> dict:
     return get_monitor().snapshot()
 
 
+def warm_reference_async() -> None:
+    """Start building the process-wide monitor's drift reference off-thread. Never raises."""
+    try:
+        get_monitor().warm_reference(background=True)
+    except Exception:
+        return
+
+
 __all__ = [
     "DriftReference",
     "OnlineMonitor",
@@ -599,4 +712,5 @@ __all__ = [
     "record_error",
     "reset_monitor",
     "snapshot",
+    "warm_reference_async",
 ]

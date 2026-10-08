@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-import careline.domain.brain.brain as brain_module
+import careline.domain.brain.triage as triage_module
 import careline.domain.gates.chain as chain_module
 from scripts import cost_report, load_test, shadow_compare
 
@@ -25,19 +25,35 @@ def test_v1_arm_is_rebuilt_from_the_v1_artifact_and_reproduces_baseline_v0():
     # v1 had no semantic layer: a paraphrased emergency slips through.
     assert rail.check_red_flag("there is a tightness in my chest and my left arm feels funny") is None
     assert rail.check_red_flag("I have chest pain") is not None
-    metrics = shadow_compare.run_variant(rail)
+    # Scored on the frozen 250 ids that existed at baseline-v0: the set has
+    # since grown (more emergencies), so the full-set count is not comparable.
+    metrics = shadow_compare.run_variant(rail, case_ids=shadow_compare.BASELINE_V0_CASE_IDS)
     # The committed baseline-v0 number (evals/reports/baseline-v0.json).
+    assert metrics["n"] == 250
     assert metrics["missed_emergencies"] == 58
     assert metrics["policy"].startswith("red_flags@v1+")
 
 
+def test_cli_case_ids_option_restricts_both_arms(tmp_path):
+    out = tmp_path / "shadow.json"
+    assert shadow_compare.main([
+        "--a", "v1", "--case-ids", str(shadow_compare.BASELINE_V0_CASE_IDS),
+        "--json", str(out),
+    ]) == 0
+    both = json.loads(out.read_text(encoding="utf-8"))
+    assert both["a"]["n"] == both["b"]["n"] == 250
+    assert both["a"]["missed_emergencies"] == 58
+
+
+def _rail_sites():
+    names = ("check_red_flag", "check_acute_concern", *shadow_compare._LATER_NETS)
+    return tuple(getattr(mod, n, None) for mod in (triage_module, chain_module) for n in names)
+
+
 def test_rails_are_restored_after_a_shadow_run():
-    before = (brain_module.check_red_flag, chain_module.check_red_flag,
-              chain_module.check_acute_concern)
+    before = _rail_sites()
     shadow_compare.run_variant(shadow_compare.build_rail("v1"))
-    after = (brain_module.check_red_flag, chain_module.check_red_flag,
-             chain_module.check_acute_concern)
-    assert before == after
+    assert _rail_sites() == before
 
 
 def test_active_version_uses_the_live_rails():

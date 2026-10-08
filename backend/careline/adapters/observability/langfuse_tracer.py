@@ -7,8 +7,18 @@ reported to Langfuse as one **generation** carrying:
 
 * the REAL model(s) the turn called (from the per-turn usage scope), or the
   caller's label when the turn made no LLM call (e.g. a red-flag escalation);
-* the REAL end-to-end latency the caller measured (start/end time are set so
-  Langfuse's own latency column is right, and it is in metadata too);
+* the REAL end-to-end latency and time window of the turn. The caller opens
+  the turn with :func:`begin_turn` before running the pipeline and passes the
+  handle to :func:`record_turn`:
+
+  - Langfuse **v2** (``client.generation(...)``): ``start_time`` = the turn's
+    real start, ``end_time`` = now;
+  - Langfuse **v3** (``client.start_generation(...)`` → ``update`` → ``end``):
+    v3 spans cannot be back-dated, so the generation is OPENED in
+    :func:`begin_turn` at the turn's real start and ended with an explicit
+    ``end_time`` (ns since epoch). Without a begun turn the v3 span is opened
+    at report time; it is still ended explicitly and the real window is in
+    metadata (``start_time``/``end_time``/``latency_ms``);
 * PER-TURN tokens and estimated cost from
   :func:`careline.adapters.llm.usage.turn_scope` — never the process-wide
   running total. Without a turn scope the cost is reported as unknown
@@ -25,6 +35,12 @@ question (needed to understand any incident; the demo data is fictional) but
 **never** patient identifiers (only a salted sha12 of the patient id), never
 fact text, and never the full record.
 
+Cost scope: the trace is sent when the turn ends, before the online
+monitor's sampled async judge runs, so the Langfuse per-turn cost covers the
+reasoner/verifier calls; the judge's spend for a sampled turn is added to
+that turn's cost in the online monitor (``GET /monitoring``) and is visible
+per agent in the usage log / cost report.
+
 Owner: Naresh (scope ``api``/observability).
 """
 
@@ -32,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -66,6 +83,35 @@ def _client() -> Any | None:
     return _client_cache[key]
 
 
+@dataclass(frozen=True)
+class TurnTrace:
+    """Handle for one turn's trace, opened at the turn's real start."""
+
+    start_time: datetime
+    generation: Any | None = None  # Langfuse v3 generation opened at start_time
+    client: Any | None = None
+
+
+def begin_turn(*, client: Any | None = None) -> TurnTrace:
+    """Mark the start of a turn (call BEFORE running the pipeline). Never raises.
+
+    With a v3 client the generation is opened now, so its span covers the
+    real turn; with v2 (or no client) only the start time is captured.
+    """
+    start = datetime.now(timezone.utc)
+    try:
+        client = client if client is not None else _client()
+        if client is not None and hasattr(client, "start_generation"):
+            return TurnTrace(start, client.start_generation(name="careline.turn"), client)
+        return TurnTrace(start, None, client)
+    except Exception:
+        return TurnTrace(start, None, None)
+
+
+def _ns(moment: datetime) -> int:
+    return int(moment.timestamp() * 1_000_000_000)
+
+
 def _resolve_model(model: str | None, turn_usage: TurnUsage | None) -> str:
     if turn_usage is not None and turn_usage.models:
         return ",".join(turn_usage.models)  # what was actually called wins
@@ -83,15 +129,19 @@ def record_turn(
     turn_usage: TurnUsage | None = None,
     extra_metadata: dict[str, Any] | None = None,
     client: Any | None = None,
+    trace: TurnTrace | None = None,
 ) -> bool:
     """Report one turn. Returns True when something was actually sent.
 
     ``turn_usage`` is the :func:`~careline.adapters.llm.usage.turn_scope` of
-    this turn; ``latency_ms`` the caller's measured wall time. ``client``
-    injects an SDK client (tests). Never raises — tracing must not break the
-    clinical call.
+    this turn; ``latency_ms`` the caller's measured wall time; ``trace`` the
+    :func:`begin_turn` handle (real start time; the open v3 generation).
+    ``client`` injects an SDK client (tests). Never raises — tracing must not
+    break the clinical call.
     """
     try:
+        if client is None and trace is not None:
+            client = trace.client
         client = client if client is not None else _client()
         if client is None:
             return False
@@ -121,22 +171,32 @@ def record_turn(
         trace_input = {"question": question, "patient": _patient_hash(patient_id)}
         trace_output = {"verdict": verdict, "scope": scope}
         end = datetime.now(timezone.utc)
-        start = end - timedelta(milliseconds=max(0.0, latency_ms))
+        start = (
+            trace.start_time
+            if trace is not None
+            else end - timedelta(milliseconds=max(0.0, latency_ms))
+        )
+        metadata["start_time"] = start.isoformat()
+        metadata["end_time"] = end.isoformat()
 
         if hasattr(client, "start_generation"):  # Langfuse v3
-            kwargs: dict[str, Any] = {
-                "name": "careline.turn",
+            details: dict[str, Any] = {
                 "model": resolved_model,
                 "input": trace_input,
+                "output": trace_output,
                 "metadata": metadata,
             }
             if usage_counts is not None:
-                kwargs["usage_details"] = usage_counts
+                details["usage_details"] = usage_counts
             if cost is not None:
-                kwargs["cost_details"] = {"total": cost}
-            generation = client.start_generation(**kwargs)
-            generation.update(output=trace_output)
-            generation.end()
+                details["cost_details"] = {"total": cost}
+            generation = trace.generation if trace is not None else None
+            if generation is None:
+                # Not begun at the turn's start: the span opens now (v3 cannot
+                # back-date); the real window is in metadata.
+                generation = client.start_generation(name="careline.turn", **details)
+            generation.update(**details)
+            generation.end(end_time=_ns(end))
             return True
 
         if hasattr(client, "generation"):  # Langfuse v2
@@ -165,4 +225,4 @@ def record_turn(
         return False
 
 
-__all__ = ["record_turn"]
+__all__ = ["TurnTrace", "begin_turn", "record_turn"]

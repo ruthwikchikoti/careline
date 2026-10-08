@@ -10,7 +10,9 @@ Two implementations, one contract:
 * :class:`OpenAIJudge` — structured output via the Responses API
   (``responses.parse`` + :class:`JudgeDTO`), instructions loaded from the
   versioned, hash-checked artifact ``prompts/judge/v1.md``. Usage is recorded
-  as agent ``"judge"`` so judge spend is visible separately in the cost report.
+  as agent ``"judge"`` so judge spend is visible separately in the cost report;
+  online, the monitor runs the judge inside a copy of the sampled turn's
+  context, so that spend is also part of the turn's per-request cost.
 * :class:`KeylessJudge` — a deterministic token-overlap groundedness check,
   so online evaluation and CI work with no key and no network. Weaker than a
   model judge (it cannot see paraphrase), but it is conservative: a claim
@@ -72,11 +74,11 @@ class JudgeVerdict:
 def load_judge_prompt() -> prompt_registry.Artifact:
     """The versioned judge prompt, hash-checked against the manifest.
 
-    ``prompt_registry.load_prompt`` whitelists the three spine prompts; the
-    judge is registered in the same manifest and goes through the same
-    tamper-checked loader (a hash mismatch raises ``RegistryError``).
+    Loaded through the public registry API like the spine prompts, so it is
+    part of :func:`~careline.adapters.llm.prompt_registry.active_versions` and
+    the same tamper check applies (a hash mismatch raises ``RegistryError``).
     """
-    return prompt_registry._load("prompts", "judge")
+    return prompt_registry.load_prompt("judge")
 
 
 def build_judge_user_message(*, answer: str, facts: Sequence[tuple[str, str]]) -> str:

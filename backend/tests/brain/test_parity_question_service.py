@@ -167,3 +167,37 @@ def test_small_talk_nudges_instead_of_answering():
     d = svc.run_question(question="good morning!", patient=_patient(), now=_NOW, session=_session())
     assert d.verdict.value == "clarify"
     assert "medicines" in (d.answer_text or "") or "help" in (d.answer_text or "")
+
+
+@pytest.mark.parametrize(
+    "name,question,reasoner,verifier", _SCENARIOS, ids=[s[0] for s in _SCENARIOS]
+)
+def test_both_service_paths_feed_the_online_monitor_identically(name, question, reasoner, verifier):
+    """The monitor sees every served turn — graph path and inline path alike."""
+    from careline.services import online_monitor
+    from careline.services.online_monitor import DriftReference, OnlineMonitor
+
+    seen = {}
+    for label, svc in (
+        ("inline", QuestionService(reasoner=reasoner, verifier=verifier, thresholds=_THRESHOLDS)),
+        ("graph", QuestionService(
+            graph=build_question_graph(reasoner=reasoner, verifier=verifier,
+                                       thresholds=_THRESHOLDS),
+            thresholds=_THRESHOLDS,
+        )),
+    ):
+        online_monitor.reset_monitor(OnlineMonitor(
+            window=10, judge_sample_rate=0.0,
+            reference=DriftReference({"in_scope": 1.0}, frozenset(), 0.0, 1.0, 1),
+        ))
+        try:
+            d = svc.run_question(question=question, patient=_patient(), now=_NOW,
+                                 session=_session())
+            snap = online_monitor.snapshot()
+        finally:
+            online_monitor.reset_monitor()
+        assert snap["operational"]["requests_total"] == 1, f"{name}: {label} did not record"
+        assert snap["output"]["verdict_counts"][d.verdict.value] == 1
+        assert snap["operational"]["latency_ms_p50"] > 0.0
+        seen[label] = snap["output"]["verdict_counts"]
+    assert seen["inline"] == seen["graph"]

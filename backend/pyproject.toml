@@ -52,6 +52,9 @@ dev = [
     "PyJWT>=2.8",
     "httpx2>=2.4",
     "fastapi>=0.111",
+    # In-memory async Mongo for tests/data — without it the whole Mongo-backed
+    # data suite is skipped at import and CI silently tests nothing there.
+    "mongomock-motor>=0.0.29",
 ]
 
 [tool.setuptools.packages.find]

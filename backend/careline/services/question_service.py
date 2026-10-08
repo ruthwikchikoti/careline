@@ -12,16 +12,25 @@ Manages per-call ``CallSession`` state (clarify-turn budget) and hands
 ESCALATE verdicts to the telephony port. Naresh's ``/internal/run-question``
 router calls this service.
 
+Observability (never decides, never breaks a call): each turn runs inside a
+usage ``turn_scope``; its real wall-clock latency and that per-turn usage go
+to the Langfuse turn trace (opened with ``begin_turn`` at the turn's real
+start) and to the online monitor (``online_monitor.record``), whose sampled
+async judge runs in a copy of this turn's context. A pipeline that raises is
+recorded as an error turn and the exception propagates unchanged.
+
 Owner: Priyanshu (scope ``safety``).
 """
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from careline.adapters.llm import usage as usage_recorder
 from careline.adapters.llm.tracing import trace_span
-from careline.adapters.observability import record_turn
+from careline.adapters.observability import begin_turn, record_turn
 from careline.adapters.telephony.stub import EscalationPayload, TelephonyPort, TelephonyStub
 from careline.domain.brain.brain import Brain
 from careline.domain.enums import Verdict
@@ -30,6 +39,7 @@ from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient
 from careline.domain.ports.reasoning import Reasoner, Verifier
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
+from careline.services import online_monitor
 from careline.services.audit_service import AuditEventKind, AuditService
 
 if TYPE_CHECKING:
@@ -75,6 +85,8 @@ class QuestionService:
     ) -> Decision:
         """Process one question and return the terminal ``Decision``."""
         now = now or datetime.now(timezone.utc)
+        started = time.perf_counter()
+        turn_trace = begin_turn()
         session.record_turn()
         trace = ReasoningTrace()
 
@@ -85,20 +97,35 @@ class QuestionService:
                 doctor_id=session.doctor_id,
             )
 
-        with trace_span("question_service.run_question") as span:
+        with trace_span("question_service.run_question") as span, \
+                usage_recorder.turn_scope() as turn_usage:
             span.log_input(question=question, patient_id=patient.patient_id)
             span.log_metadata(
                 call_id=session.call_id,
                 doctor_id=session.doctor_id,
             )
 
-            decision = self._run_pipeline(
-                question=question,
-                patient=patient,
-                session=session,
-                now=now,
-                trace=trace,
-            )
+            try:
+                decision = self._run_pipeline(
+                    question=question,
+                    patient=patient,
+                    session=session,
+                    now=now,
+                    trace=trace,
+                )
+            except Exception:
+                failed_ms = (time.perf_counter() - started) * 1000.0
+                online_monitor.record_error(latency_ms=failed_ms)
+                record_turn(  # closes a v3 generation opened at the turn's start
+                    question=question,
+                    patient_id=patient.patient_id,
+                    verdict="error",
+                    scope="error",
+                    latency_ms=failed_ms,
+                    turn_usage=turn_usage,
+                    trace=turn_trace,
+                )
+                raise
 
             if decision.verdict is Verdict.CLARIFY:
                 session.record_clarify()
@@ -122,13 +149,25 @@ class QuestionService:
                     )
 
             span.log_output(verdict=decision.verdict.value)
+            latency_ms = (time.perf_counter() - started) * 1000.0
             record_turn(
                 question=question,
                 patient_id=patient.patient_id,
-                model="deterministic-spine",
+                model="deterministic-spine",  # only used when the turn made no LLM call
                 verdict=decision.verdict.value,
                 scope=decision.scope.value if decision.scope else "unscoped",
-                latency_ms=0.0,
+                latency_ms=latency_ms,
+                turn_usage=turn_usage,
+                trace=turn_trace,
+            )
+            # Inside the turn scope: a sampled judge inherits this turn's context.
+            online_monitor.record(
+                decision=decision,
+                question=question,
+                latency_ms=latency_ms,
+                cost=turn_usage,
+                patient=patient,
+                now=now,
             )
             return decision
 

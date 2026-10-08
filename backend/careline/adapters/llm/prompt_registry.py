@@ -28,7 +28,8 @@ import yaml
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _MANIFEST_PATH = _BACKEND_ROOT / "prompts" / "manifest.yaml"
 
-_PROMPT_NAMES = ("reasoner", "verifier", "extractor")
+# Spine prompts + the LLM-as-judge prompt (judge@v1, online/offline evaluation).
+_PROMPT_NAMES = ("reasoner", "verifier", "extractor", "judge")
 
 
 class RegistryError(RuntimeError):
@@ -91,7 +92,7 @@ def _load(kind: str, name: str) -> Artifact:
 
 
 def load_prompt(name: str) -> Artifact:
-    """Load a versioned prompt artifact (``reasoner`` | ``verifier`` | ``extractor``)."""
+    """Load a versioned prompt artifact (``reasoner`` | ``verifier`` | ``extractor`` | ``judge``)."""
     if name not in _PROMPT_NAMES:
         raise RegistryError(f"unknown prompt '{name}' (expected one of {_PROMPT_NAMES})")
     return _load("prompts", name)
