@@ -34,6 +34,8 @@ from careline.api.patient_text import patient_message
 from careline.domain.enums import ScopeCategory
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision
+from careline.services import online_monitor
+from careline.services.audit_service import AuditTurnRecord, NotRatableError
 from careline.services.auth_service import is_reserved_doctor_id, is_reserved_patient_id
 from careline.services.patient_lookup_service import hash_pin
 
@@ -95,6 +97,8 @@ class PatientAnswerOut(BaseModel):
     citations: list[str] = Field(default_factory=list)
     patient_message: str | None = None
     emergency: bool = False
+    # The audit turn this reply was logged as — what POST /patient/feedback rates.
+    turn_id: str | None = None
 
 
 class PatientQuestionOut(BaseModel):
@@ -112,6 +116,27 @@ class PatientQuestionOut(BaseModel):
     replied_at: datetime | None = None
     patient_message: str | None = None
     emergency: bool = False
+    # The patient's own rating of this turn (None = not rated yet).
+    helpful: bool | None = None
+
+
+class PatientFeedbackIn(BaseModel):
+    """A patient's thumbs up / down on one of their own ANSWER / CLARIFY turns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str = Field(min_length=1, max_length=128)
+    helpful: bool
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class PatientFeedbackOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    helpful: bool
+    comment: str | None = None
+    rated_at: datetime
 
 
 # --- routes ------------------------------------------------------------------
@@ -195,14 +220,17 @@ async def patient_ask(
     )
     # The pipeline is synchronous (graph + possible blocking LLM call + audit
     # write): run it on the threadpool so it never blocks the event loop.
+    logged: list[AuditTurnRecord] = []
     decision: Decision = await run_in_threadpool(
         request.app.state.question_svc.run_question,
         question=body.question,
         patient=patient,
         session=session,
         now=now,
+        on_audit_turn=logged.append,
     )
     return PatientAnswerOut(
+        turn_id=logged[-1].turn_id if logged else None,
         verdict=decision.verdict.value,
         answer_text=decision.answer_text,
         # The internal reason ("Risk too high (0.78) ...") is for the doctor and
@@ -213,6 +241,47 @@ async def patient_ask(
             decision.verdict, decision.answer_text, decision.escalation_reason, decision.scope
         ),
         emergency=decision.scope is ScopeCategory.RED_FLAG,
+    )
+
+
+@router.post("/feedback", response_model=PatientFeedbackOut)
+async def patient_feedback(
+    body: PatientFeedbackIn,
+    request: Request,
+    principal: Annotated[PatientPrincipal, Depends(get_current_patient)],
+) -> PatientFeedbackOut:
+    """Rate one of the patient's own ANSWER / CLARIFY turns (human online eval).
+
+    The turn must belong to exactly this ``(doctor_id, patient_id)`` principal;
+    another patient's or another tenant's turn id is a 404 — the same answer as
+    an unknown id, so the route is no oracle (REVIEW-1). An escalated turn is a
+    409 (there is no AI answer to rate). One rating per turn: re-rating
+    overwrites. The comment is stored only in the tenant-scoped audit store; the
+    process-wide monitor receives just the boolean.
+    """
+    comment = (body.comment or "").strip() or None
+    try:
+        record = request.app.state.audit.rate_turn(
+            doctor_id=principal.doctor_id,
+            patient_id=principal.patient_id,
+            turn_id=body.turn_id,
+            helpful=body.helpful,
+            comment=comment,
+        )
+    except NotRatableError:
+        raise HTTPException(
+            status_code=409, detail="only answered or clarified turns can be rated"
+        ) from None
+    if record is None:
+        raise HTTPException(status_code=404, detail="turn not found")
+    online_monitor.record_patient_feedback(
+        turn_id=record.turn_id, verdict=record.verdict, helpful=record.helpful
+    )
+    return PatientFeedbackOut(
+        turn_id=record.turn_id,
+        helpful=record.helpful,
+        comment=record.comment,
+        rated_at=record.rated_at,
     )
 
 
@@ -249,6 +318,7 @@ async def patient_questions(
     out: list[PatientQuestionOut] = []
     for t in turns:
         resolution = audit.resolution_for(t.turn_id)
+        feedback = audit.feedback_for(t.turn_id)
         out.append(
             PatientQuestionOut(
                 turn_id=t.turn_id,
@@ -263,6 +333,7 @@ async def patient_questions(
                     t.verdict, t.answer_text, t.escalation_reason, t.scope
                 ),
                 emergency=t.scope == ScopeCategory.RED_FLAG.value,
+                helpful=feedback.helpful if feedback else None,
             )
         )
     return out

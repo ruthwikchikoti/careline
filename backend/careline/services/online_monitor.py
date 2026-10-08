@@ -34,6 +34,16 @@ bounded ring buffers (``CARELINE_MONITOR_WINDOW`` turns, default 1000):
     (reasoner + verifier [+ the sampled judge] calls of that one turn; the
     judge's share appears once it has run).
 
+Plus **human feedback** — the second online-evaluation channel next to the
+judge (reported under ``human_feedback``): patient thumbs on ANSWER / CLARIFY
+turns (``POST /patient/feedback``) and doctor review of turns
+(``POST /audit/turns/{id}/review``). Only booleans + the turn's verdict are kept,
+keyed by an opaque hash of the turn id so a re-rating overwrites instead of
+double-counting; comment / note text never reaches the monitor (it lives in the
+tenant-scoped audit store). Alerts: doctor-rated accuracy (correct / reviewed
+ANSWER turns) < 90 % with >= 10 reviews; patient helpful rate < 70 % with >= 20
+ratings.
+
 Ops knobs (``CARELINE_MONITOR_WINDOW``, ``CARELINE_JUDGE_SAMPLE_RATE``,
 ``CARELINE_DRIFT_PSI``) are parsed defensively: a malformed or out-of-range
 value falls back to the default with one warning, never a crash.
@@ -51,6 +61,7 @@ Owner: Naresh (scope ``services``).
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import logging
 import math
 import os
@@ -59,7 +70,7 @@ import random
 import re
 import threading
 import time
-from collections import Counter, deque
+from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -73,6 +84,10 @@ DRIFT_MIN_SAMPLES = 30
 DRIFT_PSI_THRESHOLD = 0.2
 DRIFT_OOV_DELTA = 0.15
 DRIFT_LENGTH_SHIFT = 0.5
+HUMAN_ACCURACY_ALERT = 0.90
+HUMAN_ACCURACY_MIN_REVIEWS = 10
+PATIENT_HELPFUL_ALERT = 0.70
+PATIENT_HELPFUL_MIN_RATINGS = 20
 _PSI_EPS = 1e-4
 _SAFETY_SCOPES = frozenset({ScopeCategory.RED_FLAG, ScopeCategory.CROSS_CONDITION})
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -116,6 +131,15 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
         _log.warning("%s=%r is invalid; using the default %s", name, raw, default)
         return default
     return value
+
+
+def _feedback_key(turn_id: str) -> str:
+    """Opaque dedupe key — the monitor never holds the turn id itself."""
+    return hashlib.sha256(str(turn_id).encode("utf-8")).hexdigest()[:16]
+
+
+def _verdict_value(verdict: Any) -> str:
+    return verdict.value if isinstance(verdict, Verdict) else str(verdict).lower()
 
 
 def _pct(sorted_values: list[float], q: float) -> float:
@@ -290,6 +314,9 @@ class OnlineMonitor:
         self._sampled = 0
         self._judge_errors = 0
         self._dropped = 0
+        # Human feedback: opaque key -> (verdict, bool); bounded, newest last.
+        self._patient_feedback: OrderedDict[str, tuple[str, bool]] = OrderedDict()
+        self._doctor_reviews: OrderedDict[str, tuple[str, bool]] = OrderedDict()
         self._started = time.time()
         self._queue: queue.Queue = queue.Queue(maxsize=max(1, judge_queue_size))
         self._worker: threading.Thread | None = None
@@ -361,6 +388,61 @@ class OnlineMonitor:
                 self._requests_total += 1
         except Exception:
             return
+
+    # -- human feedback (second online-eval channel) ------------------------
+
+    def _put_feedback(
+        self, book: OrderedDict, *, turn_id: str, verdict: Any, value: bool
+    ) -> None:
+        if not turn_id or not isinstance(value, bool):
+            return
+        key = _feedback_key(turn_id)
+        with self._lock:
+            book.pop(key, None)  # re-rating overwrites (and becomes newest)
+            book[key] = (_verdict_value(verdict), value)
+            while len(book) > self._window:
+                book.popitem(last=False)
+
+    def record_patient_feedback(self, *, turn_id: str, verdict: Any, helpful: bool) -> None:
+        """A patient's thumbs on one turn (no text). Never raises."""
+        try:
+            self._put_feedback(
+                self._patient_feedback, turn_id=turn_id, verdict=verdict, value=helpful
+            )
+        except Exception:
+            return
+
+    def record_doctor_review(self, *, turn_id: str, verdict: Any, correct: bool) -> None:
+        """A doctor's correct / incorrect review of one turn (no text). Never raises."""
+        try:
+            self._put_feedback(
+                self._doctor_reviews, turn_id=turn_id, verdict=verdict, value=correct
+            )
+        except Exception:
+            return
+
+    def _human_feedback(self) -> dict:
+        with self._lock:
+            ratings = list(self._patient_feedback.values())
+            reviews = list(self._doctor_reviews.values())
+        helpful = sum(v for _verdict, v in ratings)
+        answer_reviews = [v for verdict, v in reviews if verdict == Verdict.ANSWER.value]
+        correct = sum(answer_reviews)
+        return {
+            "patient_ratings": len(ratings),
+            "patient_helpful": helpful,
+            "patient_helpful_rate": (helpful / len(ratings)) if ratings else None,
+            "doctor_reviews": len(reviews),
+            "doctor_reviews_answer": len(answer_reviews),
+            "doctor_correct_answer": correct,
+            "doctor_rated_accuracy": (
+                correct / len(answer_reviews) if answer_reviews else None
+            ),
+            "note": (
+                "human online eval: patient thumbs on ANSWER/CLARIFY turns; doctor "
+                "review accuracy over ANSWER turns. Aggregates only — no text, no ids."
+            ),
+        }
 
     # -- online evaluation ------------------------------------------------
 
@@ -579,6 +661,17 @@ class OnlineMonitor:
             alerts.append(f"online faithfulness {quality['faithfulness_rate']:.1%} < 90%")
         if drift.get("drifted"):
             alerts.append("input drift: " + ", ".join(drift["reasons"]))
+        human = self._human_feedback()
+        acc = human["doctor_rated_accuracy"]
+        if human["doctor_reviews_answer"] >= HUMAN_ACCURACY_MIN_REVIEWS and (
+            acc is not None and acc < HUMAN_ACCURACY_ALERT
+        ):
+            alerts.append(f"doctor-rated accuracy {acc:.1%} < 90%")
+        rate = human["patient_helpful_rate"]
+        if human["patient_ratings"] >= PATIENT_HELPFUL_MIN_RATINGS and (
+            rate is not None and rate < PATIENT_HELPFUL_ALERT
+        ):
+            alerts.append(f"patient helpful rate {rate:.1%} < 70%")
 
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -587,6 +680,7 @@ class OnlineMonitor:
             "quality": quality,
             "drift": drift,
             "cost": cost,
+            "human_feedback": human,
             "alerts": alerts,
         }
 
@@ -691,6 +785,22 @@ def record_error(*, latency_ms: float) -> None:
         return
 
 
+def record_patient_feedback(*, turn_id: str, verdict: Any, helpful: bool) -> None:
+    """Patient thumbs on the process-wide monitor (aggregate only). Never raises."""
+    try:
+        get_monitor().record_patient_feedback(turn_id=turn_id, verdict=verdict, helpful=helpful)
+    except Exception:
+        return
+
+
+def record_doctor_review(*, turn_id: str, verdict: Any, correct: bool) -> None:
+    """Doctor review on the process-wide monitor (aggregate only). Never raises."""
+    try:
+        get_monitor().record_doctor_review(turn_id=turn_id, verdict=verdict, correct=correct)
+    except Exception:
+        return
+
+
 def snapshot() -> dict:
     return get_monitor().snapshot()
 
@@ -709,7 +819,9 @@ __all__ = [
     "build_reference",
     "get_monitor",
     "record",
+    "record_doctor_review",
     "record_error",
+    "record_patient_feedback",
     "reset_monitor",
     "snapshot",
     "warm_reference_async",

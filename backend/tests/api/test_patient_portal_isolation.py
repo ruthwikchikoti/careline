@@ -297,8 +297,12 @@ def test_mongo_audit_store_delete_is_tenant_scoped():
         "audit_calls": _FakeSyncCollection([]),
         "audit_events": _FakeSyncCollection([]),
         "audit_resolutions": _FakeSyncCollection(resolutions),
+        "audit_feedback": _FakeSyncCollection(feedback := [dict(d) for d in resolutions]),
+        "audit_reviews": _FakeSyncCollection(reviews := [dict(d) for d in resolutions]),
     }
     store = MongoAuditStore(db)
     store.delete_patient(doctor_id=_EVIL, patient_id=_PID)
     assert [d["_id"] for d in turns] == ["t1"]
     assert [d["_id"] for d in resolutions] == ["t1"]
+    assert [d["_id"] for d in feedback] == ["t1"]
+    assert [d["_id"] for d in reviews] == ["t1"]

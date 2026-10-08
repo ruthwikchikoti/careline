@@ -305,6 +305,11 @@ export interface AuditTurn {
   scope?: string | null;
   needs_review?: boolean;
   review_reason?: string | null;
+  /** Doctor's expert review (human online eval). */
+  reviewed?: boolean;
+  review_correct?: boolean | null;
+  review_note?: string | null;
+  reviewed_at?: string | null;
 }
 
 export interface AuditCall {
@@ -372,6 +377,23 @@ export function resolveEscalation(turnId: string, reply: string): Promise<Escala
   return authFetch<EscalationResolved>(`/escalations/${encodeURIComponent(turnId)}/resolve`, {
     method: "POST",
     body: JSON.stringify({ reply }),
+  });
+}
+
+export interface TurnReview {
+  turn_id: string;
+  patient_id: string;
+  verdict: Verdict;
+  correct: boolean;
+  note: string | null;
+  reviewed_at: string;
+}
+
+/** Doctor marks one of their turns correct / incorrect (re-review overwrites). */
+export function reviewTurn(turnId: string, correct: boolean, note?: string | null): Promise<TurnReview> {
+  return authFetch<TurnReview>(`/audit/turns/${encodeURIComponent(turnId)}/review`, {
+    method: "POST",
+    body: JSON.stringify({ correct, note: note?.trim() ? note.trim() : null }),
   });
 }
 
@@ -456,6 +478,17 @@ export interface MonitoringCost {
   requests_unknown_cost: number;
 }
 
+export interface MonitoringHumanFeedback {
+  patient_ratings: number;
+  patient_helpful: number;
+  patient_helpful_rate: number | null;
+  doctor_reviews: number;
+  doctor_reviews_answer: number;
+  doctor_correct_answer: number;
+  doctor_rated_accuracy: number | null;
+  note: string;
+}
+
 export interface MonitoringSnapshot {
   scope: string;
   generated_at: string;
@@ -464,6 +497,8 @@ export interface MonitoringSnapshot {
   quality: MonitoringQuality;
   drift: MonitoringDrift;
   cost: MonitoringCost;
+  /** Human online eval (patient thumbs + doctor review); absent on older backends. */
+  human_feedback?: MonitoringHumanFeedback;
   alerts: string[];
 }
 
@@ -495,6 +530,8 @@ export interface PatientAnswer {
   patient_message: string | null;
   /** True for a red-flag turn — the portal shows the call-112 banner. */
   emergency: boolean;
+  /** The audit turn this reply was logged as (what feedback rates). */
+  turn_id?: string | null;
 }
 
 export interface PatientQuestion {
@@ -508,6 +545,15 @@ export interface PatientQuestion {
   replied_at: string | null;
   patient_message: string | null;
   emergency: boolean;
+  /** The patient's own rating of this turn (null = not rated yet). */
+  helpful?: boolean | null;
+}
+
+export interface PatientFeedback {
+  turn_id: string;
+  helpful: boolean;
+  comment: string | null;
+  rated_at: string;
 }
 
 async function patientFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -573,6 +619,18 @@ export function patientAsk(question: string): Promise<PatientAnswer> {
 
 export function getPatientQuestions(): Promise<PatientQuestion[]> {
   return patientFetch<PatientQuestion[]>("/patient/questions");
+}
+
+/** Rate one of the patient's own ANSWER / CLARIFY turns (re-rating overwrites). */
+export function sendPatientFeedback(
+  turnId: string,
+  helpful: boolean,
+  comment?: string | null,
+): Promise<PatientFeedback> {
+  return patientFetch<PatientFeedback>("/patient/feedback", {
+    method: "POST",
+    body: JSON.stringify({ turn_id: turnId, helpful, comment: comment?.trim() ? comment.trim().slice(0, 500) : null }),
+  });
 }
 
 /** Clear the signed-in patient's own Q&A history (after a practice run). */

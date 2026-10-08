@@ -241,6 +241,7 @@ Gaps we disclose:
 | Eval gate | Keyless deterministic slice in CI | F2–F8, N1 | No secrets, so fork PRs are gated. Reproducible, and the 391 items run in about 1.7 s |
 | LLM slice | Live model + LLM-as-judge with an sqlite response cache | N2 | Measures what the keyless twin cannot (answer accuracy, faithfulness). The full 391-item slice has not been run; two live end-to-end flow checks (18 questions each, judge 6/6 and 4/4 faithful) have |
 | Online monitor | In-process ring buffers and a sampled judge thread | N1, N4, N6 | Five monitoring categories with no extra infrastructure on a free tier. Per-process only |
+| Human feedback | Patient 👍/👎 (`POST /patient/feedback`) and doctor correct/incorrect review (`POST /audit/turns/{id}/review`), stored tenant-scoped in the audit store; aggregates in `/monitoring` `human_feedback` | N2 | Online evaluation uses LLM-as-judge **and user feedback**: the judge scores faithfulness automatically, humans score usefulness and correctness. No real-user volume yet; exercised by tests |
 | Tracing | Langfuse Cloud (optional `obs` extra, SDK v3) | N4, N6 | Per-turn cost and latency traces, live: run 2 of the live flow check exported 18 ([example trace](https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec)). Trace input includes the question text (fictional data); the patient id is salted-hashed |
 | Deploy | Render Docker blueprint, free tier | live URL | One file and fictional data. Not deployed yet |
 

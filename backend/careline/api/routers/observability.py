@@ -29,7 +29,10 @@ from careline.api.dto.observability import (
     EscalationsOut,
     EvalRunOut,
     EvalScenarioOut,
+    TurnReviewIn,
+    TurnReviewOut,
 )
+from careline.services import online_monitor
 from careline.services.audit_service import (
     AuditCallRecord,
     AuditService,
@@ -42,6 +45,7 @@ router = APIRouter(tags=["observability"])
 
 def _turn_out(turn: AuditTurnRecord, audit: AuditService | None = None) -> AuditTurnOut:
     resolution = audit.resolution_for(turn.turn_id) if audit is not None else None
+    review = audit.review_for(turn.turn_id) if audit is not None else None
     return AuditTurnOut(
         turn_id=turn.turn_id,
         call_id=turn.call_id,
@@ -61,6 +65,10 @@ def _turn_out(turn: AuditTurnRecord, audit: AuditService | None = None) -> Audit
         scope=turn.scope,
         needs_review=turn.needs_review,
         review_reason=turn.review_reason,
+        reviewed=review is not None,
+        review_correct=review.correct if review else None,
+        review_note=review.note if review else None,
+        reviewed_at=review.reviewed_at if review else None,
     )
 
 
@@ -93,6 +101,45 @@ async def get_audit(
     return AuditLogOut(
         calls=[_call_out(c) for c in calls],
         turns=[_turn_out(t, audit) for t in turns],
+    )
+
+
+@router.post("/audit/turns/{turn_id}/review", response_model=TurnReviewOut)
+async def review_turn(
+    turn_id: str,
+    body: TurnReviewIn,
+    request: Request,
+    principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
+) -> TurnReviewOut:
+    """Mark one of this doctor's turns correct / incorrect (expert human eval).
+
+    Meant primarily for ANSWER turns (that is what doctor-rated accuracy counts)
+    but any verdict may be reviewed; the verdict is recorded with the review.
+    Tenant-scoped: another doctor's turn id is a 404, exactly like an unknown one.
+    Re-review overwrites. The note stays in the audit store; the process-wide
+    monitor receives only the boolean.
+    """
+    audit: AuditService = request.app.state.audit
+    note = (body.note or "").strip() or None
+    record = audit.review_turn(
+        doctor_id=principal.doctor_id,
+        turn_id=turn_id,
+        correct=body.correct,
+        note=note,
+        reviewed_by=principal.doctor_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="turn not found")
+    online_monitor.record_doctor_review(
+        turn_id=record.turn_id, verdict=record.verdict, correct=record.correct
+    )
+    return TurnReviewOut(
+        turn_id=record.turn_id,
+        patient_id=record.patient_id,
+        verdict=record.verdict,
+        correct=record.correct,
+        note=record.note,
+        reviewed_at=record.reviewed_at,
     )
 
 

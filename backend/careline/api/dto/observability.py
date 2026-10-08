@@ -42,6 +42,11 @@ class AuditTurnOut(BaseModel):
     scope: str | None = None
     needs_review: bool = False
     review_reason: str | None = None
+    # Doctor's expert review (human online eval): correct / incorrect + note.
+    reviewed: bool = False
+    review_correct: bool | None = None
+    review_note: str | None = None
+    reviewed_at: datetime | None = None
 
 
 class AuditCallOut(BaseModel):
@@ -137,6 +142,28 @@ class EscalationResolveOut(BaseModel):
     resolved_at: datetime
 
 
+class TurnReviewIn(BaseModel):
+    """A doctor's correct / incorrect verdict on one of their turns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    correct: bool
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TurnReviewOut(BaseModel):
+    """The saved doctor review (re-review overwrites)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    patient_id: str
+    verdict: Verdict
+    correct: bool
+    note: str | None = None
+    reviewed_at: datetime
+
+
 class EvalScenarioOut(BaseModel):
     """One re-run T-scenario and whether it matched its expected verdict."""
 
@@ -167,6 +194,8 @@ __all__ = [
     "EscalationsOut",
     "EscalationResolveIn",
     "EscalationResolveOut",
+    "TurnReviewIn",
+    "TurnReviewOut",
     "EvalScenarioOut",
     "EvalRunOut",
 ]

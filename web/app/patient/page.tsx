@@ -13,6 +13,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   Stethoscope,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
 } from "lucide-react";
 import {
@@ -20,6 +22,7 @@ import {
   getCarePlan,
   getPatientQuestions,
   patientAsk,
+  sendPatientFeedback,
   type CarePlan,
   type FactRecord,
   type PatientQuestion,
@@ -365,6 +368,10 @@ function Exchange({ q }: { q: PatientQuestion }) {
         </AgentBubble>
       )}
 
+      {(q.verdict === "answer" || q.verdict === "clarify") && (
+        <HelpfulPrompt turnId={q.turn_id} initial={q.helpful ?? null} />
+      )}
+
       {q.escalated && message && <AgentBubble tone="clarify">{message}</AgentBubble>}
 
       {q.escalated && q.doctor_reply && (
@@ -385,6 +392,58 @@ function Exchange({ q }: { q: PatientQuestion }) {
           Sent to your doctor — we&apos;ll show their reply here.
         </div>
       )}
+    </div>
+  );
+}
+
+/** "Was this helpful?" — human online-eval feedback on an AI answer / clarify. */
+function HelpfulPrompt({ turnId, initial }: { turnId: string; initial: boolean | null }) {
+  const [rated, setRated] = useState<boolean | null>(initial);
+  const [sending, setSending] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function rate(helpful: boolean) {
+    if (sending) return;
+    setSending(true);
+    setFailed(false);
+    try {
+      await sendPatientFeedback(turnId, helpful);
+      setRated(helpful);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const btn =
+    "inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50";
+  return (
+    <div className="ml-9 flex items-center gap-2 text-xs text-muted">
+      {rated === null ? (
+        <span>Was this helpful?</span>
+      ) : (
+        <span className="font-medium text-answer">Thanks for your feedback.</span>
+      )}
+      <button
+        onClick={() => rate(true)}
+        disabled={sending}
+        aria-label="Helpful"
+        aria-pressed={rated === true}
+        className={`${btn} ${rated === true ? "border-answer bg-answer-bg text-answer" : "border-border bg-canvas hover:border-primary hover:text-primary"}`}
+      >
+        <ThumbsUp className="h-3.5 w-3.5" />
+      </button>
+      <button
+        onClick={() => rate(false)}
+        disabled={sending}
+        aria-label="Not helpful"
+        aria-pressed={rated === false}
+        className={`${btn} ${rated === false ? "border-escalate bg-escalate-bg text-escalate" : "border-border bg-canvas hover:border-primary hover:text-primary"}`}
+      >
+        <ThumbsDown className="h-3.5 w-3.5" />
+      </button>
+      {failed && <span className="text-escalate">Couldn&apos;t save — try again.</span>}
     </div>
   );
 }

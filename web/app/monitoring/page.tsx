@@ -13,6 +13,7 @@ import {
   Scale,
   ShieldCheck,
   Timer,
+  Users,
 } from "lucide-react";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -165,7 +166,7 @@ function Sections({
   trend: TrendPoint[];
   empty: boolean;
 }) {
-  const { operational: op, output, quality, drift, cost } = data;
+  const { operational: op, output, quality, drift, cost, human_feedback: hf } = data;
   const decided = output.verdict_counts.answer + output.verdict_counts.clarify + output.verdict_counts.escalate;
 
   return (
@@ -245,6 +246,38 @@ function Sections({
           />
           <Tile label="Judge errors / dropped" value={`${quality.judge_errors} / ${quality.dropped}`} hint="errors are never scored faithful" />
         </div>
+      </Section>
+
+      {/* (c2) Human feedback — the second online-eval channel */}
+      <Section
+        icon={Users}
+        title="Human feedback (online eval)"
+        subtitle="Patient thumbs on answers / clarifications and doctor review of answers — aggregates only, no comment text"
+      >
+        {hf && (hf.patient_ratings > 0 || hf.doctor_reviews > 0) ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Tile label="Patient ratings" value={num(hf.patient_ratings)} hint={`${hf.patient_helpful} marked helpful`} />
+            <Tile
+              label="Patient helpful rate"
+              value={pct(hf.patient_helpful_rate)}
+              hint="alert < 70% with ≥ 20 ratings"
+              tone={hf.patient_ratings >= 20 && (hf.patient_helpful_rate ?? 1) < 0.7 ? "bad" : undefined}
+            />
+            <Tile label="Doctor reviews" value={num(hf.doctor_reviews)} hint={`${hf.doctor_reviews_answer} of ANSWER turns`} />
+            <Tile
+              label="Doctor-rated accuracy"
+              value={pct(hf.doctor_rated_accuracy)}
+              hint={`${hf.doctor_correct_answer} / ${hf.doctor_reviews_answer} answers correct · alert < 90% with ≥ 10`}
+              tone={hf.doctor_reviews_answer >= 10 && (hf.doctor_rated_accuracy ?? 1) < 0.9 ? "bad" : undefined}
+            />
+          </div>
+        ) : (
+          <Empty>
+            {hf
+              ? "No human feedback yet — patients rate answers in the portal; doctors review them in the Audit log."
+              : "This backend does not report human feedback yet."}
+          </Empty>
+        )}
       </Section>
 
       {/* (d) Input & drift */}
