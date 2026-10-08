@@ -14,9 +14,11 @@ dependencies = [
     "langgraph>=0.2",
     "pyyaml>=6.0",
     # The HTTP API is part of the deployable app (Vercel installs only these core
-    # dependencies), so FastAPI and PyJWT are core, not extras.
+    # dependencies), so FastAPI, PyJWT and the OpenAI SDK are core, not extras:
+    # without the SDK a configured key fails closed and every question escalates.
     "fastapi>=0.111",
     "PyJWT>=2.8",
+    "openai>=1.40",
 ]
 
 [project.optional-dependencies]
