@@ -21,6 +21,10 @@ emergency line — "when I have chest pain …" is a recurring report and
 escalates. The gate chain's final invariant then guarantees that no message
 containing a danger concept, suppressed or not, is ever ANSWERED.
 
+v6 (round-4 red team): every ESCALATE this triage returns — red-flag rail,
+acute net, symptom report, multi-condition — carries the 112 emergency line;
+at v5 the strongest signal (the red-flag rail) was the one that did not.
+
 Why a shared function: the Brain and the LangGraph ``triage`` node both call
 :func:`run_triage`, so the two engines cannot drift apart here — the parity
 test (RU-5) asserts it, and this makes it true by construction.
@@ -56,7 +60,8 @@ def run_triage(question: str, trace: ReasoningTrace) -> Decision | None:
             detail=f"emergency keyword matched: {matched!r}",
         )
         return Decision.escalate(
-            f"Emergency symptom detected ({matched}) — transferring to your doctor.",
+            f"Emergency symptom detected ({matched}) — transferring to your doctor. "
+            f"{EMERGENCY_LINE}",
             scope=ScopeCategory.RED_FLAG,
             risk=1.0,
             trace=trace,
@@ -108,7 +113,8 @@ def run_triage(question: str, trace: ReasoningTrace) -> Decision | None:
             detail=f"question spans conditions: {', '.join(groups)}",
         )
         return Decision.escalate(
-            "Question spans multiple clinical conditions — transferring to your doctor.",
+            "Question spans multiple clinical conditions — transferring to your doctor. "
+            f"{EMERGENCY_LINE}",
             scope=ScopeCategory.CROSS_CONDITION,
             risk=0.95,
             trace=trace,

@@ -47,8 +47,12 @@ guards disabled — which the gate chain uses as its final invariant: a
 question containing any danger concept, suppressed or not, never ends in
 ANSWER.
 
+v6 adds :func:`mentions_present_body_report` — a broader body-state
+vocabulary + present structure — which the gate chain's final invariant uses
+as the LLM-path backstop (never ANSWER a present body-state report).
+
 Deterministic, keyless, pure — mirrored into ``backend/policies/
-red-flags.v5.yaml`` (``context.symptom_report``) and held in sync by
+red-flags.v7.yaml`` (``context.symptom_report``) and held in sync by
 ``tests/llm/test_prompt_registry.py``.
 
 Owner: Priyanshu (scope ``safety``).
@@ -62,6 +66,7 @@ from careline.domain.rails.acute_concern import (
     MILD_RESOLVABLE_LABELS,
     check_acute_concern,
     resolved_transient,
+    split_clauses,
     strip_denials,
     unsuppressed_text,
 )
@@ -121,7 +126,7 @@ SYMPTOM_PATTERNS: tuple[tuple[str, str], ...] = (
     ("breathing", r"(?<!bad )(?<!deep )\bbreath\w*\b(?!\s+(?:exercises?|tests?|freshener|mints?))|\bwheez\w*|\bgasp\w*|\bchok\w*|\bsuffocat\w*|\b(?:short\s+of|out\s+of|gasping\s+for|struggling\s+for|fighting\s+for|can'?t\s+get\s+(?:any\s+|enough\s+)?)\s*air\b|\bgurgl\w*|\brattl\w*\s+(?:breath|chest|noise)|\bribs\s+(?:are\s+)?suck\w*\s+in\b|\bsaa?ns\b"),
     ("cyanosis", r"\b(?:lips?|face|fingers?|fingertips|nails?|skin|tongue)\b[^.]{0,20}\b(?:blue|bluish|grey|gray|greyish|grayish|purple|ashen)\b"),
     ("consciousness", r"\bfaint(?:ed|ing|s)?\b(?!\s+(?:rash|line|mark|smell|taste|sound|scar|red|pink))|\bpass(?:ed|ing|es)?\s+out\b|\bcollaps\w*|\bslump\w*|\bkeel\w*\s+over\b|\bblack(?:ed|ing)\s+out\b|\bwon'?t\s+wake\b|\bcan'?t\s+(?:keep\s+\w+\s+awake|wake\s+(?:him|her|them|me|up))\b|\bnodding\s+off\b|\b(?:can'?t|cannot|couldn'?t|unable\s+to|hard\s+to)\s+(?:rouse|wake|stir)\b|\bunresponsive\b|\bunconscious\b|\b(?:not|isn'?t|is\s+not|won'?t|doesn'?t|does\s+not|can'?t|stopped)\s+(?:respond\w*|answer\w*|react\w*)\b|\bout\s+of\s+it\b|\b(?:not|isn'?t|stopped)\s+(?:moving|getting\s+up|waking)\b|\blying\s+(?:on\s+the\s+)?(?:ground|floor)\b|\bstopped\s+making\s+sense\b|\b(?:doesn'?t|does\s+not|didn'?t)\s+(?:know|recogni[sz]e)\s+(?:where|who|me|us|her|him)\b|\b(?:talking|speaking)\s+(?:gibberish|nonsense|rubbish)\b|\bgibberish\b|\bnot\s+making\s+(?:any\s+)?sense\b|\b(?:everything|it\s+all|the\s+world)\s+went\s+(?:black|dark|white)\b|\b(?:i'?m|i\s+am|he'?s|she'?s|lying|found\s+\w+)\s+on\s+the\s+floor\b|\b(?:can'?t|cannot|can\s+barely|can\s+hardly|unable\s+to)\s+(?:stand(?:\s+up)?|walk|get\s+up|stay\s+awake|keep\s+awake)\b(?!\s+(?:the|it|this|that)\b)|\bbehosh\w*|\b(?:is|was|seems?|looks?|became|becoming|getting|gone|got|went)\s+(?:very\s+|really\s+|so\s+|suddenly\s+|all\s+)?(?:confused|disoriented|delirious)\b(?!\s+(?:about|by|with|over|regarding|whether|which|what|how|why|when))|\bconfusion\b"),
-    ("neuro", r"\bnumb\w*|\bparaly\w*|\bdroop\w*|\bslurr\w*|\bgarbled\b|\b(?:seeing|see|saw)\s+double\b|\bdouble\s+vision\b|\b(?:vision|eyesight|sight)\b[^.]{0,20}\b(?:went|gone|going|lost|black|double|dark)\b|\b(?:lost|losing|loss\s+of)\s+(?:my\s+|his\s+|her\s+)?(?:vision|sight|speech|balance)\b|\b(?:can'?t|cannot|couldn'?t|unable\s+to)\s+(?:move|feel|lift|raise|grip|use)\s+(?:my\s+|his\s+|her\s+|the\s+)?(?:left\s+|right\s+)?(?:arms?|legs?|hands?|foot|feet|face|side|fingers?|body)\b|\b(?:went|gone|goes|going|feels?|felt)\s+(?:all\s+)?(?:heavy|dead|floppy|limp)\b|\b(?:side|arm|leg|face|hand)\b[^.]{0,15}\b(?:heavy|limp|floppy|dangl\w*)\b|\bfloppy\b|\b(?:legs?|arms?)\s+(?:won'?t|wouldn'?t|don'?t|doesn'?t|can'?t)\s+(?:work|move|hold)\b|\blopsided\b|\b(?:mouth|face|smile|lip)\b[^.]{0,20}\b(?:twisted|crooked|uneven|to\s+one\s+side)\b|\b(?:speech|words|talking|voice)\b[^.]{0,20}\b(?:muddled|jumbled|mixed\s+up|confused|strange|weird)\b|\b(?:can'?t|cannot|couldn'?t)\s+see\s+out\s+of\b|\bdropping\s+things\b|\b(?:face|arm|leg|hand|side|mouth|eye)\b[^.]{0,10}\b(?:won'?t|wouldn'?t|can'?t|doesn'?t)\s+move\b|\b(?:legs?|knees?)\s+(?:gave|give|giving)\s+way\b|\b(?:can'?t|cannot|couldn'?t)\s+feel\s+(?:them|it|anything)\b"),
+    ("neuro", r"\bnumb(?!er)\w*|\bparaly\w*|\bdroop\w*|\bslurr\w*|\bgarbled\b|\b(?:seeing|see|saw)\s+double\b|\bdouble\s+vision\b|\b(?:vision|eyesight|sight)\b[^.]{0,20}\b(?:went|gone|going|lost|black|double|dark)\b|\b(?:lost|losing|loss\s+of)\s+(?:my\s+|his\s+|her\s+)?(?:vision|sight|speech|balance)\b|\b(?:can'?t|cannot|couldn'?t|unable\s+to)\s+(?:move|feel|lift|raise|grip|use)\s+(?:my\s+|his\s+|her\s+|the\s+)?(?:left\s+|right\s+)?(?:arms?|legs?|hands?|foot|feet|face|side|fingers?|body)\b|\b(?:went|gone|goes|going|feels?|felt)\s+(?:all\s+)?(?:heavy|dead|floppy|limp)\b|\b(?:side|arm|leg|face|hand)\b[^.]{0,15}\b(?:heavy|limp|floppy|dangl\w*)\b|\bfloppy\b|\b(?:legs?|arms?)\s+(?:won'?t|wouldn'?t|don'?t|doesn'?t|can'?t)\s+(?:work|move|hold)\b|\blopsided\b|\b(?:mouth|face|smile|lip)\b[^.]{0,20}\b(?:twisted|crooked|uneven|to\s+one\s+side)\b|\b(?:speech|words|talking|voice)\b[^.]{0,20}\b(?:muddled|jumbled|mixed\s+up|confused|strange|weird)\b|\b(?:can'?t|cannot|couldn'?t)\s+see\s+out\s+of\b|\bdropping\s+things\b|\b(?:face|arm|leg|hand|side|mouth|eye)\b[^.]{0,10}\b(?:won'?t|wouldn'?t|can'?t|doesn'?t)\s+move\b|\b(?:legs?|knees?)\s+(?:gave|give|giving)\s+way\b|\b(?:can'?t|cannot|couldn'?t)\s+feel\s+(?:them|it|anything)\b"),
     ("seizure", r"\bseizur\w*|\bconvuls\w*|\bjerk(?:ing|ed|s)\b|\b(?:had|having|has|have|in|threw|getting|get|gets|got)\s+(?:a\s+|another\s+|some\s+(?:kind|sort)\s+of\s+|what\s+looked\s+like\s+a\s+)?fits?\b|\bfitting\b|\beyes\s+(?:rolled|rolling)\s+(?:back|up)\b|\b(?:went|gone|go(?:es|ing)|turned)\s+(?:all\s+)?(?:stiff|rigid)\b|\bdaur[ae]\b|\bmirgi\b"),
     ("face_swelling", r"\b(?:lips?|eyes?|eyelids?|tongue|throat|face|mouth)\b[^.]{0,25}\b(?:swell\w*|swollen|blew\s+up|blown\s+up|balloon\w*|clos\w*\s+up)\b|\b(?:swell\w*|swollen)\s+(?:up\s+)?(?:of\s+)?(?:my\s+|his\s+|her\s+|the\s+)?(?:lips?|eyes?|eyelids?|tongue|throat|face)\b"),
     ("fever_rash", r"\b(?:fever\w*|temperature|burning\s+up|bukhar)\b[^.]{0,40}\b(?:rash\w*|spots|stiff\s+neck|purple)\b|\b(?:rash\w*|stiff\s+neck)\b[^.]{0,40}\b(?:fever\w*|temperature|burning\s+up|bukhar)\b"),
@@ -212,6 +217,79 @@ def check_symptom_report(
     return None
 
 
+# ---------------------------------------------------------------------------
+# v6: present body-state report — the LLM-path backstop
+# ---------------------------------------------------------------------------
+# On the LLM path an emergency every lexicon above misses reaches the
+# reasoner; with a reasoner that answers it and a verifier that affirms, the
+# turn was ANSWERED at v5 (round-4 red team). The gate chain's final invariant
+# therefore also refuses to ANSWER a message that reads as a PRESENT body-state
+# report by the caller or someone they care for — even when the specific
+# symptom is unknown to every lexicon. It reuses this layer's subject
+# detection with a much broader body-state vocabulary and an explicit
+# present / progressive / recent-onset structure. It only ever downgrades an
+# ANSWER to a CLARIFY carrying the emergency line (ESCALATE once the clarify
+# budget is spent); it never escalates on its own, so its breadth costs
+# answers, not doctor time.
+BODY_STATE_VOCABULARY: str = (
+    r"\b(?:pain\w*|hurt\w*|ach(?:e|es|ing|y)|\w+aches?|sore\w*|bleed\w*|breath\w*|saa?ns"
+    r"|blood(?!\s*-?\s*(?:pressure|sugars?|tests?|reports?|counts?|levels?|readings?|results?"
+    r"|group|work|glucose|thinners?)\b)"
+    r"|dard|taklif|takleef|dikkat|ajeeb|ghabrahat|cramp\w*|spasm\w*|swell\w*|swollen|numb(?!er)\w*"
+    r"|tingl\w*|dizz\w*|faint\w*|vomit\w*|nause\w*|sick|unwell|fever\w*|temperature|chills?"
+    r"|shiver\w*|shak(?:y|ing)|trembl\w*|weak\w*|exhaust\w*|drows\w*|sleepy|confus\w*|itch\w*"
+    r"|rash\w*|cough\w*|wheez\w*|discharge|leak\w*|ooz\w*|pus|lumps?|bruis\w*|fits?|seiz\w*"
+    r"|jerk\w*|palpitat\w*|flutter\w*|racing|pounding|throbb\w*|burn(?:s|ing)|sting(?:s|ing)"
+    r"|stiff\w*|spotting|neel[aeiy]|blue|purple|pale|grey|gray|clammy|sweat\w*|ringing"
+    r"|buzzing|bloat\w*|diarr?h\w*|loose\s+motions?|constipat\w*|ulti|khoon|chakkar|bukhar"
+    r"|strange|weird|funny|odd)\b"
+)
+# Present / progressive / recent-onset structure in the same clause.
+BODY_STATE_PRESENT_PATTERNS: tuple[str, ...] = (
+    r"\b(?:right\s+)?now\b|\btoday\b|\btonight\b|\bcurrently\b|\bat\s+the\s+moment\b|\babhi\b",
+    r"\bsince\b|\bago\b|\bthis\s+(?:morning|afternoon|evening)\b|\bjust\s+(?:now|started|began)\b",
+    r"\b(?:i|we)\s+(?:have|feel|keep)\b(?!\s+(?:had\b|been\b|a\s+question|no\b|never\b))|\bi'?ve\s+got\b",
+    r"\b(?:is|are|am|'s|'re|'m|keeps?|kept|been|started|starting)\s+(?:\w+\s+){0,2}?\w+ing\b",
+    r"\b(?:has|have|'s|is|are)\s+(?:gone|turned|become|got(?:ten)?|started)\b",
+    r"\b(?:ho|kar|aa|lag)\s+(?:rah[aie]|rahe)\b|\b(?:pad|ho)\s+(?:gay[aie]|gaye)\b",
+)
+# A conditional clause ("if I have a headache, can I …") or an improving one
+# ("my cough is getting better") is not a report of a current problem.
+BODY_STATE_CONDITIONAL: str = (
+    r"\b(?:if|unless|in\s+case)\b|\b(?:getting|got|feeling|feel|much|a\s+lot)\s+better\b"
+    r"|\bimproving\b"
+)
+_BODY_RE = re.compile(BODY_STATE_VOCABULARY, re.IGNORECASE)
+_BODY_PRESENT_RE = re.compile(
+    "|".join(f"(?:{p})" for p in BODY_STATE_PRESENT_PATTERNS), re.IGNORECASE
+)
+_BODY_CONDITIONAL_RE = re.compile(BODY_STATE_CONDITIONAL, re.IGNORECASE)
+_HINGLISH_DATIVE_RE = re.compile(r"\b\w+\s+ko\b", re.IGNORECASE)
+
+
+def mentions_present_body_report(question: str) -> str | None:
+    """Return the body-state word if some clause reads as a PRESENT body-state
+    report by the caller or a care recipient (v6 LLM-path backstop), else
+    ``None``. No context guards beyond the conditional clause and a mild
+    qualifier directly before the body word: it gates ANSWERs only."""
+    if not question:
+        return None
+    for variant in text_variants(question.translate(_CURLY)):
+        for clause in split_clauses(variant):
+            if _BODY_CONDITIONAL_RE.search(clause):
+                continue
+            if not (_has_subject(clause) or _HINGLISH_DATIVE_RE.search(clause)):
+                if not re.search(r"\b(?:since|ago)\b", clause, re.IGNORECASE):
+                    continue
+            if not _BODY_PRESENT_RE.search(clause):
+                continue
+            for m in _BODY_RE.finditer(clause):
+                if _MILD_BEFORE_RE.search(clause[max(0, m.start() - 30) : m.start()]):
+                    continue
+                return m.group(0).lower()
+    return None
+
+
 def mentions_danger_concept(question: str) -> str | None:
     """Every deterministic net with ALL context guards off — "is there any
     danger concept in this message at all, suppressed or not?"
@@ -234,6 +312,9 @@ def mentions_danger_concept(question: str) -> str | None:
 
 
 __all__ = [
+    "BODY_STATE_CONDITIONAL",
+    "BODY_STATE_PRESENT_PATTERNS",
+    "BODY_STATE_VOCABULARY",
     "GENERAL_KNOWLEDGE_PATTERNS",
     "MILD_QUALIFIERS",
     "SOFT_SYMPTOM_PATTERNS",
@@ -242,4 +323,5 @@ __all__ = [
     "SYMPTOM_REPORT_RISK",
     "check_symptom_report",
     "mentions_danger_concept",
+    "mentions_present_body_report",
 ]

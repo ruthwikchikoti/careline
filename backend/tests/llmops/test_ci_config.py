@@ -1,7 +1,7 @@
 """CI / packaging contract — the pipeline gates what the docs say it gates.
 
 * the eval-gate job compares against the NEWEST accepted baseline
-  (after-policy-v5.json) — on the shared case ids, which needs per_case;
+  (after-policy-v7.json) — on the shared case ids, which needs per_case;
 * the optional LLM slice never looks like a silent green when skipped;
 * the dev extra installs mongomock-motor, so tests/data actually runs in CI
   instead of being skipped at import.
@@ -29,13 +29,15 @@ def _job(name: str) -> str:
 
 def test_eval_gate_job_uses_the_newest_accepted_baseline():
     job = _job("eval-gate")
-    assert "--baseline evals/reports/after-policy-v5.json" in job
+    assert "--baseline evals/reports/after-policy-v7.json" in job
     assert "after-policy-v3.json" not in job
     assert "after-policy-v4.json" not in job
+    assert "after-policy-v5.json" not in job
+    assert "after-policy-v6.json" not in job
 
 
 def test_newest_accepted_baseline_exists():
-    assert (_BACKEND / "evals" / "reports" / "after-policy-v5.json").is_file()
+    assert (_BACKEND / "evals" / "reports" / "after-policy-v7.json").is_file()
 
 
 def test_llm_slice_skip_is_written_to_the_job_summary():

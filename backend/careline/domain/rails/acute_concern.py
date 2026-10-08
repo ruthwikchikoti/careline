@@ -40,9 +40,11 @@ mode, and the red team measured 19% benign FPs without them):
   attack" is removed from the live text as a SPAN, never a whole clause.
 * **Transient-and-resolved framing** (v5) — "it passes in a second", "it's
   gone now" suppress only the MILD labels (dizziness, fever), never a red flag.
+* **Anaphoric present** (v6) — "My mother had chest pain last year. I have it
+  now." restores the history clause the anaphor points at.
 
 Deterministic, keyless, pure — mirrored into ``backend/policies/
-red-flags.v5.yaml`` and enforced in sync by ``tests/llm/test_prompt_registry.py``.
+red-flags.v7.yaml`` and enforced in sync by ``tests/llm/test_prompt_registry.py``.
 
 Owner: Priyanshu (scope ``safety``).
 """
@@ -91,7 +93,7 @@ ACUTE_TERM_PATTERNS: tuple[tuple[str, str], ...] = (
     ("vomiting", r"\bvomit\w*|\bthrowing\s+up\b|\bbeing\s+sick\b|\bthrew\s+up\b"),
     ("seizure", r"\bseizure\w*|\bconvulsion\w*|\bfitting\b|\bjerking\b"),
     ("reduced_consciousness", r"\bunconscious\b|\bunresponsive\b|\bnot\s+responding\b|\bcannot\s+be\s+woken\b|\bcan'?t\s+(?:be\s+)?woken?\b|\bwon'?t\s+wake\b|\bcouldn'?t\s+be\s+woken\b|\bcan'?t\s+wake\s+(?:him|her|them)\b|\bkeep\s+my\s+eyes\s+open\b"),
-    ("neuro_focal", r"\bnumb\w*|\bslurr\w*|\bweak\w*\s+(?:all\s+over|one\s+side|down\s+one)\b|\bdrooping\b|\bdroop\b|\bone\s+side\b.{0,30}\b(?:weak|numb|droop)"),
+    ("neuro_focal", r"\bnumb(?!er)\w*|\bslurr\w*|\bweak\w*\s+(?:all\s+over|one\s+side|down\s+one)\b|\bdrooping\b|\bdroop\b|\bone\s+side\b.{0,30}\b(?:weak|numb|droop)"),
     ("rash_swelling", r"\brash\w*|\bswelling\b|\bswollen\b|\bhives\b|\bcoming\s+out\s+in\b"),
     ("fever", r"\bfever\w*|\bburning\s+up\b|\bboiling\b"),
     ("hypoglycaemia", r"\bsugar\s+(?:has\s+|keeps\s+|is\s+|was\s+)?(?:dropped|dropping|low)\b|\bglucose\s+(?:has\s+|is\s+)?(?:dropped|low)\b|\bhypo\b|\bsugar\s+is\s+(?:[23]\d|4\d)\b"),
@@ -179,6 +181,15 @@ PRESENT_MARKERS: tuple[str, ...] = (
     r"(?:having|getting|feeling|bleeding|vomiting|shaking|fitting|seizing|choking|struggling"
     r"|gasping|wheezing|losing|going|turning|not\s+breathing)\b",
     r"\b(?:going|gone|turning)\s+(?:blue|grey|gray|purple)\b",
+    # v6: any subject in the present progressive of an acute event ("my
+    # grandmother is having a stroke" — "grandmother" is a history marker).
+    r"\b(?:is|are)\s+(?:having|getting|bleeding|vomiting|fitting|seizing|choking|gasping"
+    r"|turning|collapsing|drooping|slurring|jerking|twitching|shaking|struggling|wheezing"
+    r"|coming\s+out|not\s+breathing)\b",
+    # v6: recent onset ("since lunch", "20 mins ago") is happening now.
+    r"\bsince\s+(?:lunch|breakfast|dinner|noon|midday|midnight|last\s+night"
+    r"|(?:this|the)\s+(?:morning|afternoon|evening|night))\b",
+    r"\b\d+\s*(?:mins?|minutes?|hours?|hrs?)\s+ago\b",
 )
 
 # Explicit self-harm denials. v4: each marker consumes the DENIED PHRASE
@@ -244,6 +255,18 @@ RESOLVED_MARKERS: tuple[str, ...] = (
     r"\bback\s+to\s+(?:normal|his\s+usual|her\s+usual|my\s+usual)\b",
     r"\bwas\b[^.;!?]{0,40}\bbut\s+(?:is\s+|she'?s\s+|he'?s\s+|i'?m\s+|it'?s\s+)?(?:now\s+)?(?:fine|ok|okay|better|normal|gone)\b",
 )
+# v6 (round-4 red team): an ANAPHORIC present clause ("I have it now", "same
+# thing is happening again", "it's back") points at the symptom in the clause
+# before it. "My mother had chest pain last year. I have it now." was
+# redirected at v5: the first clause was history-suppressed and the second
+# names no symptom. A live clause carrying one of these markers restores the
+# immediately preceding suppressed clause to the live text.
+ANAPHORIC_PRESENT_MARKERS: tuple[str, ...] = (
+    r"\b(?:i|we|he|she|they)\s+(?:have|has|'?ve\s+got|got|feel|am\s+having|is\s+having|are\s+having)\s+(?:it|that|this|those|them|the\s+same(?:\s+(?:thing|pain|symptoms?))?)\b",
+    r"\b(?:i'?m|he'?s|she'?s|they'?re|we'?re)\s+(?:having|getting|feeling)\s+(?:it|that|this|those|them|the\s+same)\b",
+    r"\b(?:it'?s|it\s+is|it\s+has|that'?s|that\s+is|this\s+is|the\s+same\s+thing(?:'s|\s+is)?)\s+(?:back|come\s+back|happening(?:\s+(?:again|now|to\s+me))?|starting\s+again|started\s+again)\b",
+)
+
 #: The only labels resolution may suppress: acute-net ``dizzy``/``fever`` and
 #: the symptom-report soft label ``dizziness``.
 MILD_RESOLVABLE_LABELS: frozenset[str] = frozenset({"dizzy", "fever", "dizziness"})
@@ -289,6 +312,9 @@ _THIRD_PARTY_RE = re.compile(
     "|".join(f"(?:{p})" for p in THIRD_PARTY_FRAMING_MARKERS), re.IGNORECASE
 )
 _RESOLVED_RE = re.compile("|".join(f"(?:{p})" for p in RESOLVED_MARKERS), re.IGNORECASE)
+_ANAPHORIC_RE = re.compile(
+    "|".join(f"(?:{p})" for p in ANAPHORIC_PRESENT_MARKERS), re.IGNORECASE
+)
 
 _CLAUSE_SPLIT = re.compile(
     r"[.;!?\n]+"
@@ -388,8 +414,12 @@ def unsuppressed_text(
 
     Clauses are re-joined with ". " so a cross-clause regex cannot bridge a
     suppressed clause into a live one.
+
+    v6: a live clause with an anaphoric present marker ("I have it now")
+    restores the suppressed clause right before it.
     """
     live: list[str] = []
+    prev_suppressed: str | None = None
     for c in split_clauses(question):
         if _clause_suppressed(
             c,
@@ -397,7 +427,13 @@ def unsuppressed_text(
             hypothetical=hypothetical,
             impersonal_definitional=impersonal_definitional,
         ):
+            prev_suppressed = c
             continue
+        if prev_suppressed is not None and _ANAPHORIC_RE.search(c):
+            restored = _drop_non_human_segments(_THIRD_PARTY_RE.sub(" ", prev_suppressed)).strip()
+            if restored:
+                live.append(restored)
+        prev_suppressed = None
         c = _drop_non_human_segments(_THIRD_PARTY_RE.sub(" ", c)).strip()
         if c:
             live.append(c)
@@ -471,6 +507,7 @@ __all__ = [
     "NON_HUMAN_SUBJECT_MARKERS",
     "THIRD_PARTY_FRAMING_MARKERS",
     "RESOLVED_MARKERS",
+    "ANAPHORIC_PRESENT_MARKERS",
     "MILD_RESOLVABLE_LABELS",
     "PRESENT_MARKERS",
     "DENIAL_MARKERS",

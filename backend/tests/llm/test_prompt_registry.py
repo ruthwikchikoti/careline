@@ -49,7 +49,7 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     )
 
     policy = yaml.safe_load(load_policy("red_flags").text)
-    assert policy["version"] == "v5"
+    assert policy["version"] == "v7"
     assert tuple(policy["patterns"]) == tuple(RED_FLAG_PATTERNS), (
         "policies/red-flags YAML and domain RED_FLAG_PATTERNS have drifted — "
         "update both together and bump the policy version in the manifest"
@@ -120,6 +120,45 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     resolved = ctx["transient_resolved"]
     assert list(RESOLVED_MARKERS) == resolved["markers"]
     assert sorted(MILD_RESOLVABLE_LABELS) == resolved["mild_labels"]
+    # v6 (round-4 red team): anaphoric present, the LLM-path body-state
+    # backstop, de-obfuscation / fuzzy pair repair and the emergency line.
+    from careline.domain.gates.chain import EMERGENCY_LINE
+    from careline.domain.rails.acute_concern import ANAPHORIC_PRESENT_MARKERS
+    from careline.domain.rails.normalise import LEET_MAP, TYPO_BIGRAMS, TYPO_FUZZY_PAIRS
+    from careline.domain.rails.red_flag import _PATTERN_CONCEPTS
+    from careline.domain.rails.symptom_report import (
+        BODY_STATE_CONDITIONAL,
+        BODY_STATE_PRESENT_PATTERNS,
+        BODY_STATE_VOCABULARY,
+    )
+
+    assert policy["pattern_concepts"] == dict(_PATTERN_CONCEPTS)
+    assert list(ANAPHORIC_PRESENT_MARKERS) == ctx["anaphoric_present"]["markers"]
+    backstop = ctx["body_state_backstop"]
+    assert BODY_STATE_VOCABULARY == backstop["vocabulary"]
+    assert list(BODY_STATE_PRESENT_PATTERNS) == backstop["present_patterns"]
+    assert BODY_STATE_CONDITIONAL == backstop["conditional"]
+    typo = policy["typo_normalisation"]
+    assert [list(p) for p in TYPO_FUZZY_PAIRS] == typo["fuzzy_pairs"]
+    assert dict(TYPO_BIGRAMS) == typo["bigrams"]
+    assert dict(LEET_MAP) == typo["deobfuscation"]["leet_map"]
+    assert EMERGENCY_LINE == policy["redirect_emergency_line"]
+    # v7 (final red team): informal-spelling repair and the answer-text
+    # grounding vocabulary must mirror the domain too.
+    from careline.domain.gates import grounding
+    from careline.domain.rails.normalise import APOSTROPHE_LESS, DROPPED_G_WORDS
+
+    informal = typo["informal_repair"]
+    assert list(DROPPED_G_WORDS) == informal["dropped_g_words"]
+    assert dict(APOSTROPHE_LESS) == informal["apostrophe_less"]
+    ag = ctx["answer_grounding"]
+    assert dict(grounding.UNIT_CANONICAL) == ag["units"]
+    assert dict(grounding.FREQUENCY_WORDS) == ag["frequency_words"]
+    assert dict(grounding.NUMBER_WORDS) == ag["number_words"]
+    assert sorted(grounding.EXEMPT_NUMBERS) == ag["exempt_numbers"]
+    assert sorted(grounding.DRUG_LEXICON) == ag["drug_lexicon"]
+    assert dict(grounding.DRUG_SYNONYMS) == ag["drug_synonyms"]
+    assert list(grounding.DRUG_SUFFIXES) == ag["drug_suffixes"]
 
 
 def test_policy_artifact_hash_matches_manifest():

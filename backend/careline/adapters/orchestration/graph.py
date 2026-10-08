@@ -39,6 +39,7 @@ from langgraph.graph import END, START, StateGraph
 from careline.domain.brain.triage import run_triage
 from careline.domain.enums import TraceStatus
 from careline.domain.gates.chain import GateContext, run_gate_chain
+from careline.domain.gates.grounding import non_current_facts
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient, ValidSlice
@@ -154,6 +155,7 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
             proposal=state["proposal"],
             verification=state.get("verification"),
             valid_slice=state["valid_slice"],
+            non_current_facts=non_current_facts(state["patient"], state["now"]),
             thresholds=state["thresholds"],
             now=state["now"],
             call_session=state.get("session"),
