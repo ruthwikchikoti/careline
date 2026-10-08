@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from careline.adapters.llm import usage as usage_recorder
 from careline.adapters.llm.tracing import trace_span
@@ -40,7 +40,7 @@ from careline.domain.model.patient import Patient
 from careline.domain.ports.reasoning import Reasoner, Verifier
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 from careline.services import online_monitor
-from careline.services.audit_service import AuditEventKind, AuditService
+from careline.services.audit_service import AuditEventKind, AuditService, AuditTurnRecord
 
 if TYPE_CHECKING:
     from careline.adapters.orchestration.graph import CompiledBrainGraph
@@ -82,8 +82,13 @@ class QuestionService:
         patient: Patient,
         session: CallSession,
         now: datetime | None = None,
+        on_audit_turn: Callable[[AuditTurnRecord], None] | None = None,
     ) -> Decision:
-        """Process one question and return the terminal ``Decision``."""
+        """Process one question and return the terminal ``Decision``.
+
+        ``on_audit_turn`` (optional) receives the logged audit record, so a caller
+        such as the patient portal can hand the ``turn_id`` back for feedback.
+        """
         now = now or datetime.now(timezone.utc)
         started = time.perf_counter()
         turn_trace = begin_turn()
@@ -133,13 +138,15 @@ class QuestionService:
                 self._deliver_escalation(decision, session)
 
             if self._audit is not None:
-                self._audit.log_turn(
+                logged = self._audit.log_turn(
                     call_id=session.call_id,
                     patient_id=session.patient_id,
                     doctor_id=session.doctor_id,
                     question=question,
                     decision=decision,
                 )
+                if on_audit_turn is not None:
+                    on_audit_turn(logged)
                 if decision.verdict is Verdict.ESCALATE:
                     self._audit.log_event(
                         AuditEventKind.ESCALATION,

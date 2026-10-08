@@ -181,6 +181,53 @@ class AuditResolutionRecord(BaseModel):
     resolved_at: datetime
 
 
+class AuditFeedbackRecord(BaseModel):
+    """A patient's helpful / not-helpful rating of one of their own turns.
+
+    Human online evaluation (patient channel). One per turn — re-rating
+    overwrites. ``comment`` is free text from the patient, so it is PHI-adjacent:
+    it lives only here (tenant-scoped, nulled by DPDP redaction), never in the
+    process-wide monitor.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    patient_id: str
+    doctor_id: str
+    verdict: Verdict
+    helpful: bool
+    comment: str | None = None
+    rated_at: datetime
+
+
+class AuditReviewRecord(BaseModel):
+    """A doctor's correct / incorrect review of one turn (expert human eval).
+
+    One per turn — re-review overwrites. ``note`` stays in the tenant-scoped audit
+    store only (nulled by DPDP redaction); the monitor gets just the boolean.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    patient_id: str
+    doctor_id: str
+    verdict: Verdict
+    correct: bool
+    note: str | None = None
+    reviewed_by: str
+    reviewed_at: datetime
+
+
+#: Verdicts a patient may rate — an escalation is not an AI answer to judge.
+RATABLE_VERDICTS = frozenset({Verdict.ANSWER, Verdict.CLARIFY})
+
+
+class NotRatableError(ValueError):
+    """The turn exists and is the caller's, but its verdict cannot be rated."""
+
+
 def _trace_to_skeleton(trace: ReasoningTrace) -> list[dict[str, Any]]:
     """Serialise trace steps without clinical content — safe for redacted logs."""
     return [
@@ -215,6 +262,10 @@ class AuditStore(Protocol):
         list[AuditResolutionRecord],
     ]: ...
 
+    # Optional (human feedback): ``save_feedback(record)``, ``save_review(record)``
+    # and ``load_human_feedback() -> (feedback, reviews)``. Detected with hasattr so
+    # a store predating them keeps working (feedback is then in-memory only).
+
 
 class AuditService:
     """In-memory audit read model, optionally write-through to a durable store.
@@ -236,6 +287,8 @@ class AuditService:
         self._calls: dict[str, AuditCallRecord] = {}
         self._events: list[AuditEventRecord] = []
         self._resolutions: dict[str, AuditResolutionRecord] = {}
+        self._feedback: dict[str, AuditFeedbackRecord] = {}
+        self._reviews: dict[str, AuditReviewRecord] = {}
         self._store = store
         if store is not None:
             turns, calls, events, resolutions = store.load()
@@ -243,6 +296,13 @@ class AuditService:
             self._calls = {c.call_id: c for c in calls}
             self._events = list(events)
             self._resolutions = {r.turn_id: r for r in resolutions}
+            if hasattr(store, "load_human_feedback"):
+                try:
+                    feedback, reviews = store.load_human_feedback()
+                    self._feedback = {f.turn_id: f for f in feedback}
+                    self._reviews = {r.turn_id: r for r in reviews}
+                except Exception:  # noqa: BLE001 - feedback is advisory; audit must load
+                    pass
 
     def _persist_turn(self, record: AuditTurnRecord) -> None:
         """Best-effort write-through — a storage hiccup never breaks a live turn."""
@@ -270,6 +330,14 @@ class AuditService:
         if self._store is not None:
             try:
                 self._store.save_resolution(record)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _persist_optional(self, method: str, record: BaseModel) -> None:
+        """Best-effort write-through to an optional store method (human feedback)."""
+        if self._store is not None and hasattr(self._store, method):
+            try:
+                getattr(self._store, method)(record)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -475,6 +543,85 @@ class AuditService:
             resolutions = list(self._resolutions.values())
         return [r for r in resolutions if r.doctor_id == doctor_id and r.patient_id == patient_id]
 
+    # --- human feedback (second online-evaluation channel) -------------------
+
+    def rate_turn(
+        self,
+        *,
+        doctor_id: str,
+        patient_id: str,
+        turn_id: str,
+        helpful: bool,
+        comment: str | None = None,
+        rated_at: datetime | None = None,
+    ) -> AuditFeedbackRecord | None:
+        """Record the patient's rating of their own turn (re-rating overwrites).
+
+        Returns ``None`` unless the turn belongs to exactly ``(doctor_id,
+        patient_id)`` — a cross-patient / cross-tenant turn id is
+        indistinguishable from an unknown one (REVIEW-1). Raises
+        :class:`NotRatableError` for a turn whose verdict is not ratable.
+        """
+        with self._lock:
+            turn = next((t for t in self._turns if t.turn_id == turn_id), None)
+            if turn is None or turn.doctor_id != doctor_id or turn.patient_id != patient_id:
+                return None
+            if turn.verdict not in RATABLE_VERDICTS:
+                raise NotRatableError(turn.verdict.value)
+            record = AuditFeedbackRecord(
+                turn_id=turn_id,
+                patient_id=turn.patient_id,
+                doctor_id=turn.doctor_id,
+                verdict=turn.verdict,
+                helpful=helpful,
+                comment=comment,
+                rated_at=rated_at or datetime.now(timezone.utc),
+            )
+            self._feedback[turn_id] = record
+        self._persist_optional("save_feedback", record)
+        return record
+
+    def review_turn(
+        self,
+        *,
+        doctor_id: str,
+        turn_id: str,
+        correct: bool,
+        reviewed_by: str,
+        note: str | None = None,
+        reviewed_at: datetime | None = None,
+    ) -> AuditReviewRecord | None:
+        """Record the doctor's correct / incorrect review of one of their turns.
+
+        Any verdict may be reviewed (the verdict is recorded). Returns ``None``
+        when the turn is unknown or belongs to another doctor (REVIEW-1).
+        """
+        with self._lock:
+            turn = next((t for t in self._turns if t.turn_id == turn_id), None)
+            if turn is None or turn.doctor_id != doctor_id:
+                return None
+            record = AuditReviewRecord(
+                turn_id=turn_id,
+                patient_id=turn.patient_id,
+                doctor_id=turn.doctor_id,
+                verdict=turn.verdict,
+                correct=correct,
+                note=note,
+                reviewed_by=reviewed_by,
+                reviewed_at=reviewed_at or datetime.now(timezone.utc),
+            )
+            self._reviews[turn_id] = record
+        self._persist_optional("save_review", record)
+        return record
+
+    def feedback_for(self, turn_id: str) -> AuditFeedbackRecord | None:
+        with self._lock:
+            return self._feedback.get(turn_id)
+
+    def review_for(self, turn_id: str) -> AuditReviewRecord | None:
+        with self._lock:
+            return self._reviews.get(turn_id)
+
     def clear_patient(self, *, doctor_id: str, patient_id: str) -> int:
         """Remove this patient's turns + doctor replies entirely (UI 'clear history').
 
@@ -485,7 +632,12 @@ class AuditService:
         Returns the number of turns removed.
         """
 
-        def _mine(record: AuditTurnRecord | AuditResolutionRecord) -> bool:
+        def _mine(
+            record: AuditTurnRecord
+            | AuditResolutionRecord
+            | AuditFeedbackRecord
+            | AuditReviewRecord,
+        ) -> bool:
             return record.doctor_id == doctor_id and record.patient_id == patient_id
 
         with self._lock:
@@ -494,6 +646,8 @@ class AuditService:
             self._resolutions = {
                 tid: r for tid, r in self._resolutions.items() if not _mine(r)
             }
+            self._feedback = {tid: f for tid, f in self._feedback.items() if not _mine(f)}
+            self._reviews = {tid: r for tid, r in self._reviews.items() if not _mine(r)}
             removed = before - len(self._turns)
         # Best-effort durable delete — keep the in-memory clear even if storage hiccups.
         if self._store is not None and hasattr(self._store, "delete_patient"):
@@ -547,11 +701,27 @@ class AuditService:
                     self._calls[call_id] = marked
                     changed_calls.append(marked)
 
+            # Patient comments / doctor notes are free text: null them, keep the signal.
+            changed_feedback: list[AuditFeedbackRecord] = []
+            for tid, fb in list(self._feedback.items()):
+                if fb.doctor_id == doctor_id and fb.patient_id == patient_id and fb.comment:
+                    self._feedback[tid] = fb.model_copy(update={"comment": None})
+                    changed_feedback.append(self._feedback[tid])
+            changed_reviews: list[AuditReviewRecord] = []
+            for tid, rv in list(self._reviews.items()):
+                if rv.doctor_id == doctor_id and rv.patient_id == patient_id and rv.note:
+                    self._reviews[tid] = rv.model_copy(update={"note": None})
+                    changed_reviews.append(self._reviews[tid])
+
         # Overwrite the durable copies too (outside the lock — best-effort I/O).
         for redacted in changed_turns:
             self._persist_turn(redacted)
         for marked in changed_calls:
             self._persist_call(marked)
+        for fb in changed_feedback:
+            self._persist_optional("save_feedback", fb)
+        for rv in changed_reviews:
+            self._persist_optional("save_review", rv)
         count = len(changed_turns) + len(changed_calls)
 
         self.log_event(
@@ -569,6 +739,10 @@ __all__ = [
     "AuditCallRecord",
     "AuditEventRecord",
     "AuditResolutionRecord",
+    "AuditFeedbackRecord",
+    "AuditReviewRecord",
     "AuditService",
+    "NotRatableError",
+    "RATABLE_VERDICTS",
     "review_reason",
 ]

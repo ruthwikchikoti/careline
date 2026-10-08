@@ -27,7 +27,9 @@ from typing import Any
 from careline.services.audit_service import (
     AuditCallRecord,
     AuditEventRecord,
+    AuditFeedbackRecord,
     AuditResolutionRecord,
+    AuditReviewRecord,
     AuditTurnRecord,
 )
 
@@ -35,6 +37,8 @@ TURNS = "audit_turns"
 CALLS = "audit_calls"
 EVENTS = "audit_events"
 RESOLUTIONS = "audit_resolutions"
+FEEDBACK = "audit_feedback"  # patient thumbs (human online eval), keyed by turn_id
+REVIEWS = "audit_reviews"    # doctor correct/incorrect review, keyed by turn_id
 
 
 def create_audit_store(uri: str, *, db_name: str = "careline") -> "MongoAuditStore":
@@ -62,6 +66,8 @@ class MongoAuditStore:
         self._calls = database[CALLS]
         self._events = database[EVENTS]
         self._resolutions = database[RESOLUTIONS]
+        self._feedback = database[FEEDBACK]
+        self._reviews = database[REVIEWS]
         self._client = client
 
     # --- write-through (upsert by the record's own id) -----------------------
@@ -82,6 +88,16 @@ class MongoAuditStore:
             {"_id": record.turn_id}, self._resolution_doc(record), upsert=True
         )
 
+    def save_feedback(self, record: AuditFeedbackRecord) -> None:
+        self._feedback.replace_one(
+            {"_id": record.turn_id}, {**record.model_dump(), "_id": record.turn_id}, upsert=True
+        )
+
+    def save_review(self, record: AuditReviewRecord) -> None:
+        self._reviews.replace_one(
+            {"_id": record.turn_id}, {**record.model_dump(), "_id": record.turn_id}, upsert=True
+        )
+
     # --- hydrate (rebuild the in-memory read model on startup) ---------------
 
     def load(
@@ -98,6 +114,13 @@ class MongoAuditStore:
         resolutions = [AuditResolutionRecord(**_strip_id(d)) for d in self._resolutions.find()]
         return turns, calls, events, resolutions
 
+    def load_human_feedback(
+        self,
+    ) -> tuple[list[AuditFeedbackRecord], list[AuditReviewRecord]]:
+        feedback = [AuditFeedbackRecord(**_strip_id(d)) for d in self._feedback.find()]
+        reviews = [AuditReviewRecord(**_strip_id(d)) for d in self._reviews.find()]
+        return feedback, reviews
+
     def delete_patient(self, *, doctor_id: str, patient_id: str) -> None:
         """Hard-delete this patient's turns + resolutions (UI 'clear history').
 
@@ -110,6 +133,8 @@ class MongoAuditStore:
         scope = {"doctor_id": doctor_id, "patient_id": patient_id}
         self._turns.delete_many(scope)
         self._resolutions.delete_many(scope)
+        self._feedback.delete_many(scope)
+        self._reviews.delete_many(scope)
 
     def close(self) -> None:
         if self._client is not None:
@@ -139,4 +164,5 @@ def _strip_id(doc: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in doc.items() if k != "_id"}
 
 
-__all__ = ["MongoAuditStore", "create_audit_store", "TURNS", "CALLS", "EVENTS", "RESOLUTIONS"]
+__all__ = ["MongoAuditStore", "create_audit_store", "TURNS", "CALLS", "EVENTS", "RESOLUTIONS",
+           "FEEDBACK", "REVIEWS"]

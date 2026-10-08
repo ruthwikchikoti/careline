@@ -321,15 +321,27 @@ judge has not been calibrated against human labels.
 
 `services/online_monitor.py` is fed by `QuestionService` on every turn.
 `GET /monitoring` (doctor JWT) returns `{scope, generated_at, operational,
-output, quality, drift, cost, alerts}`. `scope` is always
+output, quality, drift, cost, human_feedback, alerts}`. `scope` is always
 `"process-wide, aggregate, no PHI"`: every authenticated doctor sees the whole
-deployment's aggregates, not a per-tenant slice. The five category sections:
+deployment's aggregates, not a per-tenant slice.
+
+**Online evaluation has two channels: LLM-as-judge and human feedback.** The
+judge scores a sample of ANSWER turns (below). Human feedback adds the patient
+and the doctor: the patient rates each ANSWER / CLARIFY turn in the portal
+(`POST /patient/feedback`, thumbs up/down plus an optional comment of up to 500
+characters, own turns only, re-rating overwrites), and the doctor marks turns
+correct or incorrect on the Audit page (`POST /audit/turns/{turn_id}/review`,
+own tenant only, shown on `GET /audit` rows). Comments and notes stay in the
+tenant-scoped audit store; the monitor's `human_feedback` section holds
+aggregates only. There is no real-user volume yet: the mechanism is exercised
+by the test suite, not by production traffic. The five category sections:
 
 | Section (`/monitoring` key) | Metrics | Alert (in `alerts[]`) |
 |---|---|---|
 | `operational` | latency p50/p95/p99, error rate, fail-closed rate, throughput | fail-closed > 5%, errors > 1% |
 | `output` | verdict mix, escalation rate, low-risk-escalation proxy, scope counts | none |
 | `quality` | sampled online LLM-as-judge faithfulness (`CARELINE_JUDGE_SAMPLE_RATE`, default 0.2, on a background thread; keyless twin offline) | faithfulness < 90% once ≥ 10 judged |
+| `quality` (human, key `human_feedback`) | patient ratings and helpful rate; doctor reviews and doctor-rated accuracy (correct / reviewed ANSWER turns). Aggregates only, no text or ids | doctor-rated accuracy < 90% once ≥ 10 reviews; patient helpful rate < 70% once ≥ 20 ratings |
 | `drift` (the input category lives here) | scope-mix PSI vs the eval-set reference, OOV rate vs the dev vocabulary, mean-length shift; evaluated after 30 turns | PSI > 0.2, OOV > baseline + 0.15, length shift > 50% |
 | `cost` | tokens and estimated $ per request (mean, p95) | none (the daily cap is a hard 429, not an alert) |
 
