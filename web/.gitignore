@@ -17,3 +17,4 @@ next-env.d.ts
 npm-debug.log*
 
 # local env (committed .env.local is fine for a public demo base URL)
+.vercel
