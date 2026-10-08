@@ -244,7 +244,7 @@ Gaps we disclose:
 | Online monitor | In-process ring buffers and a sampled judge thread | N1, N4, N6 | Five monitoring categories with no extra infrastructure on a free tier. Per-process only |
 | Human feedback | Patient 👍/👎 (`POST /patient/feedback`) and doctor correct/incorrect review (`POST /audit/turns/{id}/review`), stored tenant-scoped in the audit store; aggregates in `/monitoring` `human_feedback` | N2 | Online evaluation uses LLM-as-judge **and user feedback**: the judge scores faithfulness automatically, humans score usefulness and correctness. No real-user volume yet; exercised by tests |
 | Tracing | Langfuse Cloud (optional `obs` extra, SDK v3) | N4, N6 | Per-turn cost and latency traces, live: run 2 of the live flow check exported 18 ([example trace](https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec)). Trace input includes the question text (fictional data); the patient id is salted-hashed |
-| Deploy | Vercel free tier (FastAPI on the Python runtime + Next.js); Render Docker blueprint as the alternative | live URL | Live: https://careline-web.vercel.app, API https://careline-api-nine.vercel.app. Keyless, fictional data, in-memory store per instance |
+| Deploy | Vercel free tier (FastAPI on the Python runtime + Next.js); Render Docker blueprint as the alternative | live URL | Live: https://careline-web.vercel.app, API https://careline-api-nine.vercel.app. Live GPT-4o-mini (spend capped), fictional data, in-memory store per instance |
 
 ## 7. Failure behaviour (fail closed)
 

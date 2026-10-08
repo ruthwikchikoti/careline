@@ -216,7 +216,7 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Mitigation.** We warm the URL before a demo (`curl /health`). The keyless local fallback gives identical behaviour (see `docs/DEMO-RUNBOOK.md`). The monitor and limiter state limits are documented in `docs/OPERATIONS.md`.
 - **Where we ended up: Vercel.** The live demo runs on Vercel (web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app; FastAPI on the Python runtime, entrypoint `careline.api.vercel_app:app`), **because** the free tier hosts both the FastAPI API (Python runtime) and the Next.js web app in one account with no Docker build. `render.yaml` and the Dockerfile remain the documented alternative host.
   - *What it changes.* The API is serverless, so the in-memory store, rate-limit/daily-cap counters and monitor are per instance and reset on cold start: the doctor console starts empty, and the Live Console uses the built-in demo patient. Deploys are a manual `vercel deploy --prod` after CI is green (the projects are not Git-connected, so a red push never deploys); rollback is Vercel Instant Rollback.
-- **Status: deployed on Vercel** (keyless, fictional data, public-demo hardening on). Pending: Vercel Git integration with deploy-after-checks, plus branch protection.
+- **Status: deployed on Vercel** (live GPT-4o-mini with spend capped by rate limit and daily cap; fictional data, public-demo hardening on). Pending: Vercel Git integration with deploy-after-checks, plus branch protection.
 
 ## 10. In-process monitor over Prometheus + Grafana
 

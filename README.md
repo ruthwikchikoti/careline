@@ -17,7 +17,7 @@ releases, monitoring, cost and latency capture, and shadow comparison.
 > cross-patient reachability (a cross-patient leak is a sev-0).
 
 **Live demo:** https://careline-web.vercel.app (web) · API https://careline-api-nine.vercel.app (`/health`, `/docs`).
-Keyless deterministic spine, fictional data, public-demo hardening (per-doctor credentials, rate limits, daily cap, CORS locked to the web origin). The Live Console works without signing in; the doctor login is shared with the team privately.
+Runs live GPT-4o-mini (reasoner + verifier), fictional data, spend bounded by the rate limit (40/min/IP) and daily cap (3,000); emergency, injection and own-medicine rules run before any model call; public-demo hardening (per-doctor credentials, rate limits, daily cap, CORS locked to the web origin). The Live Console works without signing in; the doctor login is shared with the team privately.
 
 ---
 
@@ -555,7 +555,7 @@ now fails closed to ESCALATE in well under a minute.
 
 | Item | Status | Reason |
 |---|---|---|
-| Live public URL (deploy) | **Done** | Vercel: web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app (FastAPI on the Python runtime, entrypoint `careline.api.vercel_app:app`; `.vercelignore` keeps `.env`, `.venv` and tests out). Keyless (no LLM spend from a public URL), in-memory store (the doctor console starts empty; the Live Console uses the built-in demo patient). `render.yaml` remains an alternative |
+| Live public URL (deploy) | **Done** | Vercel: web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app (FastAPI on the Python runtime, entrypoint `careline.api.vercel_app:app`; `.vercelignore` keeps `.env`, `.venv` and tests out). Live GPT-4o-mini (spend capped by rate limit + daily cap; switch `CARELINE_LLM_BACKEND=heuristic` to go keyless), in-memory store (the doctor console starts empty; the Live Console uses the built-in demo patient). `render.yaml` remains an alternative |
 | CI-gated deploy | **Pending (manual today)** | Vercel projects are not Git-connected: deploys are a manual `vercel deploy --prod` after CI is green, so a red push never deploys, but no tooling enforces the wait. Team action: Vercel Git integration with deploy-after-checks, plus branch protection |
 | Branch protection / PR merge blocked by the gate | **Pending** | `main` has no branch protection and no CODEOWNERS, and no PR has ever run CI (every run so far is a push). Team action: require "Suite (keyless)" and "Eval gate (deterministic slice)", then open a PR from [`demo/blocked-by-eval-gate`](https://github.com/ruthwikchikoti/careline/tree/demo/blocked-by-eval-gate) and screenshot the blocked merge |
 | CI failing an eval regression | **Done (evidence, on push)** | Branch `demo/blocked-by-eval-gate` drops the v6/v7 rail families; its CI run [fails the eval gate](https://github.com/ruthwikchikoti/careline/actions/runs/37785663116) (missed_emergencies 0 → 23) while [`main` passes](https://github.com/ruthwikchikoti/careline/actions/runs/37785648690) |

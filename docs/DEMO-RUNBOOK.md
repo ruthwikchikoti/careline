@@ -1,6 +1,6 @@
 # CareLine Ops — Demo-day runbook
 
-**Live demo (Vercel):** web https://careline-web.vercel.app · API https://careline-api-nine.vercel.app (`/health`, `/docs`). Keyless, fictional data, public-demo hardening (per-doctor credentials, CORS locked to the web origin, a per-IP rate limit and a daily cap). The store is in memory: the doctor console starts empty and the Live Console uses the built-in demo patient. **Do not share the URL with the room during the demo:** the rate limit is per IP, and an audience on the same venue wifi shares one IP, so their clicks spend the presenter's budget and can 429 the demo mid-talk. Share it afterwards. The local commands below remain the offline fallback.
+**Live demo (Vercel):** web https://careline-web.vercel.app · API https://careline-api-nine.vercel.app (`/health`, `/docs`). Live GPT-4o-mini (first question ~8 s while the function warms up, then 2–3 s), fictional data, public-demo hardening (per-doctor credentials, CORS locked to the web origin, a per-IP rate limit and a daily cap). The store is in memory: the doctor console starts empty and the Live Console uses the built-in demo patient. **Do not share the URL with the room during the demo:** the rate limit is per IP, and an audience on the same venue wifi shares one IP, so their clicks spend the presenter's budget and can 429 the demo mid-talk. Share it afterwards. The local commands below remain the offline fallback.
 
 **Format.** A short live demo. Every command in it is keyless and offline, so a dead wifi connection does not stop it.
 
