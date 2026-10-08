@@ -1,0 +1,14 @@
+# Never upload secrets, local environments or test-only material.
+.env
+.env.*
+!.env.example
+.venv/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+tests/
+evals/.cache/
+evals/blind/
+evals/human/
+evals/reports/*.json
+Dockerfile

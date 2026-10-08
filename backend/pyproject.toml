@@ -13,6 +13,10 @@ dependencies = [
     "pydantic-settings>=2.2",
     "langgraph>=0.2",
     "pyyaml>=6.0",
+    # The HTTP API is part of the deployable app (Vercel installs only these core
+    # dependencies), so FastAPI and PyJWT are core, not extras.
+    "fastapi>=0.111",
+    "PyJWT>=2.8",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +60,10 @@ dev = [
     # data suite is skipped at import and CI silently tests nothing there.
     "mongomock-motor>=0.0.29",
 ]
+
+[tool.vercel]
+# Vercel Python runtime: module-level ASGI app (careline/api/vercel_app.py).
+entrypoint = "careline.api.vercel_app:app"
 
 [tool.setuptools.packages.find]
 include = ["careline*"]

@@ -15,8 +15,8 @@ releases, monitoring, cost and latency capture, and shadow comparison.
 > Never answer from a superseded fact. One patient per call, with zero
 > cross-patient reachability (a cross-patient leak is a sev-0).
 
-**Live URL:** not deployed yet. The Render blueprint (`render.yaml`) is ready;
-see [Not applicable / not yet done](#not-applicable--not-yet-done).
+**Live demo:** https://careline-web.vercel.app (web) · API https://careline-api-nine.vercel.app (`/health`, `/docs`).
+Keyless deterministic spine, fictional data, public-demo hardening (per-doctor credentials, rate limits, daily cap, CORS locked to the web origin). The Live Console works without signing in; the doctor login is shared with the team privately.
 
 ---
 
@@ -551,7 +551,7 @@ now fails closed to ESCALATE in well under a minute.
 
 | Item | Status | Reason |
 |---|---|---|
-| Live public URL (deploy) | **Pending** | The Render blueprint (`render.yaml`) is ready but not deployed. A deploy needs the four secrets set in the dashboard, and the web app has no deploy target in the blueprint. Cold start, RAM and time-to-rollback on a live deploy are therefore unmeasured |
+| Live public URL (deploy) | **Done** | Vercel: web https://careline-web.vercel.app, API https://careline-api-nine.vercel.app (FastAPI on the Python runtime, entrypoint `careline.api.vercel_app:app`; `.vercelignore` keeps `.env`, `.venv` and tests out). Keyless (no LLM spend from a public URL), in-memory store (the doctor console starts empty; the Live Console uses the built-in demo patient). `render.yaml` remains an alternative |
 | CI-gated deploy | **Pending** | `render.yaml` has `autoDeploy: true`, so a deploy would run on every push to `main`, in parallel with CI. Team action: `autoDeployTrigger: checksPass` |
 | Branch protection / PR merge blocked by the gate | **Pending** | `main` has no branch protection and no CODEOWNERS, and no PR has ever run CI (every run so far is a push). Team action: require "Suite (keyless)" and "Eval gate (deterministic slice)", then open a PR from [`demo/blocked-by-eval-gate`](https://github.com/ruthwikchikoti/careline/tree/demo/blocked-by-eval-gate) and screenshot the blocked merge |
 | CI failing an eval regression | **Done (evidence, on push)** | Branch `demo/blocked-by-eval-gate` drops the v6/v7 rail families; its CI run [fails the eval gate](https://github.com/ruthwikchikoti/careline/actions/runs/37785663116) (missed_emergencies 0 → 23) while [`main` passes](https://github.com/ruthwikchikoti/careline/actions/runs/37785648690) |
