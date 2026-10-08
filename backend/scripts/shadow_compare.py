@@ -1,6 +1,6 @@
 """Shadow comparison — the offline stand-in for a canary deploy.
 
-Runs the same 250 eval questions through two **red-flag policy versions** *in
+Runs the same eval questions through two **red-flag policy versions** *in
 the same process* and prints a side-by-side metrics table, so a candidate
 release can be judged on evidence before it merges. Chosen over a live canary
 because the traffic here is fictional and low-volume, and emergency recall —
@@ -11,11 +11,11 @@ Each arm's emergency rail is rebuilt **from its versioned policy artifact**
 (``policies/red-flags.<v>.yaml``), not from today's regex constants — so the
 "v1 (regex only)" arm really is v1:
 
-* ``patterns`` only (v1) → literal regex rail; acute-concern net off. Exact
-  for the rail.
+* ``patterns`` only (v1) → literal regex rail; every later code-only net
+  (acute-concern, structural symptom-report) off. Exact for the rail.
 * ``patterns`` + ``semantic`` (v2) → literal + semantic danger-phrase layer
   with that artifact's phrases and threshold, scored by today's scorer
-  (the scoring code has not changed since v2); acute-concern net off.
+  (the scoring code has not changed since v2); later code-only nets off.
 * the **active** manifest version → the live domain rails, unpatched (exact).
 * a non-active version with a ``context`` section (v3+) → APPROXIMATE: the
   history/denial suppression and the acute-concern net are code, not data,
@@ -23,8 +23,10 @@ Each arm's emergency rail is rebuilt **from its versioned policy artifact**
 
 Reproduction scope — stated in every report: only the *rail* is swapped;
 every other component (gates, retrieval, keyless reasoner, eval labels) is
-today's code. Measured: the v1 arm reproduces baseline-v0's 58/60 missed
-emergencies exactly; its in-scope accuracy / over-escalation differ because
+today's code. Measured: scored on the frozen baseline-v0 ids
+(``--case-ids evals/reports/baseline-v0.case_ids.txt`` — the set has since
+grown, so a full-set count is not comparable), the v1 arm reproduces
+baseline-v0's 58/60 missed emergencies exactly; its in-scope accuracy / over-escalation differ because
 the gates and retrieval improved since. To reproduce a historical report
 byte-for-byte, replay the gate on the tree of the commit that produced it —
 ``--replay <commit>`` does this read-only (``git archive`` into a temp dir,
@@ -39,6 +41,7 @@ Usage::
     cd backend && python -m scripts.shadow_compare                 # v1 vs active
     python -m scripts.shadow_compare --a v1 --b v3 --markdown evals/reports/shadow-v1-vs-v3.md
     python -m scripts.shadow_compare --a v2 --b v4 --json out.json
+    python -m scripts.shadow_compare --a v1 --case-ids evals/reports/baseline-v0.case_ids.txt
     python -m scripts.shadow_compare --replay b8476c9              # exact historical replay
 
 Owner: Naresh (scope ``services``).
@@ -57,15 +60,17 @@ from typing import Callable
 
 import yaml
 
-import careline.domain.brain.brain as brain_module
+import careline.domain.brain.triage as triage_module
 import careline.domain.gates.chain as chain_module
 from careline.adapters.llm.prompt_registry import _manifest, load_policy
 from careline.domain.rails import red_flag
-from careline.services.eval_gate import _load_seed, load_cases, run_keyless, score
+from careline.services.eval_gate import _load_seed, load_case_ids, load_cases, run_keyless, score
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _POLICY_DIR = _BACKEND_ROOT / "policies"
 BASELINE_V0_COMMIT = "b8476c9"
+# The 250 case ids that existed at baseline-v0 (frozen; the set has grown since).
+BASELINE_V0_CASE_IDS = _BACKEND_ROOT / "evals" / "reports" / "baseline-v0.case_ids.txt"
 
 
 @dataclass(frozen=True)
@@ -134,7 +139,9 @@ def build_rail(version: str) -> PolicyRail:
     literal = re.compile("|".join(f"(?:{p})" for p in policy["patterns"]), re.IGNORECASE)
     semantic = _semantic_checker(policy["semantic"]) if policy.get("semantic") else None
 
-    def check(question: str) -> str | None:
+    # **_kw: the live call sites may pass rail options (e.g. soften_hypothetical);
+    # v1/v2 artifacts had no such context layer, so the options are ignored.
+    def check(question: str, **_kw) -> str | None:
         if not question:
             return None
         m = literal.search(question)
@@ -152,34 +159,51 @@ def build_rail(version: str) -> PolicyRail:
         fidelity = "rail rebuilt from artifact (literal + semantic, this version's phrases/threshold)"
     else:
         fidelity = "rail rebuilt from artifact (literal patterns only)"
-    return PolicyRail(version, sha12, check, lambda _q: None, fidelity)
+    return PolicyRail(version, sha12, check, lambda _q, **_kw: None, fidelity)
 
 
-def run_variant(rail: PolicyRail) -> dict:
-    # The rail is imported in TWO places (Brain's pre-LLM rail and the scope
-    # gate's defense-in-depth re-check) and the v3 acute net lives in the
-    # gate — a faithful shadow patches all three.
-    originals = (
-        brain_module.check_red_flag,
-        chain_module.check_red_flag,
-        chain_module.check_acute_concern,
-    )
+# Code-only emergency nets added after v2 (not rebuildable from an artifact).
+_LATER_NETS = ("check_symptom_report",)
+
+
+def _no_hit(_question: str, **_kw) -> None:
+    return None
+
+
+def run_variant(rail: PolicyRail, *, case_ids: str | Path | None = None) -> dict:
+    """Score one arm. ``case_ids`` (a frozen id-list file) restricts the set."""
+    ids = load_case_ids(case_ids) if case_ids is not None else None
+    # The rails are imported in more than one place: the shared pre-LLM triage
+    # (Brain and graph both call it; since v4 it runs the red-flag rail AND the
+    # acute-concern net on every question) and the scope gate's
+    # defense-in-depth re-check. A faithful shadow patches every import site.
+    targets = []
+    if rail.check_acute_concern is not None:
+        # A rebuilt (non-active) arm predates every code-only net added since
+        # v3 — switch off each one that exists in this tree, at every site.
+        for mod in (triage_module, chain_module):
+            for name in _LATER_NETS:
+                if hasattr(mod, name):
+                    targets.append((mod, name, _no_hit))
+    if rail.check_red_flag is not None:
+        targets += [(triage_module, "check_red_flag", rail.check_red_flag),
+                    (chain_module, "check_red_flag", rail.check_red_flag)]
+    if rail.check_acute_concern is not None:
+        targets += [(triage_module, "check_acute_concern", rail.check_acute_concern),
+                    (chain_module, "check_acute_concern", rail.check_acute_concern)]
+    originals = [(mod, name, getattr(mod, name)) for mod, name, _ in targets]
     try:
-        if rail.check_red_flag is not None:
-            brain_module.check_red_flag = rail.check_red_flag
-            chain_module.check_red_flag = rail.check_red_flag
-        if rail.check_acute_concern is not None:
-            chain_module.check_acute_concern = rail.check_acute_concern
+        for mod, name, fn in targets:
+            setattr(mod, name, fn)
         patients, now = _load_seed()
-        metrics = score(run_keyless(load_cases(), patients, now))
+        metrics = score(run_keyless(load_cases(case_ids=ids), patients, now))
     finally:
-        (
-            brain_module.check_red_flag,
-            chain_module.check_red_flag,
-            chain_module.check_acute_concern,
-        ) = originals
+        for mod, name, fn in originals:
+            setattr(mod, name, fn)
     metrics["policy"] = f"red_flags@{rail.version}+{rail.sha256_12}"
     metrics["fidelity"] = rail.fidelity
+    if case_ids is not None:
+        metrics["case_ids_file"] = str(case_ids)
     return metrics
 
 
@@ -205,7 +229,11 @@ def render(a: dict, b: dict, a_label: str, b_label: str) -> str:
         "# Shadow comparison — candidate release vs incumbent",
         "",
         f"*When:* {datetime.now().astimezone().isoformat(timespec='seconds')}",
-        f"*Set:* the full {n}-item eval set, keyless deterministic slice",
+        (
+            f"*Set:* {n} items from `{a['case_ids_file']}`, keyless deterministic slice"
+            if a.get("case_ids_file")
+            else f"*Set:* the full {n}-item eval set, keyless deterministic slice"
+        ),
         f"*A:* `{a['policy']}` — {a['fidelity']}",
         f"*B:* `{b['policy']}` — {b['fidelity']}",
         "",
@@ -288,6 +316,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--b-label", default=None)
     parser.add_argument("--markdown", help="write the comparison table here")
     parser.add_argument("--json", dest="json_out", help="write both arms' metrics here")
+    parser.add_argument(
+        "--case-ids", metavar="FILE",
+        help="score only the case ids in FILE (e.g. evals/reports/baseline-v0.case_ids.txt)",
+    )
     args = parser.parse_args(argv)
 
     if args.replay:
@@ -299,8 +331,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     b_version = args.b or active_version()
-    a = run_variant(build_rail(args.a))
-    b = run_variant(build_rail(b_version))
+    a = run_variant(build_rail(args.a), case_ids=args.case_ids)
+    b = run_variant(build_rail(b_version), case_ids=args.case_ids)
     a_label = args.a_label or f"red_flags@{args.a}"
     b_label = args.b_label or f"red_flags@{b_version}"
     table = render(a, b, a_label, b_label)

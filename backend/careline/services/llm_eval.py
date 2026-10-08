@@ -496,6 +496,9 @@ def run_cli(args: argparse.Namespace, *, client=None) -> int:
             "artifacts": stamps,
             "eval_set_sha256": digest["combined"],
             "eval_set_files_sha256": digest["files"],
+            # Per-case outcomes: lets a later run be regression-checked on the
+            # shared case ids only (sampled runs, grown sets) — see eval_gate.
+            "per_case": eval_gate.per_case_results(run.results),
         }
     )
     failures = evaluate_llm_gates(metrics)
@@ -503,7 +506,9 @@ def run_cli(args: argparse.Namespace, *, client=None) -> int:
         failures += eval_gate.check_split_floors(metrics["splits"])
     if getattr(args, "baseline", None):
         baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
-        failures += eval_gate.regression_check(metrics, baseline)
+        failures += eval_gate.regression_check(
+            metrics, baseline, known_ids={c["id"] for c in eval_gate.load_cases()}
+        )
     metrics["gate_failures"] = failures
 
     report = markdown_report(metrics, failures)

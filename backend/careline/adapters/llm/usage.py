@@ -16,7 +16,10 @@ Two views:
 * **Per turn** — :func:`turn_scope` collects exactly the calls made inside one
   QuestionService turn (a ``ContextVar``, so concurrent requests on other
   threads never bleed in). This is the honest per-request number: never a
-  process-wide running total presented as one turn's cost.
+  process-wide running total presented as one turn's cost. Work a turn hands
+  to another thread joins the turn only when run inside a copy of the turn's
+  context (``contextvars.copy_context().run``) — the online monitor's async
+  judge does exactly that, so judge spend is part of the turn that sampled it.
 
 Prices are USD per 1M tokens (input, output), as of 2026-10. Unknown models
 record ``cost_usd=None`` rather than a guess — the report says "unknown
@@ -28,6 +31,7 @@ Owner: Srujan (scope ``llm``).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from collections import deque
@@ -55,6 +59,29 @@ PRICE_TABLE_USD_PER_MTOK: dict[str, tuple[float, float]] = {
 PRICE_TABLE_AS_OF = "2026-10"
 
 DEFAULT_CAPACITY = 10_000
+
+_log = logging.getLogger(__name__)
+
+
+def _capacity_from_env() -> int:
+    """``CARELINE_USAGE_BUFFER`` as a positive int; a bad value is the default + a warning.
+
+    Parsed at import — an ops typo must never stop the service from starting.
+    """
+    raw = os.environ.get("CARELINE_USAGE_BUFFER")
+    if raw is None or not raw.strip():
+        return DEFAULT_CAPACITY
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = 0
+    if value < 1:
+        _log.warning(
+            "CARELINE_USAGE_BUFFER=%r is not a positive integer; using the default %d",
+            raw, DEFAULT_CAPACITY,
+        )
+        return DEFAULT_CAPACITY
+    return value
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float | None:
@@ -135,9 +162,7 @@ class TurnUsage:
 
 
 _lock = threading.Lock()
-_records: deque[UsageRecord] = deque(
-    maxlen=max(1, int(os.environ.get("CARELINE_USAGE_BUFFER", DEFAULT_CAPACITY) or DEFAULT_CAPACITY))
-)
+_records: deque[UsageRecord] = deque(maxlen=_capacity_from_env())
 _calls_total = 0
 _file: IO[str] | None = None
 _active_turns: ContextVar[tuple[TurnUsage, ...]] = ContextVar("careline_turn_usage", default=())

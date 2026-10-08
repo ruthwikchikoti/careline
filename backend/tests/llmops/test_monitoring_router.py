@@ -1,7 +1,8 @@
 """GET /monitoring — doctor-authenticated snapshot of the online monitor.
 
-``api/app.py`` is wired by the lead; here the router is mounted on the real
-app factory exactly as ``app.include_router(monitoring_router)`` will.
+Served by the real app factory (``create_app`` mounts the monitoring router).
+Doctor login requires the per-deployment credential, set through the
+environment exactly as ``tests/api/conftest.py`` does.
 """
 
 from __future__ import annotations
@@ -11,15 +12,18 @@ from fastapi.testclient import TestClient
 
 from careline.adapters.llm.judge import KeylessJudge
 from careline.api.app import create_app
-from careline.api.routers.monitoring import router as monitoring_router
 from careline.domain.enums import ScopeCategory
 from careline.domain.model.decision import Decision
 from careline.services import online_monitor
 from careline.services.online_monitor import DriftReference, OnlineMonitor
 
 
+_PASSWORD = "test-doctor-password-for-offline-suite"
+
+
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", _PASSWORD)
     online_monitor.reset_monitor(
         OnlineMonitor(
             window=20, judge=KeylessJudge(), judge_sample_rate=0.0,
@@ -27,14 +31,14 @@ def client():
         )
     )
     app = create_app()
-    app.include_router(monitoring_router)
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     online_monitor.reset_monitor()
 
 
 def _token(client, doctor="dr-A"):
-    r = client.post("/auth/token", json={"doctor_id": doctor})
+    r = client.post("/auth/token", json={"doctor_id": doctor, "password": _PASSWORD})
+    assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
