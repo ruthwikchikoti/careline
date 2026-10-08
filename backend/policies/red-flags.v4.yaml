@@ -1,0 +1,420 @@
+version: v4
+description: 'Emergency rail policy. v4 = v3 + round-1 adversarial-review fixes (2026-10-08): (1) the
+  acute-concern net and the red-flag rail run pre-LLM on EVERY question (Brain and graph share one triage
+  function) and the scope gate re-checks both for every scope, so an emergency mixed into an in-scope/administrative
+  question can no longer be answered; (2) history/hypothetical/denial context is clause-scoped, never
+  suppresses a present-tense clause, drops the bare ''at NN'' age marker, and a denial removes only the
+  denied phrase; (3) structural patterns for ideation families, ''not breathing'', ingestion counts /
+  whole packs, child ingestion of non-food, airway swelling, chest tightness, blood from gut/lungs, wound
+  bleeding/dehiscence, fever + confusion, rigid abdomen, sudden neuro deficit, reduced fetal movement,
+  cyanosis, transliterated Hindi/Hinglish terms; (4) typo normalisation for the highest-risk tokens. Pinned
+  by tests/brain/test_review_round1.py (post-fix regression probes, not independent generalisation evidence).'
+patterns:
+- chest\s+pain
+- difficulty\s+breathing
+- breathing\s+difficulty
+- can'?t\s+breathe
+- shortness\s+of\s+breath
+- unconscious
+- unresponsive
+- seizure
+- convulsion
+- bleeding\s+heavily
+- heavy\s+bleeding
+- suicid
+- self[- ]?harm
+- heart\s+attack
+- stroke\s+symptom
+- anaphyla
+- choking
+- overdose
+- poison
+- severe\s+allergic
+- head\s+injury
+- loss\s+of\s+consciousness
+- cannot\s+breathe
+- can\s+not\s+breathe
+- shortness[\s-]+of[\s-]+breath
+- breathless\s+(?:at|while|when)\s+(?:rest|lying|sitting|speaking|talking|walking|climbing)
+- black\s+like\s+tar
+- black\s+(?:tarry\s+)?stool
+- coffee[\s-]ground
+- (?:sugar|glucose)\s+(?:has\s+|keeps\s+|is\s+|was\s+)?(?:dropped|dropping|low)\b
+- (?:sugar|glucose)\b[^.]{0,30}\b(?:[23]\d|4\d)\b(?!\d)
+- \b(?:1[7-9]\d|2\d\d)\s*(?:over|/)\s*1[0-4]\d\b
+- ketone\w*\s*(?:strips?|test|levels?)?\s*(?:is|are|show\w*|reading)?\s*high
+- nail\s+polish\s+remover
+- fruity\s+breath
+- (?:drank|drinking|swallowed|swallowing|ate|eaten|got\s+into)\b[^.]{0,40}\b(?:kerosene|bleach|pesticide|weed\s?-?killer|cleaning\s+liquid|detergent|camphor|naphthalene|petrol)\b
+- (?:cannot|could\s?not|won'?t)\s+be\s+woken
+- not\s+responding
+- \bslurr(?:ed|ing)\b
+- bleeding\s+(?:through|past|soaking)\s+(?:the\s+)?(?:bandage|dressing)
+- \btook\b[^.]{0,40}(?:instead\s+of\s+(?:my|mine)|by\s+mistake|wrong\s+(?:tablet|medicine|dose|bottle))
+- (?:turned|turning)\s+(?:blue|bluish|grey|gray)
+- \b(?:want(?:ed)?|wanna|going|plan(?:ning)?|ready|wish)\s+(?:to\s+)?(?:die|be\s+dead)\b
+- \bkill(?:ing)?\s+my\s*self\b
+- \bend(?:ing)?\s+(?:my\s+(?:own\s+)?life|it\s+all)\b
+- \bnot\s+worth\s+living\b|\bno\s+(?:reason|point)\s+(?:to|in)\s+(?:live|living|going\s+on)\b|\bbetter\s+off\s+dead\b
+- \b(?:sleep|go\s+to\s+sleep|close\s+my\s+eyes)\s+and\s+never\s+wake\s+up\b|\bnever\s+wake\s+up\s+again\b
+- \b(?:not|isn'?t|stopped|no\s+longer)\s+breathing\b
+- \b(?:can'?t|cannot|unable\s+to|struggling\s+to)\s+(?:speak|talk|say|finish|get\s+out)\b[^.]{0,20}\bsentences?\b|\btoo\s+breathless\s+to\s+(?:speak|talk)\b
+- \b(?:having|in\s+the\s+middle\s+of)\s+(?:an?\s+)?(?:bad\s+|severe\s+|major\s+|big\s+)?asthma\s+attack\b
+- \b(?:took|taken|swallow\w*|ate|eaten|popped|consumed|downed|finished)\b[^.]{0,30}\b(?:whole|entire|full)\s+(?:\w+\s+)?(?:strip|bottle|pack\w*|box|blister|sheet|jar)\b
+- \b(?:took|taken|swallow\w*|ate|eaten|popped|consumed|downed)\b[^.]{0,20}\b(?:[1-9]\d+|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)\s+(?:\w+\s+){0,2}(?:tablets?|pills?|capsules?|tabs|caps)\b
+- \b(?:took|taken|swallow\w*|ate|eaten|popped|consumed|downed)\b[^.]{0,20}\b(?:[3-9]|three|four|five|six|seven|eight|nine)\s+(?:\w+\s+){0,2}(?:tablets?|pills?|capsules?|tabs|caps)\b[^.]{0,20}\b(?:together|at\s+once|in\s+one\s+go|at\s+one\s+go|at\s+the\s+same\s+time)\b
+- \b(?:child|kid|son|daughter|baby|toddler|grandson|granddaughter|grandchild|infant|boy|girl)\b[^.]{0,30}\b(?:swallow\w*|drank|drunk|drinking|ate|eaten|eating|chewed|chewing|got\s+into)\b[^.]{0,40}\b(?:tablets?|pills?|capsules?|strip|batter(?:y|ies)|magnets?|coins?|cleaner|bleach|detergent|chemicals?|acid|kerosene|petrol|diesel|phenyl|soap|pods?|poison\w*|insecticide|pesticide|mosquito|naphthalene|camphor|sanitis\w*|sanitiz\w*|perfume|alcohol)\b
+- \b(?:drank|drunk|drinking|swallowed|swallowing|ate|eaten)\b[^.]{0,40}\b(?:floor\s+cleaner|toilet\s+cleaner|cleaner|batter(?:y|ies)|acid|phenyl|sanitis\w*|sanitiz\w*|rat\s+poison|insecticide|antifreeze)\b
+- \btook\b[^.]{0,40}\bby\s+accident\b|\baccidentally\s+(?:took|swallowed|drank|ate)\b
+- \b(?:throat|tongue|lips?)\b[^.]{0,12}\b(?:swell\w*|swollen|tight\w*|clos\w*)\b
+- \b(?:swell\w*|swollen|tight\w*)\s+(?:in\s+|of\s+)?(?:my\s+|the\s+|his\s+|her\s+)?(?:throat|tongue|lips?)\b
+- \b(?:can'?t|cannot|unable\s+to)\s+swallow\b(?!\s+(?:the\s+|my\s+|these\s+|big\s+|large\s+)?(?:tablets?|pills?|capsules?|medicines?))
+- \bchest\s+(?:is\s+|feels?\s+|feeling\s+|getting\s+|gone\s+|very\s+|so\s+)*(?:tight\w*|heavy|crushing|squeez\w*)\b
+- \b(?:tight\w*|heaviness|crushing)\s+(?:in|on|of|across)\s+(?:my\s+|the\s+|his\s+|her\s+)?chest\b
+- \b(?:vomit\w*|throw\w*\s+up|threw\s+up|cough\w*(?:\s+up)?|spit\w*(?:\s+up)?|puk\w*)\s+(?:up\s+)?(?:some\s+|bright\s+red\s+|fresh\s+)?blood\b
+- \bblood\w*\s+(?:in|when|while)\s+(?:i\s+)?(?:my\s+)?(?:vomit|cough|spit)\w*
+- \b(?:wound|incision|stitch\w*|sutures?|scar|cut|drain|staples?|dressing)\b[^.]{0,15}\b(?:bleed\w*|gush\w*|pour\w*|spurt\w*)\b
+- \b(?:gush\w*|pour\w*|spurt\w*)\s+(?:out\s+)?(?:of\s+)?blood\b|\bblood\s+(?:is\s+)?(?:gush\w*|pour\w*|spurt\w*)
+- \b(?:stitch\w*|sutures?|wound|incision|staples?)\b[^.]{0,15}\b(?:burst|split|opened|open\s+up|came\s+(?:open|apart|undone)|come\s+(?:open|apart|undone)|popped|broke(?:n)?\s+open|torn|tore|gaping)\b
+- \bfever\w*\b[^.]{0,40}\b(?:confus\w*|drowsy|delirious|disorient\w*|stiff\s+neck)\b|\b(?:confus\w*|drowsy|delirious|disorient\w*|stiff\s+neck)\b[^.]{0,40}\bfever\w*
+- \b(?:suddenly|very|so|extremely)\s+(?:confused|disoriented)\b
+- \b(?:belly|abdomen|stomach|tummy)\b[^.]{0,15}\b(?:rigid|hard\s+as\s+(?:a\s+)?(?:board|rock)|board[\s-]like)\b|\brigid\s+(?:belly|abdomen|stomach|tummy)\b
+- \bsudden(?:ly)?\b[^.]{0,30}\b(?:(?:can'?t|cannot|unable\s+to|couldn'?t)\s+(?:lift|move|raise|feel|see|speak|talk|walk|stand|understand)|(?:lost|losing|loss\s+of)\s+(?:my\s+|his\s+|her\s+|the\s+)?(?:vision|sight|speech|balance|feeling|movement|strength)|weak\w*|numb\w*|paraly\w*|blind\w*|garbled|slurr\w*|droop\w*)
+- \b(?:lost|losing|loss\s+of)\s+(?:the\s+)?(?:vision|sight|eyesight)\b
+- \b(?:speech|words?|talking|voice)\b[^.]{0,25}\b(?:garbled|jumbled|slurr\w*|nonsense|not\s+making\s+sense)\b
+- \bface\b[^.]{0,20}\b(?:uneven|lopsided|droop\w*|crooked|twisted)\b
+- \b(?:can'?t|cannot|unable\s+to)\s+(?:lift|move|raise|feel)\s+(?:my\s+|his\s+|her\s+)?(?:left|right|one)\s+(?:arm|leg|hand|side)\b
+- \bbaby\b[^.]{0,25}\b(?:hasn'?t|has\s+not|not|stopped|isn'?t|is\s+not|no\s+longer|didn'?t|did\s+not)\s+(?:been\s+)?(?:mov\w*|kick\w*)
+- \b(?:reduced|less|no|fewer|decreased|stopped)\s+(?:(?:fetal|foetal|baby(?:'s)?)\s+(?:movements?|kicks?|kicking)|kicks?|kicking)\b
+- \b(?:lips?|tongue|fingers?|fingertips|nails?|face|skin)\b[^.]{0,15}\b(?:blue|bluish|purple)\b
+- \bcan'?t\s+stop\s+(?:wheez\w*|vomit\w*|bleed\w*|shak\w*|fitting|jerking|convuls\w*)
+- \bseene?\s+(?:me|mein|mai|mei|main)\s+(?:dard|dabav|dabaav|jalan|bhaari|bhari)\b
+- \bsaa?ns\s+(?:nahi|nahin|nai|na)\b|\bsaa?ns\s+(?:lene\s+)?(?:me|mein|mai|mei|main)\s+(?:taklif|takleef|taqleef|dikkat|dikat|pareshani)\b|\bsaa?ns\s+(?:ruk|phool|ful)\w*
+- \bbehosh\w*
+- \b(?:khoon|khun)\s+(?:ki|ka|wali)\s+ult(?:i|ee|iyan|iyaan)\b|\bult(?:i|ee)\s+(?:me|mein|mai)\s+(?:khoon|khun)\b
+- \bdaur[ae]\s+(?:pad|pada|padna|padne|aa|aaya|aya)\w*|\bmirgi\b
+pattern_concepts:
+  heart\s+attack: cardiac_signs
+  stroke\s+symptom: stroke
+  head\s+injury: head_injury
+  chest\s+pain: chest_pain_cardiac
+  seizure: seizure
+  convulsion: seizure
+  unconscious: reduced_consciousness
+  unresponsive: reduced_consciousness
+  loss\s+of\s+consciousness: reduced_consciousness
+  suicid: suicid
+  self[- ]?harm: self_harm
+  \b(?:want(?:ed)?|wanna|going|plan(?:ning)?|ready|wish)\s+(?:to\s+)?(?:die|be\s+dead)\b: ideation
+  \bkill(?:ing)?\s+my\s*self\b: ideation
+  \bend(?:ing)?\s+(?:my\s+(?:own\s+)?life|it\s+all)\b: ideation
+  \bnot\s+worth\s+living\b|\bno\s+(?:reason|point)\s+(?:to|in)\s+(?:live|living|going\s+on)\b|\bbetter\s+off\s+dead\b: ideation
+  \b(?:sleep|go\s+to\s+sleep|close\s+my\s+eyes)\s+and\s+never\s+wake\s+up\b|\bnever\s+wake\s+up\s+again\b: ideation
+  \bchest\s+(?:is\s+|feels?\s+|feeling\s+|getting\s+|gone\s+|very\s+|so\s+)*(?:tight\w*|heavy|crushing|squeez\w*)\b: chest_pain_cardiac
+  \b(?:tight\w*|heaviness|crushing)\s+(?:in|on|of|across)\s+(?:my\s+|the\s+|his\s+|her\s+)?chest\b: chest_pain_cardiac
+  ? \bsudden(?:ly)?\b[^.]{0,30}\b(?:(?:can'?t|cannot|unable\s+to|couldn'?t)\s+(?:lift|move|raise|feel|see|speak|talk|walk|stand|understand)|(?:lost|losing|loss\s+of)\s+(?:my\s+|his\s+|her\s+|the\s+)?(?:vision|sight|speech|balance|feeling|movement|strength)|weak\w*|numb\w*|paraly\w*|blind\w*|garbled|slurr\w*|droop\w*)
+  : stroke
+  \b(?:lost|losing|loss\s+of)\s+(?:the\s+)?(?:vision|sight|eyesight)\b: stroke
+  \b(?:speech|words?|talking|voice)\b[^.]{0,25}\b(?:garbled|jumbled|slurr\w*|nonsense|not\s+making\s+sense)\b: stroke
+  \bface\b[^.]{0,20}\b(?:uneven|lopsided|droop\w*|crooked|twisted)\b: stroke
+  ? \b(?:can'?t|cannot|unable\s+to)\s+(?:lift|move|raise|feel)\s+(?:my\s+|his\s+|her\s+)?(?:left|right|one)\s+(?:arm|leg|hand|side)\b
+  : stroke
+  \bseene?\s+(?:me|mein|mai|mei|main)\s+(?:dard|dabav|dabaav|jalan|bhaari|bhari)\b: chest_pain_cardiac
+  \bbehosh\w*: reduced_consciousness
+  \bdaur[ae]\s+(?:pad|pada|padna|padne|aa|aaya|aya)\w*|\bmirgi\b: seizure
+semantic:
+  threshold: 0.55
+  score: 0.6*token_coverage + 0.4*char_trigram_cosine
+  phrases:
+    suicidal_ideation:
+    - I want to end my life
+    - I don't want to be alive anymore
+    - I don't think I want to live anymore
+    - I am going to kill myself
+    - I feel like hurting myself
+    - I want to harm myself
+    - everyone would be better off without me
+    - taking all my tablets and not waking up
+    - I have thoughts of ending things
+    - I don't feel safe with myself tonight
+    overdose:
+    - I took too many tablets at once
+    - I took 20 tablets at once
+    - I took too many of my pain pills
+    - I took too many tablets today
+    - took an entire strip of tablets
+    - I had a double dose of my tablets by mistake
+    - took my tablet twice by accident
+    - I accidentally took two doses
+    - I accidentally took an extra dose of my medicine
+    - I overdosed on my medication
+    - my child ate some of my tablets
+    - my child got into my tablet strip
+    - swallowed a whole bottle of pills
+    poisoning:
+    - I drank cleaning liquid by mistake
+    - I swallowed something poisonous
+    - I accidentally drank a chemical
+    - my child swallowed something from the cupboard
+    - I drank the weed killer
+    chest_pain_cardiac:
+    - crushing pain in my chest
+    - tightness in my chest
+    - pressure on my chest
+    - my chest feels like an elephant is sitting on it
+    - a band is squeezing my chest
+    - chest is tight and squeezing
+    - pain in my chest like a knife
+    - chest pain going to my left arm
+    - chest pain going into my jaw
+    - pain in my chest and my arm feels funny
+    - sudden pain in my chest and cold sweat
+    - I broke into a cold sweat and feel like collapsing
+    stroke:
+    - my face is drooping on one side
+    - one side of my face has drooped
+    - my words are coming out slurred
+    - my speech is slurred
+    - my speech has gone funny
+    - one side of my body has gone weak and numb
+    - sudden weakness on one side of my body
+    - the worst headache of my life
+    - a sudden thunderclap headache
+    breathing_distress:
+    - finding it very hard to breathe
+    - I can't catch my breath
+    - cannot catch my breath
+    - I am gasping for air
+    - struggling to breathe
+    - so breathless I cannot finish a sentence
+    - cannot speak a full sentence
+    - my lips have turned blue
+    - my nails and lips have turned bluish
+    - I turned blue
+    anaphylaxis:
+    - my lips are swelling and my throat is closing
+    - my throat feels like it is closing
+    - my tongue is swelling up
+    - my face and tongue are swelling
+    - my whole body has come out in hives
+    - hives spreading fast over my body
+    - a rash all over my body
+    - rash spreading over my whole body after medicine
+    - severe swelling of my mouth and throat
+    reduced_consciousness:
+    - I cannot keep my eyes open
+    - my family cannot wake me
+    - nobody can wake me up
+    - I keep blacking out
+    - I have been blacking out repeatedly
+    - I fainted
+    - I passed out
+    - I collapsed
+    - I was unresponsive
+    - I feel like I might collapse
+    - I am very drowsy and confused
+    seizure:
+    - I keep fitting
+    - I am having fits
+    - jerking uncontrollably
+    - my limbs are jerking and I cannot control them
+    - was jerking in my sleep
+    - I had a seizure
+    - I had a convulsion
+    choking:
+    - I cannot stop choking
+    - something went down the wrong way and I am choking
+    - food is stuck and I cannot breathe
+    - I am choking
+    uncontrolled_bleeding:
+    - the wound will not stop bleeding
+    - I cannot stop the bleeding
+    - blood is soaking through the dressing
+    - bleeding heavily and it will not stop
+    - I am coughing up blood
+    - there is blood when I vomit
+    - I vomited blood
+    - I have cut myself deeply
+    - a deep cut that is bleeding a lot
+    head_injury:
+    - I hit my head badly
+    - I fell and hit my head
+    - I fell down the stairs and hurt my head
+    - a heavy blow to my head
+    hypoglycaemia:
+    - my sugar is very low and I am shaking and sweating
+    - my sugar is 42 and I am shaking
+    - shaking and sweating and my sugar is low
+    - low sugar episode with sweating and trembling
+    - I feel shaky sweaty and confused from low sugar
+    hyperglycaemia_dka:
+    - my sugar is very high and I keep vomiting
+    - my sugar reading is very high and I am being sick
+    - sugar above 350 and vomiting
+    - breath smells fruity and sugar very high
+    severe_asthma:
+    - my reliever inhaler is not helping at all
+    - the inhaler is not helping my breathing
+    - wheezing very badly
+    - wheezing that keeps getting worse
+    - I used the inhaler six times in two hours
+    - using the reliever again and again with no relief
+    - my chest has completely locked up
+    post_op_wound:
+    - my incision has opened up
+    - the surgical wound has opened
+    - pus is coming out of my wound
+    - the wound is oozing pus
+    - my wound smells bad and is leaking fluid
+    acute_neuro:
+    - the room is spinning and I cannot stand up
+    - severe dizziness and I cannot stand
+    - I am seeing things that are not there
+    - sudden confusion and I don't know where I am
+    - double vision that started suddenly
+    dvt_swelling:
+    - my calf is swollen and painful
+    - one leg is swollen and painful after a flight
+    - both ankles have swollen up hugely
+    - sudden severe swelling of my ankles
+    cardiac_signs:
+    - my heart is racing so fast
+    - my heart feels like it will jump out
+    - palpitations that will not stop
+    - I feel my heart pounding irregularly
+    severe_undifferentiated:
+    - sudden terrible pain and I am drenched in sweat
+    - the pain is unbearable tonight
+    - severe pain that is getting worse by the minute
+    - I feel very unwell after taking medicine that was not mine
+    - I feel very unwell after taking someone else's tablets
+    - I mixed my medicine with someone else's tablets and feel very unwell
+    - I feel extremely unwell right now
+    joint_redness_sepsis:
+    - my knee has become hot and red
+    - the joint is hot red and extremely painful
+    - red streaks spreading from my wound
+context:
+  scope: 'clause-scoped: split at [.;!?], before but/however/although/though/whereas/except, and before
+    a fresh ''now''; a clause is suppressed only if it carries a history/hypothetical (or, for the acute
+    net, definitional) marker AND no present marker'
+  history_suppressible_concepts:
+  - cardiac_signs
+  - chest_pain_cardiac
+  - dvt_swelling
+  - head_injury
+  - joint_redness_sepsis
+  - reduced_consciousness
+  - seizure
+  - severe_undifferentiated
+  - stroke
+  history_suppressible_regex_concepts:
+  - cardiac_signs
+  - chest_pain_cardiac
+  - head_injury
+  - reduced_consciousness
+  - seizure
+  - stroke
+  denial_regex_concepts:
+  - ideation
+  - self_harm
+  - suicid
+  history_markers:
+  - last\s+year
+  - last\s+month
+  - years?\s+ago
+  - a\s+year\s+ago
+  - \bhistory\b
+  - family\s+history
+  - runs\s+in\s+the\s+family
+  - grandfather
+  - grandmother
+  - my\s+(?:father|mother|dad|mom|brother|sister|wife|husband|uncle|aunt)\s+(?:had|has\s+had|had\s+a|died)\b
+  - during\s+the\s+(?:operation|surgery|procedure)
+  - when\s+they\s+took\s+my\b
+  - last\s+time\b
+  - \bused\s+to\b
+  - injury\s+questions
+  - \bat\s+(?:the\s+)?age\s+(?:of\s+)?\d{1,3}\b
+  - \bwhen\s+i\s+was\s+(?:\d{1,3}|a\s+(?:kid|child|baby|teenager|boy|girl))\b
+  - \bin\s+the\s+past\b
+  - \bas\s+a\s+(?:kid|child|baby|teenager)\b
+  - nearly\s+(?:fainted?|collapsed|passed\s+out)
+  - almost\s+(?:fainted?|collapsed|passed\s+out)
+  hypothetical_markers:
+  - \b(?:if|when|whenever|in\s+case|should)\s+(?:i|my\s+\w+|he|she|they)\s+(?:ever\s+)?(?:feel|feels|get|gets|have|has|develop\w*|start\w*|notice\w*|become\w*|experience\w*)\b
+  - \bif\s+i\s+ever\b
+  - \bwhat\s+if\b
+  present_markers:
+  - \b(?:right\s+)?now\b
+  - \btoday\b
+  - \btonight\b
+  - \bcurrently\b
+  - \bat\s+the\s+moment\b
+  - \bthis\s+(?:morning|afternoon|evening)\b
+  - \bsince\s+(?:yesterday|last\s+night|this\s+morning|morning|an?\s+hour|\d+)
+  - \bcan'?t\s+stop\b
+  - \bi\s+(?:have|feel|keep)\b(?!\s+(?:had\b|been\b|(?:a\s+|an\s+)?(?:family\s+)?history\b|no\b|never\b))
+  - \bi'?ve\s+got\b
+  - \b(?:i'?m|i\s+am|he'?s|he\s+is|she'?s|she\s+is|it'?s|it\s+is|they'?re|they\s+are)\s+(?:having|getting|feeling|bleeding|vomiting|shaking|fitting|seizing|choking|struggling|gasping|wheezing|losing|going|turning|not\s+breathing)\b
+  - \b(?:going|gone|turning)\s+(?:blue|grey|gray|purple)\b
+  denial_markers:
+  - \b(?:not|never)\s+(?:feeling\s+)?suicidal\b
+  - \b(?:do(?:n'?t|\s+not)|did(?:n'?t|\s+not)|would\s+never|will\s+never|won'?t|never)\s+(?:(?:want|plan|intend|going)\s+to\s+)?(?:end|kill|harm|hurt)\s+(?:my\s*self|my\s+(?:own\s+)?life|it\s+all)\b
+  - \bdo(?:n'?t|\s+not)\s+want\s+to\s+(?:die|be\s+dead)\b
+  - \bnot\s+going\s+to\s+(?:hurt|kill|end|harm)\s+(?:my\s*self|my\s+(?:own\s+)?life|it\s+all)\b
+  - \bno\s+(?:plans?|intention|thoughts?)\s+(?:to|of)\s+(?:harm\w*|end\w*|kill\w*|hurt\w*)\s+(?:my\s*self|my\s+(?:own\s+)?life|it\s+all)\b
+  - \b(?:not|never)\s+(?:self[- ]?harm\w*|harm(?:ed|ing)?\s+my\s*self)\b
+  acute_concern:
+    note: first-person + acute-distress term in a live (non-suppressed) clause -> escalate; v4 runs it
+      pre-LLM on every question (domain/brain/triage.py) and re-checks it in the scope gate for every
+      scope (gates/chain.py)
+    term_patterns:
+      bleeding: \bbleed(?:ing|s)?\b|\bblood\s+in\s+(?:my\s+)?(?:vomit|stool|urine|phlegm|sputum)
+      breathing_distress: \bbreathless\w*|\bcannot\s+breathe|\bcan'?t\s+breathe|\bunable\s+to\s+breathe|\bshortness\s+of\s+breath|\bbreath\s+(?:keeps?\s+)?(?:stopping|getting\s+(?:hard|worse|difficult)|is\s+short)
+      chest: \bchest\b
+      collapse: \bcollapse[ds]?\b|\bfaint(?:ed|ing|s)?\b|\bpass(?:ed|ing)?\s+out\b|\bblacking\s+out\b|\bblackouts?\b
+      dizzy: \bdizzy\w*|\bdizziness\b|\broom\s+is\s+spinning\b|\bspinning\s+head\b
+      vomiting: \bvomit\w*|\bthrowing\s+up\b|\bbeing\s+sick\b|\bthrew\s+up\b
+      seizure: \bseizure\w*|\bconvulsion\w*|\bfitting\b|\bjerking\b
+      reduced_consciousness: \bunconscious\b|\bunresponsive\b|\bnot\s+responding\b|\bcannot\s+be\s+woken\b|\bcan'?t\s+(?:be\s+)?woken?\b|\bwon'?t\s+wake\b|\bcouldn'?t\s+be\s+woken\b|\bcan'?t\s+wake\s+(?:him|her|them)\b|\bkeep\s+my\s+eyes\s+open\b
+      neuro_focal: \bnumb\w*|\bslurr\w*|\bweak\w*\s+(?:all\s+over|one\s+side|down\s+one)\b|\bdrooping\b|\bdroop\b|\bone\s+side\b.{0,30}\b(?:weak|numb|droop)
+      rash_swelling: \brash\w*|\bswelling\b|\bswollen\b|\bhives\b|\bcoming\s+out\s+in\b
+      fever: \bfever\w*|\bburning\s+up\b|\bboiling\b
+      hypoglycaemia: \bsugar\s+(?:has\s+|keeps\s+|is\s+|was\s+)?(?:dropped|dropping|low)\b|\bglucose\s+(?:has\s+|is\s+)?(?:dropped|low)\b|\bhypo\b|\bsugar\s+is\s+(?:[23]\d|4\d)\b
+      tremor: \btrembl\w*|\bshak(?:ing|es)\b|\bshivering\s+uncontrollably\b
+      gi_bleed: \bblack\s+(?:stool|tarry)\b|\btarry\s+stool\b|\bblack\s+like\s+tar\b|\bcoffee[\s-]ground
+      head_injury: \bhit\s+my\s+head\b|\bfell\s+(?:down|on)\b|\bfallen\b|\bfell\s+and\b|\b(?:splitting|worst|severe|sudden|thunderclap)\s+headache
+      poisoning: \bkerosene\b|\bbleach\b|\bpesticide\b|\bweed\s?-?killer\b|\bcleaning\s+liquid\b|\bpoison\w*|\boverdosed?\b|\bketone\w*\s*(?:strips?|test)?\s*(?:is|are|show\w*)?\s*high|\bnail\s+polish\s+remover|\bfruity\s+breath
+      cyanosis: \b(?:turned|turning|is|look\w*)\s+(?:blue|bluish|grey|gray)\b
+      wrong_medication: \btook\b.{0,40}\binstead\s+of\s+(?:my|mine)\b|\bby\s+(?:mistake|accident)\b|\baccidentally\s+(?:took|swallowed|drank|ate|had)\b|\bwrong\s+(?:tablet|medicine|dose|bottle)\b
+      bp_crisis: \b(?:1[7-9]\d|2\d\d)\s*(?:over|/)\s*1[0-4]\d\b
+typo_normalisation:
+  method: optimal-string-alignment distance; tokens >= 5 letters snap to a canonical token at distance
+    <= 1 (<= 2 for canonical tokens >= 10 letters); rails scan the original AND the normalised text
+  canonical_tokens:
+  - unconscious
+  - unresponsive
+  - seizure
+  - seizures
+  - convulsion
+  - convulsions
+  - suicidal
+  - suicide
+  - overdose
+  - overdosed
+  - anaphylaxis
+  - anaphylactic
+  - breathe
+  - breathing
+  - bleeding
+  - vomiting
+  bigrams:
+    chest: pain
+    heart: attack
+  joined_compounds:
+  - chestpain
+  - heartpain
+  - chestattack
+  - heartattack
+redirect_emergency_line: If this is an emergency, call 112 (India) or your local emergency number now.

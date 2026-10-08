@@ -7,7 +7,8 @@ verdict is explainable after the fact.
 
 Gate order (defense-in-depth — gates only *downgrade*, never upgrade):
 
-1. **ScopeGate** — out-of-scope / red-flag → ESCALATE
+1. **ScopeGate** — red-flag / acute concern (re-checked for EVERY scope,
+   v4) → ESCALATE; out-of-scope → fail-closed checks, else redirect (CLARIFY)
 2. **RiskGate** — risk > ceiling even at high confidence → ESCALATE
 3. **CrossConditionGate** — question spans ≥2 condition groups → ESCALATE
 4. **ConfidenceStalenessGate** — confidence < floor, empty/stale slice, or
@@ -38,6 +39,13 @@ from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.scoring.confidence import compute_confidence
 from careline.domain.scoring.risk import compute_risk
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
+
+#: Appended to every redirect / clarify the chain produces (policy v4): a
+#: caller who is told "I can't help with that" or "please rephrase" must
+#: never be left without the way out. The acute-concern escalation uses it too.
+EMERGENCY_LINE: str = (
+    "If this is an emergency, call 112 (India) or your local emergency number now."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +81,8 @@ _GateFn = Callable[[GateContext], Decision | None]
 
 
 def _scope_gate(ctx: GateContext) -> Decision | None:
-    """Gate 1: out-of-scope or red-flag → ESCALATE."""
+    """Gate 1: red-flag / acute concern (any scope) → ESCALATE; out-of-scope →
+    fail-closed checks, else a redirect that always carries the emergency line."""
     if ctx.proposal.scope is ScopeCategory.RED_FLAG:
         ctx.trace.record(
             "scope_gate",
@@ -88,37 +97,60 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
             trace=ctx.trace,
         )
 
+    # Defense in depth, EVERY scope (v4): the scope label is a classifier
+    # output and the caller may have skipped triage. Re-run both deterministic
+    # emergency nets on the raw question before any downstream gate can ANSWER
+    # or redirect. At v3 these ran only for OUT_OF_SCOPE, so an emergency mixed
+    # into an in-scope question ("soft diet avoid spicy; I want to die") passed.
+    matched = check_red_flag(ctx.question)
+    if matched:
+        ctx.trace.record(
+            "scope_gate",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=(
+                f"scope labelled {ctx.proposal.scope.value} but rail matched "
+                f"{matched!r} on the raw question — escalating"
+            ),
+        )
+        return Decision.escalate(
+            f"Red-flag detected: {matched}",
+            scope=ScopeCategory.RED_FLAG,
+            risk=1.0,
+            trace=ctx.trace,
+        )
+
+    acute = check_acute_concern(ctx.question)
+    if acute is not None:
+        ctx.trace.record(
+            "scope_gate",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=(
+                f"first-person acute concern ({acute}) under scope "
+                f"{ctx.proposal.scope.value} — escalating rather than answering/redirecting"
+            ),
+        )
+        return Decision.escalate(
+            "Your message may describe an urgent symptom this service "
+            "cannot assess from your approved record — transferring to "
+            f"your doctor. {EMERGENCY_LINE}",
+            scope=ctx.proposal.scope,
+            risk=0.9,
+            trace=ctx.trace,
+        )
+
     if ctx.proposal.scope is ScopeCategory.OUT_OF_SCOPE:
         # Out-of-scope = not a clinical question this patient's approved care plan
         # covers (general knowledge, off-topic, another condition). Redirecting is
         # the right move — escalating it would flood the doctor's queue with
         # non-clinical noise and train them to ignore it (a real safety hazard).
         #
-        # BUT the scope label is a *classifier output* and can be wrong: a caller
-        # that skipped the pre-LLM rails, or a reasoner that saw no matching fact,
-        # can label an emergency "out of scope". Defense-in-depth — the gate
-        # re-runs the deterministic rails on the raw question before redirecting,
-        # and fails closed on an empty valid slice (gate 4's rule, which a
-        # mislabelled scope must not be able to shadow). Gates only downgrade:
-        # ESCALATE here preempts a would-be CLARIFY, never the reverse.
-        matched = check_red_flag(ctx.question)
-        if matched:
-            ctx.trace.record(
-                "scope_gate",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail=(
-                    f"scope labelled out-of-scope but rail matched {matched!r} "
-                    "on the raw question — escalating"
-                ),
-            )
-            return Decision.escalate(
-                f"Red-flag detected: {matched}",
-                scope=ScopeCategory.RED_FLAG,
-                risk=1.0,
-                trace=ctx.trace,
-            )
-
+        # The emergency nets already ran above for every scope; what is left
+        # here is the out-of-scope-specific fail-closed checks: a cross-
+        # condition span the caller's tripwire missed, and an empty valid slice
+        # (gate 4's rule, which a mislabelled scope must not be able to shadow).
+        # Gates only downgrade: ESCALATE here preempts a would-be CLARIFY.
         is_cross, groups = check_multi_condition(ctx.question)
         if is_cross:
             ctx.trace.record(
@@ -154,32 +186,6 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
                 trace=ctx.trace,
             )
 
-        # v3 fail-closed net: a first-person acute-distress statement that no
-        # approved fact matches must never be redirected — the red team showed
-        # fresh-vocabulary emergencies ("my stools are black like tar") landing
-        # on the polite redirect. Definitional/history context exempts benign
-        # questions (see acute_concern.py).
-        acute = check_acute_concern(ctx.question)
-        if acute is not None:
-            ctx.trace.record(
-                "scope_gate",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail=(
-                    f"unmatched first-person acute concern ({acute}) — "
-                    "escalating rather than redirecting"
-                ),
-            )
-            return Decision.escalate(
-                "Your message may describe an urgent symptom this service "
-                "cannot assess from your approved record — transferring to "
-                "your doctor. If this is an emergency, call your local "
-                "emergency number now.",
-                scope=ScopeCategory.OUT_OF_SCOPE,
-                risk=0.9,
-                trace=ctx.trace,
-            )
-
         ctx.trace.record(
             "scope_gate",
             TraceStatus.TERMINAL,
@@ -189,7 +195,7 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
         return Decision.clarify(
             "I can only help with the care your doctor approved for you — your "
             "medicines, diet, and post-visit instructions. For anything else, please "
-            "contact the clinic directly.",
+            f"contact the clinic directly. {EMERGENCY_LINE}",
             scope=ScopeCategory.OUT_OF_SCOPE,
             trace=ctx.trace,
         )
@@ -275,7 +281,7 @@ def _confidence_staleness_gate(ctx: GateContext) -> Decision | None:
             )
             return Decision.clarify(
                 "I wasn't able to find a clear answer. "
-                "Could you rephrase or provide more detail?",
+                f"Could you rephrase or provide more detail? {EMERGENCY_LINE}",
                 confidence=confidence,
                 scope=ctx.proposal.scope,
                 trace=ctx.trace,
@@ -307,7 +313,7 @@ def _confidence_staleness_gate(ctx: GateContext) -> Decision | None:
             )
             return Decision.clarify(
                 "I'm not fully confident in my answer. "
-                "Could you provide more detail about your question?",
+                f"Could you provide more detail about your question? {EMERGENCY_LINE}",
                 confidence=confidence,
                 scope=ctx.proposal.scope,
                 trace=ctx.trace,
@@ -438,4 +444,4 @@ def run_gate_chain(ctx: GateContext) -> Decision:
     )
 
 
-__all__ = ["GateContext", "run_gate_chain"]
+__all__ = ["EMERGENCY_LINE", "GateContext", "run_gate_chain"]

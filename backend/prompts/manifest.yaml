@@ -18,10 +18,28 @@ prompts:
     sha256_12: f7f494360114
 policies:
   red_flags:
-    version: v3
-    file: policies/red-flags.v3.yaml
-    sha256_12: 8b1735562544
+    version: v4
+    file: policies/red-flags.v4.yaml
+    sha256_12: 6c537c25b08c
 changelog:
+- artifact: red_flags
+  version: v4
+  note: 'round-1 adversarial review fixes. (1) red-flag rail AND acute-concern net run pre-LLM
+    on every question (one triage function shared by Brain and graph) and the scope gate
+    re-checks both for every scope -- v3 ran the acute net only on out-of-scope, so emergencies
+    mixed into in-scope/administrative questions were answered. (2) history/hypothetical/denial
+    context is clause-scoped, never suppresses a present-tense clause, drops the bare "at NN"
+    age marker, and a denial strips only the denied phrase. (3) structural patterns (ideation
+    families, not breathing, ingestion counts/whole packs, child ingestion, airway swelling,
+    chest tightness, blood from gut/lungs, wound bleeding/dehiscence, fever+confusion, rigid
+    abdomen, sudden neuro deficit, reduced fetal movement, cyanosis), transliterated Hindi/Hinglish
+    terms, typo normalisation for the highest-risk tokens; acute "pass out" regex bug fixed. (4)
+    every redirect/clarify ends with the 112 emergency line. Eval set grown 250 -> 287 (em-061..084
+    + 13 benign near-misses, all held_out=false, written AFTER the fix, so not blind). On the
+    287-item set: v3 recall 74/84 (10 missed) -> v4 84/84; over-escalation v3 12/109 (11.0%) ->
+    v4 8/109 (7.3%); on the original 250 items v4 holds 60/60 and over-escalation 9.4% -> 8.3%.
+    The review battery (tests/brain/test_review_round1.py) is a post-fix regression set, not
+    generalisation evidence.'
 - artifact: red_flags
   version: v3
   note: 'red-team hardening: history/denial context suppression, acute-concern fail-closed
