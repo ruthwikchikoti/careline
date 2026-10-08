@@ -12,6 +12,10 @@ prompts:
     version: v1
     file: prompts/extractor/v1.md
     sha256_12: aa7c75f999bd
+  judge:
+    version: v1
+    file: prompts/judge/v1.md
+    sha256_12: f7f494360114
 policies:
   red_flags:
     version: v3
