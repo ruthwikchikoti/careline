@@ -202,7 +202,9 @@ class _InMemoryPatientRepository(PatientRepository):
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    if settings.is_production:
+    # Production AND the public demo refuse dev-default secrets at startup
+    # (fail closed: an internet-facing deploy never boots on published secrets).
+    if settings.requires_hardened_config:
         settings.assert_prod_safe()
 
     mongo_client = None
