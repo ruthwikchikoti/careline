@@ -22,6 +22,10 @@ from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 _DEFAULT_JWT_SECRET = "dev-jwt-secret-change-in-production!!"
 _DEFAULT_INTERNAL_API_KEY = "dev-internal-api-key-change-in-production!"
 _DEFAULT_PIN_HMAC_SECRET = "dev-pin-hmac-secret-change-in-prod!!"
+# Dev-only doctor login credential (REVIEW-2). Local dev signs in with it; any
+# hardened deploy (production / public demo) refuses to start while it is in use.
+_DEFAULT_DOCTOR_PASSWORD = "careline-dev-doctor-password"
+_MIN_DOCTOR_PASSWORD_CHARS = 12
 _MIN_SECRET_BYTES = 32
 
 
@@ -72,6 +76,21 @@ class Settings(BaseSettings):
     pin_hmac_secret: str = Field(
         default=_DEFAULT_PIN_HMAC_SECRET, min_length=_MIN_SECRET_BYTES
     )
+    doctor_password: str = Field(
+        default=_DEFAULT_DOCTOR_PASSWORD,
+        min_length=1,
+        description=(
+            "Per-deployment doctor login credential (CARELINE_DOCTOR_PASSWORD). "
+            "POST /auth/token mints a doctor JWT only when it matches."
+        ),
+    )
+    doctor_ids: str | None = Field(
+        default=None,
+        description=(
+            "Optional comma-separated allowlist of doctor ids that may sign in "
+            "(CARELINE_DOCTOR_IDS). Empty = any id with the credential."
+        ),
+    )
     mongo_uri: str | None = Field(
         default=None,
         description="MongoDB connection URI; when unset the API uses in-memory stores.",
@@ -105,6 +124,18 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """True when running in the production environment."""
         return self.environment is Environment.PRODUCTION
+
+    @property
+    def doctor_id_allowlist(self) -> frozenset[str]:
+        """Parsed ``doctor_ids`` allowlist (empty = no allowlist configured)."""
+        if not self.doctor_ids:
+            return frozenset()
+        return frozenset(d.strip() for d in self.doctor_ids.split(",") if d.strip())
+
+    @property
+    def uses_default_doctor_password(self) -> bool:
+        """True while the published dev doctor credential is still configured."""
+        return self.doctor_password == _DEFAULT_DOCTOR_PASSWORD
 
     def to_thresholds(self) -> Thresholds:
         """Build the frozen gate-chain thresholds from current settings."""

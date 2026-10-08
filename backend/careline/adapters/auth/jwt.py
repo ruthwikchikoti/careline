@@ -17,12 +17,19 @@ class TokenInvalid(ValueError):
     """Raised when a JWT is missing, expired, tampered, or otherwise invalid."""
 
 
+# Role claims (REVIEW-3): every issued token names its audience so a patient
+# session can never be replayed against a doctor route, or vice versa.
+ROLE_DOCTOR = "doctor"
+ROLE_PATIENT = "patient"
+
+
 def encode_doctor_token(*, doctor_id: str, secret: str, ttl_seconds: int) -> str:
-    """Issue an HS256 JWT with ``sub = doctor_id``."""
+    """Issue an HS256 JWT with ``sub = doctor_id`` and ``role = doctor``."""
     jwt = _import_jwt()
     now = datetime.now(timezone.utc)
     payload = {
         "sub": doctor_id,
+        "role": ROLE_DOCTOR,
         "iat": now,
         "exp": now + timedelta(seconds=ttl_seconds),
     }
@@ -30,12 +37,18 @@ def encode_doctor_token(*, doctor_id: str, secret: str, ttl_seconds: int) -> str
 
 
 def decode_doctor_token(token: str, secret: str) -> DoctorPrincipal:
-    """Validate a doctor JWT and return the authenticated principal."""
+    """Validate a doctor JWT and return the authenticated principal.
+
+    Fails closed on any role other than ``doctor`` — including a missing role, so
+    a patient token (or a legacy role-less token) never authenticates a doctor.
+    """
     jwt = _import_jwt()
     try:
         payload = jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise TokenInvalid("invalid or expired token") from exc
+    if payload.get("role") != ROLE_DOCTOR:
+        raise TokenInvalid("not a doctor token")
     doctor_id = payload.get("sub")
     if not doctor_id or not isinstance(doctor_id, str):
         raise TokenInvalid("token missing subject")
@@ -51,7 +64,7 @@ def encode_patient_token(
     payload = {
         "sub": patient_id,
         "doctor_id": doctor_id,
-        "role": "patient",
+        "role": ROLE_PATIENT,
         "iat": now,
         "exp": now + timedelta(seconds=ttl_seconds),
     }
@@ -65,7 +78,7 @@ def decode_patient_token(token: str, secret: str) -> PatientPrincipal:
         payload = jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise TokenInvalid("invalid or expired token") from exc
-    if payload.get("role") != "patient":
+    if payload.get("role") != ROLE_PATIENT:
         raise TokenInvalid("not a patient token")
     patient_id = payload.get("sub")
     doctor_id = payload.get("doctor_id")
@@ -85,6 +98,8 @@ def _import_jwt():
 
 
 __all__ = [
+    "ROLE_DOCTOR",
+    "ROLE_PATIENT",
     "TokenInvalid",
     "decode_doctor_token",
     "encode_doctor_token",
