@@ -534,6 +534,21 @@ def medication_names(facts: Iterable[Fact]) -> frozenset[str]:
     return frozenset(out)
 
 
+def own_medications_named(text: str, facts: Iterable[Fact]) -> list[str]:
+    """Canonical names of THIS patient's medications that ``text`` names.
+
+    ``facts`` is one patient's record (current AND non-current facts), so a
+    stopped drug still counts; brands map to their generic first ("Crocin" ->
+    paracetamol). A drug that is not a medication fact of ``facts`` is never
+    returned, whatever the lexicon knows — the result can only echo a drug
+    this patient's own record holds. Ordered, de-duplicated.
+    """
+    known = medication_names(facts)
+    if not known:
+        return []
+    return [t[5:] for t in answer_tokens(text, known) if t.startswith("drug:") and t[5:] in known]
+
+
 def _grounded_in(token: str, fact_tokens: set[str], fact_words: frozenset[str]) -> bool:
     if token.startswith("drug:"):
         name = token[5:]
@@ -752,6 +767,7 @@ __all__ = [
     "facts_containing",
     "medication_names",
     "non_current_facts",
+    "own_medications_named",
     "polarity_conflicts",
     "ungrounded_tokens",
 ]

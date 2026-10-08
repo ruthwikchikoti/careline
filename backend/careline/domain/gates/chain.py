@@ -8,8 +8,9 @@ verdict is explainable after the fact.
 Gate order (defense-in-depth — gates only *downgrade*, never upgrade):
 
 1. **ScopeGate** — red-flag / acute concern / symptom report (re-checked for
-   EVERY scope, v4) → ESCALATE; out-of-scope → fail-closed checks, else
-   redirect (CLARIFY)
+   EVERY scope, v4) → ESCALATE; out-of-scope → fail-closed checks (incl. the
+   own-medication route: a drug from this patient's record → rephrase CLARIFY
+   while the clarify budget lasts, else ESCALATE), else redirect (CLARIFY)
 2. **RiskGate** — risk > ceiling even at high confidence → ESCALATE
 3. **CrossConditionGate** — question spans ≥2 condition groups → ESCALATE
 4. **ConfidenceStalenessGate** — confidence < floor, empty/stale slice, or
@@ -58,6 +59,7 @@ from careline.domain.enums import ScopeCategory, TraceStatus, Verdict
 from careline.domain.gates.grounding import (
     facts_containing,
     medication_names,
+    own_medications_named,
     polarity_conflicts,
     ungrounded_tokens,
 )
@@ -84,6 +86,11 @@ from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 EMERGENCY_LINE: str = (
     "If this is an emergency, call 112 (India) or your local emergency number now."
 )
+
+
+#: Risk recorded when an out-of-scope question names the patient's own
+#: medication and is escalated rather than redirected (not a red flag).
+OWN_MEDICATION_RISK: float = 0.7
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +131,8 @@ _GateFn = Callable[[GateContext], Decision | None]
 
 def _scope_gate(ctx: GateContext) -> Decision | None:
     """Gate 1: red-flag / acute concern (any scope) → ESCALATE; out-of-scope →
-    fail-closed checks, else a redirect that always carries the emergency line."""
+    fail-closed checks (cross-condition, empty slice, the patient's own
+    medication named), else a redirect that always carries the emergency line."""
     if ctx.proposal.scope is ScopeCategory.RED_FLAG:
         ctx.trace.record(
             "scope_gate",
@@ -246,6 +254,58 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
                 "No approved, currently-valid facts available for this patient.",
                 scope=ScopeCategory.OUT_OF_SCOPE,
                 risk=compute_risk(ctx.proposal, ctx.valid_slice),
+                trace=ctx.trace,
+            )
+
+        # Own-medication route (post-v8 demo review): a question naming a drug
+        # from THIS patient's record (current or not) is a clinical ask about
+        # their own care that the reasoner could not ground. It is never
+        # redirected away ("contact the clinic"): it is treated like gate 4's
+        # unanswerable in-scope proposal — one rephrase CLARIFY while the
+        # clarify budget lasts, else ESCALATE to the doctor. One-shot surfaces
+        # (web demo, patient portal) run with a zero budget, so they escalate
+        # at once. Drugs not in this record (a spouse's, another patient's,
+        # general knowledge) keep the redirect. The patient-facing text names
+        # no drug and no fact; only the trace names the drug the caller wrote.
+        own = own_medications_named(
+            ctx.question, (*ctx.valid_slice.facts, *ctx.non_current_facts)
+        )
+        if own:
+            drugs = ", ".join(own)
+            if ctx.call_session is not None and ctx.call_session.can_clarify():
+                ctx.trace.record(
+                    "own_medication_route",
+                    TraceStatus.TERMINAL,
+                    spec_section="§5.5",
+                    detail=(
+                        "scope labelled out-of-scope but the question names this patient's "
+                        f"own medication ({drugs}) — not redirecting; asking to rephrase "
+                        "(escalates once the clarify budget is spent)"
+                    ),
+                )
+                return Decision.clarify(
+                    "Your question is about your medication, and I couldn't find a clear "
+                    "answer in your doctor's approved record. Could you rephrase it? If I "
+                    f"still can't answer, I'll send it to your doctor. {EMERGENCY_LINE}",
+                    confidence=0.0,
+                    scope=ScopeCategory.IN_SCOPE,
+                    trace=ctx.trace,
+                )
+            ctx.trace.record(
+                "own_medication_route",
+                TraceStatus.TERMINAL,
+                spec_section="§5.5",
+                detail=(
+                    "scope labelled out-of-scope but the question names this patient's "
+                    f"own medication ({drugs}) and the clarify budget is spent — "
+                    "escalating, not redirecting"
+                ),
+            )
+            return Decision.escalate(
+                "Your question is about your medication — sending it to your doctor. "
+                f"{EMERGENCY_LINE}",
+                scope=ScopeCategory.IN_SCOPE,
+                risk=OWN_MEDICATION_RISK,
                 trace=ctx.trace,
             )
 
@@ -709,4 +769,4 @@ def run_gate_chain(ctx: GateContext) -> Decision:
     )
 
 
-__all__ = ["EMERGENCY_LINE", "GateContext", "run_gate_chain"]
+__all__ = ["EMERGENCY_LINE", "OWN_MEDICATION_RISK", "GateContext", "run_gate_chain"]
