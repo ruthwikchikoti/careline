@@ -49,7 +49,7 @@ changelog:
     381 shared ids vs after-policy-v7 (gate PASS); full 391: recall 160/160, over-escalation 10/137
     (7.3%), redirect 1.000, no_answer 1.000, keyless in-scope accuracy 0.167 (unchanged). LLM-path
     stand-in: 0/160 eval emergencies answered (dev data), Brain and graph agree. The six live
-    gpt-4o-mini ANSWER texts (evals/reports/live-flow-gpt-4o-mini.json, replayed against the record''s
+    gpt-4o-mini ANSWER texts (evals/reports/live-flow-gpt-4o-mini-run1.json, replayed against the record''s
     facts with reconstructed citations) still ANSWER. Blind battery 3 was NOT opened or tuned on: at v8
     it scores 45/50 recall (v7: 44/50), 5/50 (10%) false escalation, 0 answered keyless; with the
     stand-in (python -m scripts.score_blind evals/blind/battery-3.json --stand-in confident) 5/50

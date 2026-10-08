@@ -252,7 +252,9 @@ class Settings(BaseSettings):
 
         # Langfuse traces carry a salted patient hash; the public default salt
         # would make those hashes reversible by anyone who reads the repo.
-        if os.environ.get("CARELINE_LANGFUSE_PUBLIC_KEY") and os.environ.get(
+        from careline.adapters.observability.langfuse_tracer import langfuse_credentials
+
+        if langfuse_credentials() is not None and os.environ.get(
             "CARELINE_TRACE_SALT", "careline-trace"
         ) in ("", "careline-trace"):
             raise ValueError(

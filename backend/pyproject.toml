@@ -40,7 +40,7 @@ data = [
 # CARELINE_LANGFUSE_PUBLIC_KEY / CARELINE_LANGFUSE_SECRET_KEY (and optionally
 # CARELINE_LANGFUSE_HOST) to enable; without keys the tracer is a no-op.
 obs = [
-    "langfuse>=2",
+    "langfuse>=2,<4",  # tracer targets the v2/v3 APIs; v4 dropped start_generation
 ]
 api = [
     "fastapi>=0.111",

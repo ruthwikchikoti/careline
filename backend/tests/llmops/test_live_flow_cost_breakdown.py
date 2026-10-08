@@ -17,7 +17,7 @@ import pytest
 
 from scripts.live_flow_check import _markdown, cost_breakdown
 
-_REPORT = Path(__file__).resolve().parents[2] / "evals" / "reports" / "live-flow-gpt-4o-mini.json"
+_REPORT = Path(__file__).resolve().parents[2] / "evals" / "reports" / "live-flow-gpt-4o-mini-run1.json"
 
 
 def test_cost_breakdown_from_the_committed_live_run():

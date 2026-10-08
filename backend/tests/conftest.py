@@ -34,6 +34,10 @@ BLANKED_KEYS: tuple[str, ...] = (
     "ANTHROPIC_API_KEY",
     "LANGSMITH_API_KEY",
     "LANGCHAIN_API_KEY",
+    "CARELINE_LANGFUSE_PUBLIC_KEY",
+    "CARELINE_LANGFUSE_SECRET_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
 )
 #: Removed outright (an empty Mongo URI is not the same as no Mongo URI).
 REMOVED_KEYS: tuple[str, ...] = ("CARELINE_MONGO_URI",)

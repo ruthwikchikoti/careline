@@ -56,6 +56,17 @@ from careline.adapters.llm.prompt_registry import active_versions
 from careline.adapters.llm.usage import TurnUsage
 
 _client_cache: dict[tuple[str, str, str], Any] = {}
+#: URLs of traces sent in this process (v3), newest last — for evidence reports.
+TRACE_URLS: list[str] = []
+
+
+def flush() -> None:
+    """Block until queued traces are sent (scripts call this before exiting)."""
+    for client in list(_client_cache.values()):
+        try:
+            client.flush()
+        except Exception:
+            pass
 
 
 def _patient_hash(patient_id: str) -> str:
@@ -63,12 +74,28 @@ def _patient_hash(patient_id: str) -> str:
     return hashlib.sha256(f"{salt}:{patient_id}".encode()).hexdigest()[:12]
 
 
-def _client() -> Any | None:
-    public = os.environ.get("CARELINE_LANGFUSE_PUBLIC_KEY")
-    secret = os.environ.get("CARELINE_LANGFUSE_SECRET_KEY")
+def langfuse_credentials() -> tuple[str, str, str] | None:
+    """(public, secret, host) from the CARELINE_* names, else Langfuse's own.
+
+    Langfuse hands out LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY /
+    LANGFUSE_BASE_URL (or LANGFUSE_HOST); a deployer who pastes those gets
+    tracing instead of a silent no-op. The CARELINE_* names win when set.
+    """
+    env = os.environ.get
+    public = env("CARELINE_LANGFUSE_PUBLIC_KEY") or env("LANGFUSE_PUBLIC_KEY")
+    secret = env("CARELINE_LANGFUSE_SECRET_KEY") or env("LANGFUSE_SECRET_KEY")
     if not public or not secret:
         return None
-    host = os.environ.get("CARELINE_LANGFUSE_HOST", "")
+    host = (env("CARELINE_LANGFUSE_HOST") or env("LANGFUSE_BASE_URL")
+            or env("LANGFUSE_HOST") or "")
+    return public, secret, host
+
+
+def _client() -> Any | None:
+    creds = langfuse_credentials()
+    if creds is None:
+        return None
+    public, secret, host = creds
     key = (public, secret, host)
     if key in _client_cache:  # one SDK client (and its flush thread) per process
         return _client_cache[key]
@@ -196,7 +223,15 @@ def record_turn(
                 # back-date); the real window is in metadata.
                 generation = client.start_generation(name="careline.turn", **details)
             generation.update(**details)
+            if os.environ.get("CARELINE_LANGFUSE_PUBLIC_TRACES", "").lower() in ("1", "true"):
+                # Opt-in share links for demo evidence (fictional data only):
+                # a public trace opens without a Langfuse login.
+                generation.update_trace(public=True)
             generation.end(end_time=_ns(end))
+            try:
+                TRACE_URLS.append(client.get_trace_url(trace_id=generation.trace_id))
+            except Exception:
+                pass
             return True
 
         if hasattr(client, "generation"):  # Langfuse v2
@@ -225,4 +260,4 @@ def record_turn(
         return False
 
 
-__all__ = ["TurnTrace", "begin_turn", "record_turn"]
+__all__ = ["TRACE_URLS", "TurnTrace", "begin_turn", "flush", "langfuse_credentials", "record_turn"]
