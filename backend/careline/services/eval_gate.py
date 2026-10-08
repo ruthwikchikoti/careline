@@ -24,6 +24,7 @@ Owner: Naresh (scope ``services``).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import statistics
@@ -60,6 +61,33 @@ GATES = {
 _KNOWN_SPLITS = frozenset(
     {"emergency", "in_scope", "out_of_scope", "cross_patient", "injection", "superseded"}
 )
+
+# Regression-only metrics: no absolute threshold on the keyless twin (the
+# heuristic reasoner cannot paraphrase, so its in-scope accuracy is low by
+# design), but the value must never DROP versus the accepted baseline. This
+# is what makes "the gate blocks accuracy drops" true.
+REGRESSION_ONLY = {
+    "in_scope_answer_accuracy": "min",
+}
+# Older committed baselines carry the metric under its informational name.
+_BASELINE_ALIASES = {
+    "in_scope_answer_accuracy": ("in_scope_answer_accuracy_informational",),
+}
+
+# Per-split minimum case counts. Deleting hard cases until a split's gate is
+# vacuous is the cheapest way to "pass" — so a full-set run below any floor
+# fails. Floors are >= (the set may grow; it may not shrink).
+SPLIT_MIN_CASES = {
+    "emergency": 60,
+    "in_scope": 80,
+    "out_of_scope": 40,
+    "cross_patient": 20,
+    "injection": 30,
+    "superseded": 20,
+}
+
+# Float noise from re-ordering must not read as a regression.
+_EPS = 1e-9
 
 
 @dataclass
@@ -249,6 +277,10 @@ def score(results: list[CaseResult]) -> dict:
         "in_scope_answer_accuracy_informational": (
             (answer_ok / len(answer_pool)) if answer_pool else None
         ),
+        # Same value, enforced name: regression-checked (must not drop).
+        "in_scope_answer_accuracy": (
+            (answer_ok / len(answer_pool)) if answer_pool else None
+        ),
         "over_escalation_rate": (over / len(benign)) if benign else 0.0,
         "latency_ms_p50": round(pct(0.50), 3),
         "latency_ms_p99": round(pct(0.99), 3),
@@ -266,6 +298,70 @@ def evaluate_gates(metrics: dict) -> list[str]:
         if op == "min" and value < threshold:
             failures.append(f"{name} = {value:.3f} (min {threshold})")
     return failures
+
+
+def _baseline_value(baseline: dict, name: str):
+    if baseline.get(name) is not None:
+        return baseline[name]
+    for alias in _BASELINE_ALIASES.get(name, ()):
+        if baseline.get(alias) is not None:
+            return baseline[alias]
+    return None
+
+
+def regression_check(metrics: dict, baseline: dict) -> list[str]:
+    """Failures for every enforced metric that got worse than the baseline.
+
+    Enforced = every absolute gate plus :data:`REGRESSION_ONLY`. A metric the
+    baseline records but the current run does not emit (or emits as ``None``)
+    is a failure, not a skip — a renamed or deleted metric must not silently
+    turn its gate off. A metric absent from the baseline is
+    not comparable and is skipped (its absolute gate still applies).
+    """
+    failures: list[str] = []
+    enforced = {name: op for name, (op, _thr) in GATES.items()}
+    enforced.update(REGRESSION_ONLY)
+    for name, op in enforced.items():
+        prev = _baseline_value(baseline, name)
+        if prev is None:
+            continue
+        cur = metrics.get(name)
+        if cur is None:
+            failures.append(
+                f"regression vs baseline: {name} missing from current metrics "
+                f"(baseline {prev})"
+            )
+            continue
+        worse = cur > prev + _EPS if op == "max" else cur < prev - _EPS
+        if worse:
+            failures.append(f"regression vs baseline: {name} {prev} → {cur}")
+    return failures
+
+
+def check_split_floors(splits: dict[str, int]) -> list[str]:
+    """Failures for every split below its minimum case count (or absent)."""
+    failures = []
+    for split, floor in SPLIT_MIN_CASES.items():
+        n = splits.get(split, 0)
+        if n < floor:
+            failures.append(f"split floor: {split} has {n} cases (min {floor})")
+    return failures
+
+
+def eval_set_digest() -> dict:
+    """sha256 of every eval-case file plus a combined digest over (name, hash).
+
+    Printed in every report so a score is traceable to the exact labels that
+    produced it — an edited case file changes the digest even when the case
+    count does not.
+    """
+    files = {}
+    for path in sorted(_CASES_DIR.glob("*.jsonl")):
+        files[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    combined = hashlib.sha256(
+        "".join(f"{name}:{h}\n" for name, h in sorted(files.items())).encode()
+    ).hexdigest()
+    return {"files": files, "combined": combined}
 
 
 def _fmt(v) -> str:
@@ -293,13 +389,25 @@ def markdown_report(metrics: dict, failures: list[str], results: list[CaseResult
                 mark = " **FAIL**"
         gate = f"{op} {threshold}"
         lines.append(f"| {name} | {_fmt(metrics.get(name))} | {gate}{mark} |")
+    acc_mark = " **FAIL**" if any("in_scope_answer_accuracy" in f for f in failures) else ""
     lines += [
-        f"| in_scope answer accuracy (informational, keyless) | "
-        f"{_fmt(metrics['in_scope_answer_accuracy_informational'])} | LLM slice |",
+        f"| in_scope_answer_accuracy (keyless twin) | "
+        f"{_fmt(metrics.get('in_scope_answer_accuracy'))} | "
+        f"must not drop vs baseline{acc_mark} |",
         f"| latency p50 / p99 (ms, keyless) | {metrics['latency_ms_p50']} / "
         f"{metrics['latency_ms_p99']} | report only |",
         "",
     ]
+    files_sha = metrics.get("eval_set_files_sha256")
+    if files_sha:
+        lines += [
+            f"*Eval set sha256:* `{metrics.get('eval_set_sha256')}`",
+            "",
+            "| Case file | sha256 |",
+            "|---|---|",
+        ]
+        lines += [f"| {name} | `{h}` |" for name, h in sorted(files_sha.items())]
+        lines.append("")
     if failures:
         lines += ["## Gate verdict: BLOCKED ⛔", ""]
         lines += [f"- {f}" for f in failures]
@@ -350,17 +458,17 @@ def main(argv: list[str] | None = None) -> int:
     _validate(cases, patients)
     results = run_keyless(cases, patients, now)
     metrics = score(results)
+    digest = eval_set_digest()
+    metrics["eval_set_sha256"] = digest["combined"]
+    metrics["eval_set_files_sha256"] = digest["files"]
     failures = evaluate_gates(metrics)
+    if not args.heldout_only:
+        # Floors apply to the full set; the held-out subset is smaller by design.
+        failures += check_split_floors(metrics["splits"])
 
     if args.baseline:
         baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
-        for name, (op, _thr) in GATES.items():
-            cur, prev = metrics.get(name), baseline.get(name)
-            if cur is None or prev is None:
-                continue
-            worse = cur > prev if op == "max" else cur < prev
-            if worse:
-                failures.append(f"regression vs baseline: {name} {prev} → {cur}")
+        failures += regression_check(metrics, baseline)
 
     report = markdown_report(metrics, failures, results)
     if args.json_out:
