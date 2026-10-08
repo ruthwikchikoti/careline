@@ -51,8 +51,8 @@ backend/careline/
   services/      question_service, eval_gate, llm_eval, online_monitor, audit, auth, approval, dpdp, ...
   api/           FastAPI app + routers (auth, patients, consultations, brain, observability, monitoring, patient_portal)
 backend/prompts/    versioned prompts + manifest.yaml (pins, sha256_12, changelog)
-backend/policies/   red-flags.v1..v5.yaml
-backend/evals/      cases/ (339 items), blind/ (blind batteries), reports/ (gate reports per release)
+backend/policies/   red-flags.v1..v7.yaml
+backend/evals/      cases/ (381 items), blind/ (blind batteries), reports/ (gate reports per release)
 backend/scripts/    seed_demo, shadow_compare, score_blind, load_test, cost_report
 backend/tests/      offline, keyless pytest suite
 web/                Next.js doctor console + patient portal
@@ -66,8 +66,11 @@ pip install -e ".[dev]"
 python -m pytest -q                       # must be green before every commit; offline + keyless
 python -m careline.services.eval_gate     # must PASS before any rail/gate/prompt/eval change lands
 ```
-Everything runs with **no API key and no database**. Run the suite with
-`CARELINE_MONGO_URI` unset rather than set to an empty string.
+Everything runs with **no API key and no database**. The suite is hermetic:
+`tests/conftest.py` blanks the provider / tracing keys, unsets
+`CARELINE_MONGO_URI`, disables `load_dotenv` and stops `Settings()` reading
+`backend/.env` before any test module is imported, so plain `python -m pytest -q`
+is green with or without a developer `.env`.
 
 ## Working agreements (must follow)
 - **Owned paths:** edit only the files your area owns (see
@@ -91,13 +94,28 @@ Everything runs with **no API key and no database**. Run the suite with
   commit: no `Co-Authored-By` trailers, session links or "generated with" lines.
 
 ## Status (2026-10-08)
-Active: `red_flags@v5+d7897fb5e5ab`, reasoner/verifier/extractor/judge v1. The
-339-item gate passes. Blind battery 2: 42/50 recall, 0 emergencies answered.
+Active: `red_flags@v7+93b8295ea3c0` (on disk, not yet committed or tagged; v6
+is also uncommitted), reasoner/verifier/extractor/judge v1. The 381-item gate
+passes, and against the v6 baseline it passes with 0 verdict changes on the 376
+shared cases. CI baseline: `after-policy-v7.json`. Keyless suite: 1512 passed,
+2 skipped (with or without the env prefix). v7 adds the final red-team rail
+families and a deterministic **answer-text grounding check** in the gate chain
+(every dose / number / drug name in an ANSWER must appear in a cited current
+fact). Blind battery 3 (blind to v6 and v7): 44/50 recall, 5/50 false
+escalation, 0 emergencies answered on the keyless path at both versions.
+Battery 2 is dev data from v6 on (its honest number stays 42/50 at v5). On a
+worst-case LLM-path stand-in, battery 3's 6 rail misses still end in ANSWER at
+v7; only 1 of the 6 lands in the doctor review queue (measured at v6).
+LLM-path protection is measured only with stand-ins (no live key).
 
 Pending:
-- live LLM-slice run (needs a key)
+- commit v6 and v7 + product fixes; tag `release/red-flags-v2`,
+  `release/red-flags-v3`, `release/red-flags-v6`, `release/red-flags-v7`
+- live LLM-slice run (needs a valid key; the local `.env` key is rejected)
 - Langfuse project
-- public deploy
+- public deploy; `autoDeployTrigger: checksPass` in `render.yaml`
 - branch protection and a blocked-PR screenshot
 - Cohen's κ
-- release tags
+- rotate the Atlas password (it was printed in local tooling output before the test_config fix)
+- set `OpenAI(timeout=10, max_retries=1)`; refuse the default `CARELINE_TRACE_SALT` in public demo
+- battery 4 before any v8 is quoted (battery 3 is blind to v7 too, and v7 did not move it)

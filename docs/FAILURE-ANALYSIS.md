@@ -5,7 +5,7 @@ This document has two parts:
 1. **LLMOps pipeline failure modes.** The release-pipeline work this project centres on: the eval gate, versioned policy releases, the online monitor, and the deploy and API hardening. These are failures we found (several by running adversarial reviews on ourselves) or designed against. Each has a detection mechanism, a mitigation, the test or command that pins it, and the risk that remains.
 2. **Agent-level bugs.** Three bugs in the system under test (our team's clinical follow-up agent), found earlier while running it end to end. They are kept here because they explain why the gate measures over-escalation as well as recall.
 
-All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to `main`.
+All numbers can be reproduced keylessly from `backend/` at `red_flags@v6+2df6ecd24fda` (v7, `red_flags@v7+93b8295ea3c0`, changes no committed eval verdict on those cases; see `evals/reports/after-policy-v7.md`). Releases are referenced by tag (`baseline-v0`, `release/red-flags-v2` … `-v5`; `release/red-flags-v6` and `-v7` at commit); other commit hashes refer to `main` before any history rewrite.
 
 ---
 
@@ -15,31 +15,34 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
 
 | # | Failure mode | Detection | Mitigation | Pinned by | Residual risk |
 |---|---|---|---|---|---|
-| 1 | Silent prompt/policy regression | Eval gate on every PR (`eval_gate`, exit 1) | 8 absolute gates + regression vs baseline | `--replay b8476c9` → 58/60 missed, exit 1 | Prompt text is not exercised by the keyless twins; `main` is unprotected |
+| 1 | Silent prompt/policy regression | Eval gate on every PR (`eval_gate`, exit 1) | 8 absolute gates + regression vs baseline | `--replay baseline-v0` → 58/60 missed, exit 1 | Prompt text is not exercised by the keyless twins; `main` is unprotected |
 | 2 | Baseline gaming (moving or diluted baseline) | Shared-case comparison over `per_case` ids | Intersection rescoring, split floors, deleted case fails | `tests/llmops/test_eval_gate_intersection.py`, `test_eval_gate_hardening.py` | The baseline JSON is editable in a PR (no CODEOWNERS) |
-| 3 | Eval-set overfitting | Blind batteries scored once per version | Protocol in `evals/blind/README.md`; tuned batteries become dev data | `scripts/score_blind.py` | n = 50; ~84% ceiling; each battery is single-use |
+| 3 | Eval-set overfitting | Blind batteries scored once per version | Protocol in `evals/blind/README.md`; tuned batteries become dev data | `scripts/score_blind.py` | n = 50; 88% at v6 (battery 3); each battery is single-use |
 | 4 | Gate failing open (vacuous splits) | Split-floor check | Per-split minimum counts | `test_split_below_floor_fails`, `test_split_missing_entirely_fails` | None known |
-| 5 | LLM provider outage / timeout | `ReasonerUnavailable` → ESCALATE; `fail_closed_rate` on `/monitoring` | Fail closed; alert above 5% | `tests/brain/test_brain.py`, `test_graph.py`, `test_parity*.py` | No explicit client timeout (SDK default); a hung call holds a threadpool worker |
+| 5 | LLM provider outage / timeout | `ReasonerUnavailable` → ESCALATE; `fail_closed_rate` on `/monitoring` | Fail closed; alert above 5% | `tests/brain/test_brain.py`, `test_graph.py`, `test_parity*.py` | No explicit client timeout: SDK default 600 s read, 2 retries; a hung call holds a threadpool worker |
 | 6 | Judge self-bias / small sample | Judge errors counted, never scored faithful; alert only at n_judged ≥ 10 | Judge sees only the cited, currently valid facts; versioned `judge@v1` prompt | `tests/llmops/test_judge.py`, `test_online_monitor.py` | Same model family as the Reasoner; not calibrated against humans; never run live |
 | 7 | Cost runaway | Daily-cap 429s; cost section of `/monitoring`; usage JSONL | Per-IP spend window, daily cap, separate login window; red-flag turns make no LLM call; eval cache | `tests/api/test_rate_limit.py` | Counters are per process; no provider-side cap configured |
 | 8 | Input drift | PSI / OOV / length vs the eval reference | Alert on `/monitoring` | `tests/llmops/test_online_monitor.py` | Poll-only, no paging; the reference is our own eval set |
 | 9 | Cross-tenant leak (found in review) | Sev-0 repro test | Tenant-keyed audit queries + doctor-scoped portal login | `tests/api/test_patient_portal_isolation.py` | The Mongo sev-0 suite in `tests/data` skips without `mongomock_motor` |
 | 10 | Passwordless doctor login (found in review) | Auth tests | Credential required → per-doctor PBKDF2 hashes | `tests/api/test_routers_auth.py`, `test_doctor_credentials.py` | No MFA; no rotation UI |
-| 11 | PIN brute force | Lockout counters | 5 per account / 20 per IP → 15 min lockout; 6-digit PINs | `tests/api/test_login_lockout.py`, `test_seed_demo_pin.py` | A known account can be deliberately locked out |
+| 11 | PIN brute force | Lockout counters | 5 per account / 20 per IP → 15 min lockout; exactly 6 digits enforced at registration; one distinct seed PIN per patient | `tests/api/test_login_lockout.py`, `test_seed_demo_pin.py`, `test_patient_pin_policy.py` | A known account can be deliberately locked out |
 | 12 | `X-Forwarded-For` spoofing of rate limits | Limiter tests | Key on the rightmost trusted hop; `--no-proxy-headers` | `tests/api/test_rate_limit.py`, `test_forwarded_proto.py` | A CDN in front would make clients share buckets (over-limits, never a bypass) |
 | 13 | Event-loop blocking by the sync pipeline | Loop-probe tests | Question routes run on the threadpool | `tests/api/test_event_loop_offload.py` | Extraction route still calls a sync LLM inside `async` |
 | 14 | Dead observability code (Langfuse) | Fake-client tests | `obs` extra; real model, latency and per-turn cost sent | `tests/llmops/test_usage_langfuse.py`, `test_wiring.py` | No Langfuse project or keys yet |
-| 15 | Emergency rail misses fresh wording | Blind batteries | Danger-concept invariant; every redirect carries the 112 line | `tests/brain/test_review_round*.py`, `test_blind1_battery.py` | ~16% of blind emergencies are redirected, not escalated |
-| 16 | Deploy not gated by CI | Review of `render.yaml` | Documented; fix specified | — | `render.yaml` still has `autoDeploy: true`; not deployed yet |
+| 15 | Emergency rail misses fresh wording | Blind batteries | Danger-concept + body-state invariant; every redirect carries the 112 line; symptom redirects queued for doctor review | `tests/brain/test_review_round*.py`, `test_blind1_battery.py`, `tests/api/test_review_queue.py` | 6/50 (12%) of battery 3 redirected, not escalated; only 1 of those 6 reaches the review queue |
+| 16 | Deploy not gated by CI | Review of `render.yaml` | Documented; fix specified | — | `render.yaml` still has `autoDeploy: true` (deploys on push to `main`); not deployed yet |
 | 17 | Lost audit records under concurrency | Threaded tests | Re-entrant lock around every audit mutation | `tests/api/test_audit_concurrency.py` | A turn logged while the same history is cleared can reappear after restart |
+| 18 | Answer cites a fact outside the valid slice (superseded, mangled, duplicate) | Citation veto in `run_gate_chain` (v6) | CLARIFY, or ESCALATE with a danger concept or spent clarify budget; Brain = graph | `tests/brain/test_review_round4.py` | A valid citation does not stop an answer whose *text* adds facts; only the verifier and judge can catch that |
+| 19 | Rail miss answered on the LLM path | Final danger + present-body-state invariant (v6) | Stand-in reasoner/verifier tests | `tests/brain/test_review_round4.py` | Worst-case stand-in answers all 6 of battery 3's misses; no live LLM measurement |
+| 20 | Red-flag escalation without emergency guidance | 112-line sweep over every RED_FLAG path | 112 line on every RED_FLAG escalation (v6); portal `emergency` flag → 112 banner | `tests/brain/test_review_round4.py`, `tests/api/test_patient_portal_emergency.py` | Non-English emergencies outside the lexicon are not escalated, so they get the redirect's 112 line, not the banner |
 
 ### 1. Silent prompt or policy regression
 
 - **What happened.** Baseline-v0 shipped a rail that caught 2 of 60 paraphrased emergencies. Nothing failed, because nothing measured it.
 - **Detection.**
-  - `python -m careline.services.eval_gate` runs all 339 items through the full Brain and exits 1 on any trip.
+  - `python -m careline.services.eval_gate` runs all 381 items through the full Brain and exits 1 on any trip.
   - CI runs it on every PR touching `backend/**`, `.github/workflows/ci.yml` or `render.yaml`.
-  - Replaying the original failure, `python -m scripts.shadow_compare --replay b8476c9`, gives `missed_emergencies: 58` and `replay_gate_exit_code: 1`.
+  - Replaying the original failure, `python -m scripts.shadow_compare --replay baseline-v0`, gives `missed_emergencies: 58`, `replayed_commit: b8476c9…` and `replay_gate_exit_code: 1`.
 - **Mitigation.**
   - Eight absolute gates (missed emergencies 0, cross-patient leaks 0, superseded leaks 0, injection answered 0, ungrounded answers 0, redirect accuracy ≥ 0.90, no-answer accuracy ≥ 0.95, over-escalation ≤ 0.15).
   - Regression against the committed baseline.
@@ -51,7 +54,7 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
 
 ### 2. Baseline gaming
 
-- **What happened (the v3 lesson).** Policy v3 (`16c741a`) raised over-escalation from 0.0707 to 0.09375 against the v2 baseline. It passed only because the same review batch (`1f7aaf2`) changed CI's `--baseline` to `after-policy-v3.json`. The eval set has also grown 250 → 339, and an aggregate comparison would read growth as improvement or hide a regression in the new denominator.
+- **What happened (the v3 lesson).** Policy v3 (tag `release/red-flags-v3`) raised over-escalation from 0.0707 to 0.09375 against the v2 baseline. It passed only because the same review batch (`1f7aaf2`) changed CI's `--baseline` to `after-policy-v3.json`. The eval set has also grown 250 → 376, and an aggregate comparison would read growth as improvement or hide a regression in the new denominator.
 - **Detection.** The gate recomputes every enforced metric over the case ids present in **both** runs (`per_case` in each report JSON).
 - **Mitigation.**
   - Intersection rescoring.
@@ -60,24 +63,25 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
   - Keyless in-scope accuracy is regression-only: it may not drop.
   - The original 250 ids are frozen in `evals/reports/baseline-v0.case_ids.txt`.
 - **Pinned by.** `tests/llmops/test_eval_gate_intersection.py::test_new_hard_cases_do_not_read_as_a_regression`, `tests/llmops/test_eval_gate_hardening.py::test_accuracy_drop_vs_baseline_fails`.
-- **Residual risk.** A PR can still edit `evals/reports/after-policy-v5.json`. Our rule is that a baseline bump is its own commit and names the regression it accepts, but there is no CODEOWNERS file or required review to enforce that.
+- **Residual risk.** A PR can still edit `evals/reports/after-policy-v7.json`. Our rule is that a baseline bump is its own commit and names the regression it accepts, but there is no CODEOWNERS file or required review to enforce that.
 
 ### 3. Eval-set overfitting
 
 - **What happened.** We reported 42/42 on a "novel" probe battery after v3. The battery was written before v3 and v3 was built to pass it, so 42/42 was a fit.
 - **Detection.** A blind battery, written by an evaluator that never read the rail code, scored once per policy version.
-- **Mitigation and evidence.** `python -m scripts.score_blind evals/blind/battery-2.json` gives:
+- **Mitigation and evidence.** `python -m scripts.score_blind evals/blind/battery-N.json`, each at the version it was blind to:
 
-  | Battery | Blind to | Emergency recall | False escalation | Emergencies answered |
+  | Battery | Blind to | Emergency recall | False escalation | Emergencies answered (keyless) |
   |---|---|---|---|---|
   | battery-1 | v4 | 34/40 (85%) | 4/40 (10%) | 0 |
   | battery-2 | v5 | 42/50 (84%) | 13/50 (26%) | 0 |
+  | battery-3 | v6 | 44/50 (88%) | 5/50 (10%) | 0 |
 
-  Battery-1 drove v5, so it is dev data now. Its v5 score is not quoted.
+  Battery-1 drove v5 and battery-2 drove v6, so both are dev data now. v6's 50/50 on battery 2 is a fit and is not quoted.
 - **Residual risk.**
-  - n is small: the Wilson 95% interval for 42/50 is 71–92%.
-  - The committed benign split (7.9% over-escalation) is easier than real near-misses (26%).
-  - The next release needs a fresh battery-3.
+  - n is small: the Wilson 95% interval for 44/50 is 76–94%.
+  - The committed benign split (7.3% over-escalation) is easier than real near-misses (10–26%).
+  - The next release needs a fresh battery-4.
 
 ### 4. Gate failing open on vacuous splits
 
@@ -90,7 +94,7 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
 - **Detection.** The Reasoner and Verifier adapters raise `ReasonerUnavailable` on provider errors. The online monitor counts each such turn as `fail_closed`, and `GET /monitoring` alerts when `fail_closed_rate > 5%` or `error_rate > 1%`.
 - **Mitigation.** Fail closed: the turn escalates to the doctor, never a guess. Red-flag escalations need no LLM, so emergencies are unaffected by an outage.
 - **How it is measured.** As an error and fail-closed rate on `/monitoring`. We have **not** run an outage drill against the live provider (no live key).
-- **Residual risk.** `OpenAI(api_key=...)` is built without an explicit `timeout`, so the SDK default applies. A hung provider call holds a threadpool worker for that long, and p99 would balloon before the error rate moved. **Fix:** set a timeout of about 10 s with one retry.
+- **Residual risk.** `OpenAI(api_key=...)` is built without an explicit `timeout` in `openai_backend.py`, `judge.py`, `extraction_backend.py` and `llm_eval.py`, so the `openai` 2.43.0 SDK defaults apply: 600 s read timeout, 5 s connect, 2 retries. A hung provider call can hold a threadpool worker for up to ~30 minutes in the worst case (3 attempts × 600 s), and p99 would balloon long before the error rate moved. **Fix:** `OpenAI(timeout=10, max_retries=1)`; the turn then fails closed to ESCALATE after ~20 s at worst.
 
 ### 6. Judge self-bias and small samples
 
@@ -152,9 +156,10 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
 
 - **Mitigation.**
   - 5 failed logins per account (from any IP), or 20 per IP across accounts, lock out for 900 s. While locked, even a correct PIN gets 429.
-  - Seeded demo PINs are 6 random digits.
-- **Pinned by.** `tests/api/test_login_lockout.py`, `tests/api/test_seed_demo_pin.py`.
-- **Residual risk.** Someone can lock a known patient out for 15 minutes. We accepted that as the safe failure. Registration still accepts 4–12 character PINs.
+  - Registration requires exactly 6 digits (`^[0-9]{6}$`, else 422), and a 422 never echoes the submitted PIN.
+  - The seed gives each patient a distinct 6-digit PIN (random, or derived from `CARELINE_DEMO_PIN` so the table repeats), and wipes only `dr-asha`'s audit trail.
+- **Pinned by.** `tests/api/test_login_lockout.py`, `tests/api/test_seed_demo_pin.py`, `tests/api/test_patient_pin_policy.py`.
+- **Residual risk.** Someone can lock a known patient out for 15 minutes. We accepted that as the safe failure. Patients registered before the 6-digit rule keep their old PINs.
 
 ### 12. `X-Forwarded-For` spoofing
 
@@ -181,21 +186,25 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
 
 ### 15. Emergency rail misses fresh wording
 
-- **Mitigation (v4 / v5).**
+- **Mitigation (v4 → v6).**
   - Emergency rails run on **every** question before the LLM.
-  - History, denial and media suppression is clause-scoped and never suppresses a present-tense clause.
-  - Hinglish and typo normalisation.
+  - History, denial and media suppression is clause-scoped and never suppresses a present-tense clause; since v6 an anaphoric present ("…last year. I have it now") brings the history clause back.
+  - Hinglish and typo normalisation; since v6, de-obfuscation and a generic distress / help-seeking family.
   - A structural symptom-report layer.
-  - A final gate invariant: no question with a danger concept can end in ANSWER.
+  - A final gate invariant: no question with a danger concept, or (v6) a present body-state report, can end in ANSWER.
   - Every CLARIFY redirect ends with "If this is an emergency, call 112 (India) or your local emergency number now."
-- **Residual risk.** About 16% of battery-2's emergencies were redirected rather than escalated. **0 were answered.** The misses are listed in `evals/blind/README.md`.
+  - A redirected turn that names a danger concept or a present symptom is flagged `needs_review` and listed for the doctor under "Redirected — please review" (`GET /escalations` → `review`). The doctor is not paged.
+- **Residual risk.**
+  - 6 of battery 3's 50 emergencies (12%) were redirected rather than escalated at v6. **0 were answered on the keyless path.** The misses are listed in `evals/blind/README.md`.
+  - Only 1 of those 6 lands in the review queue; the other 5 rely on the patient acting on the 112 line.
+  - On a worst-case LLM-path stand-in, all 6 end in ANSWER (#19).
 
 ### 16. Deploy not gated by CI
 
 - **Status.**
   - `render.yaml` still sets `autoDeploy: true`, so once the service is deployed, Render would deploy every push to `main` in parallel with CI, not after it.
   - **Fix specified:** `autoDeployTrigger: checksPass`, plus branch protection requiring "Suite (keyless)" and "Eval gate (deterministic slice)".
-  - Both are pending; see `docs/OPERATIONS.md` §3.
+  - Both are pending team actions; see `docs/OPERATIONS.md` §3. Until they are done, deploy happens on push to `main` and CI does not gate it.
   - The service is not deployed today, so no un-gated deploy has happened.
 
 ### 17. Lost audit records under concurrency
@@ -203,6 +212,26 @@ All numbers can be reproduced keylessly from `backend/`. Commit hashes refer to 
 - **What happened.** Once the pipeline moved to the threadpool, concurrent `log_turn` calls could interleave. A test before the fix lost records (for example, 584 of 600 turns).
 - **Mitigation.** `3d97823` added a re-entrant lock around every audit mutation. Durable writes happen outside the lock.
 - **Pinned by.** `tests/api/test_audit_concurrency.py`.
+
+### 18. Answer cites a fact outside the valid slice
+
+- **What happened.** Before v6 only the keyless `HeuristicVerifier` rejected a citation outside the valid slice. With an LLM verifier that agreed, an answer citing a superseded id, a case-mangled id (`MED-1`) or a duplicate could pass the gate chain.
+- **Mitigation.** `_citation_veto` in `domain/gates/chain.py`: any citation that is not an exact id in the valid slice, or is duplicated, gives CLARIFY, or ESCALATE when a danger concept is present or the clarify budget is spent. The graph inherits it through the shared `run_gate_chain`.
+- **Pinned by.** `tests/brain/test_review_round4.py` (Brain/graph parity for superseded, case-mangled, duplicate, unknown and whitespace-mangled ids, plus the escalating cases).
+- **Residual risk.** A valid citation does not stop an answer whose text adds facts the cited fact does not contain. Only the verifier and the sampled judge can catch that.
+
+### 19. A rail miss answered on the LLM path
+
+- **What happened.** Rails run before the reasoner, so any emergency the rails miss reaches the model. A red-team round showed a confident reasoner plus an affirming verifier would ANSWER such questions.
+- **Mitigation (v6).** The final invariant now also checks `mentions_present_body_report()`: a clause with a subject, present or recent-onset wording and a body-state word blocks ANSWER, even when no rail lexicon names the symptom.
+- **How it is measured.** Only with a stand-in (a reasoner that always proposes a confident, validly cited answer; a verifier that always agrees). On the eval set and batteries 1–2 (dev data for v6) it answers 0 emergencies. **On battery 3, blind to v6, it answers 6 of 50: exactly the 6 rail misses** (Brain and graph agree). No live LLM run exists.
+- **Residual risk.** High until a live run measures whether the real model classifies these as `red_flag`. Next steps: add the batteries to `llm_eval` with expected never-ANSWER, and broaden the body-state check to third-person and clinical-shorthand reports ("pt on chemo, temp 38.9").
+
+### 20. Red-flag escalation without emergency guidance
+
+- **What happened.** Before v6 the red-flag escalation text said "transferring to your doctor" but did not tell the patient to call 112, and the portal showed only that the question was sent to the doctor.
+- **Mitigation.** v6 appends the 112 line to every RED_FLAG escalation, both cross-condition texts and the danger-invariant escalation. The portal API returns `patient_message` and `emergency` (scope `red_flag`), and the web portal shows an inline alert and a dismissible banner: "If this is an emergency, call 112 (India) or your local emergency number now."
+- **Pinned by.** `tests/brain/test_review_round4.py` (including a sweep over all eval emergencies), `tests/api/test_patient_portal_emergency.py`.
 
 ---
 

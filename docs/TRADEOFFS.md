@@ -10,7 +10,7 @@ Every entry has the same five parts:
 
 **Constraints behind all of them.** About $20 of LLM spend in total. A free-tier deploy (Render free web service: 512 MB RAM, no GPU, one container). No real patient data: five fictional patients and one doctor. A fixed timeline. And the safety rule that outranks everything else: *uncertainty resolves to ESCALATE, never answer from a superseded fact, zero cross-patient reachability.*
 
-**Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` on the active policy `red_flags@v5+d7897fb5e5ab`. Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Costs are **ESTIMATES** from `python -m scripts.cost_report`: tokens are counted as chars/4 and priced from the versioned table in `careline/adapters/llm/usage.py`. No live LLM run has happened yet (see #6).
+**Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` on `red_flags@v6+2df6ecd24fda` (re-run 2026-10-08); the active policy is now `red_flags@v7+93b8295ea3c0`, which changed no verdict on those cases (`evals/reports/after-policy-v7.md`). Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Costs are **ESTIMATES** from `python -m scripts.cost_report`: tokens are counted as chars/4 and priced from the versioned table in `careline/adapters/llm/usage.py`. No live LLM run has happened yet (see #6).
 
 | # | We chose | Over | Constraint that forced it |
 |---|---|---|---|
@@ -20,7 +20,7 @@ Every entry has the same five parts:
 | 4 | Fail-closed ESCALATE | Best-effort answer | Safety rule; the cost of a wrong answer |
 | 5 | Two LLM calls (Reasoner + independent Verifier) | One self-checking call | Safety rule against hallucinated grounding |
 | 6 | gpt-4o-mini | Stronger or pricier models | Cost ($20) |
-| 7 | Shared-case regression vs a committed baseline | A moving baseline | Data growth (the set went 250 → 339) |
+| 7 | Shared-case regression vs a committed baseline | A moving baseline | Data growth (the set went 250 → 376) |
 | 8 | Blind batteries | Self-written probes | Honest generalisation numbers |
 | 9 | Render free tier | Fly.io / HF Spaces | Cost ($0), blueprint-as-code |
 | 10 | In-process monitor (`GET /monitoring`) | Prometheus + Grafana | 512 MB, one container |
@@ -33,18 +33,17 @@ Every entry has the same five parts:
 
 ## 1. Offline eval gate over a live canary deploy
 
-**We chose** an offline eval gate, run on every PR against 339 hand-labelled items and designed to block the merge (branch protection is still pending, see #7), plus an offline shadow comparison of candidate and incumbent policy, **over** a live canary that routes a slice of real traffic to the candidate and promotes on live metrics, **because** the metric that matters, emergency recall, cannot be measured on organic traffic. Emergencies are rare by definition, and our traffic is a fictional demo with near-zero volume. A canary would need weeks to see a single missed emergency. The emergency split puts 118 in front of every candidate, in about a second.
+**We chose** an offline eval gate, run on every PR against 376 hand-labelled items and designed to block the merge (branch protection is still pending, see #7), plus an offline shadow comparison of candidate and incumbent policy, **over** a live canary that routes a slice of real traffic to the candidate and promotes on live metrics, **because** the metric that matters, emergency recall, cannot be measured on organic traffic. Emergencies are rare by definition, and our traffic is a fictional demo with near-zero volume. A canary would need weeks to see a single missed emergency. The emergency split puts 145 in front of every candidate; the whole gate takes about 1.6 s.
 
 - **Alternatives rejected.**
   - *Canary at 10% with auto-rollback.* There is no traffic to split, and a missed emergency would be discovered by harming a patient.
   - *A/B test on user feedback.* Patients cannot judge whether an escalation was clinically right.
 - **Constraint.** Data availability: there are no real calls and no labelled production traffic.
 - **Evidence.**
-  - `python -m scripts.shadow_compare --a v1 --b v5 --case-ids evals/reports/baseline-v0.case_ids.txt` scores the frozen 250 original items. Emergency recall goes 0.033 → 1.000 (58 → 0 missed). Over-escalation goes 0.083 → 0.094.
-  - The same comparison on the full 339 gives 106 → 0 missed and over-escalation 0.134 → 0.079.
+  - `python -m scripts.shadow_compare --a v1 --b v6 --case-ids evals/reports/baseline-v0.case_ids.txt` scores the frozen 250 original items. Emergency recall goes 0.033 → 1.000 (58 → 0 missed). Over-escalation goes 0.083 → 0.094: the cost column a canary would also have to show.
 - **Failure mode it creates.** The gate measures our own eval distribution, not live users. If live wording drifts away from the eval set, the gate stays green while recall drops.
 - **Mitigation.**
-  - Blind batteries (#8) measure recall on wording nobody tuned against. The current number is 42/50.
+  - Blind batteries (#8) measure recall on wording nobody tuned against. The current number is 44/50 (battery 3, blind to v6).
   - The online monitor (`GET /monitoring`) computes input drift against the eval set: PSI over the scope mix, OOV rate and length shift. It raises an alert at PSI > 0.2.
   - Any fresh miss becomes an eval item before the next release.
 
@@ -53,13 +52,13 @@ Every entry has the same five parts:
 **We chose** to make the merge-blocking check a deterministic slice with no secrets at all: the full Brain, offline heuristic Reasoner and Verifier twins, and temperature-free rails. **We chose this over** calling GPT-4o-mini in the blocking path, **because** a merge-blocking check has to be reproducible (same commit, same verdict), free, and available to fork PRs, which get no secrets. A check that flakes when the provider is slow or down gets switched off by annoyed humans, and that is how gates die.
 
 - **Alternatives rejected.**
-  - *LLM-in-CI on every PR.* About $0.0003 × 339 items × every push, plus provider nondeterminism and outages, would make the check unreliable.
+  - *LLM-in-CI on every PR.* About $0.0003 × 381 items × every push, plus provider nondeterminism and outages, would make the check unreliable.
   - *No CI eval, manual testing only.* That is exactly how baseline-v0 shipped with 58/60 emergencies missed.
 - **Constraint.** Cost: $20 in total. Reproducibility. Fork PRs carry no secrets.
 - **Evidence.**
-  - The gate runs in about 1.2 s wall on a laptop (`time python -m careline.services.eval_gate`). Per-case latency is p50 3.0 ms / p99 6.8 ms. Cost: $0.
-  - Replaying the commit that produced baseline-v0, `python -m scripts.shadow_compare --replay b8476c9`, exits with gate code 1: 58/60 missed.
-- **Failure mode it creates.** The keyless twins cannot paraphrase, so the keyless slice cannot measure answer quality. Keyless in-scope answer accuracy is **0.176**, and a change to a *prompt* (`prompts/reasoner/v1.md`) is not exercised by the twins.
+  - The gate runs in about 1.6 s wall on a laptop (`time python -m careline.services.eval_gate`). Per-case latency is p50 ≈ 3.9 ms / p99 ≈ 10 ms. Cost: $0.
+  - Replaying the tagged commit that produced baseline-v0, `python -m scripts.shadow_compare --replay baseline-v0`, exits with gate code 1: 58/60 missed.
+- **Failure mode it creates.** The keyless twins cannot paraphrase, so the keyless slice cannot measure answer quality. Keyless in-scope answer accuracy is **0.167** (0.176 on the 339 cases shared with v5), and a change to a *prompt* (`prompts/reasoner/v1.md`) is not exercised by the twins.
 - **Mitigation.**
   - In-scope accuracy is a regression-only gate: it must not drop against the baseline.
   - Prompt files are hash-stamped in `prompts/manifest.yaml`, and a mismatch fails at import, so a prompt change is always visible.
@@ -71,6 +70,7 @@ Every entry has the same five parts:
 **We chose** a deterministic, versioned emergency rail. It has several layers:
 
 - literal patterns;
+- since v6, de-obfuscation (letter-, hyphen- and dot-spaced words, leetspeak inside words) and a generic distress / help-seeking family;
 - a curated danger-phrase library scored by token coverage + character-trigram cosine (lexical, not semantic, despite the original plan's wording);
 - clause-scoped history, denial and media suppression;
 - Hinglish and typo normalisation;
@@ -84,18 +84,20 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - *Embedding classifier.* Model weights in a 512 MB container, plus nondeterminism across library versions.
   - *LLM as the pre-rail.* It needs a key, so it would not be keyless in CI, and it adds latency and cost before triage.
 - **Constraint.** Data availability, the free-tier 512 MB memory limit, and auditability.
-- **Evidence: the ceiling is real and we measured it.**
-  - Blind battery 2 (50 emergencies + 50 benign near-misses, written by an evaluator that never read the rail code) against v5: **recall 42/50 (84%)**, **false escalation 13/50 (26%)**, **0 emergencies answered**.
-  - Blind battery 1 against v4: 34/40 (85%) and 4/40 false escalation.
-  - Two independent batteries agree on a ceiling of roughly 84–85% for a keyless lexical rail.
+- **Evidence: the limit is real and we measured it.**
+  - Blind battery 3 (50 emergencies + 50 benign near-misses, written by an evaluator that never read the rail code) against v6: **recall 44/50 (88%)**, **false escalation 5/50 (10%)**, **0 emergencies answered** on the keyless path.
+  - Earlier batteries at the version each was blind to: battery 1 at v4 34/40 (85%); battery 2 at v5 42/50 (84%).
+  - On batteries those versions never saw, recall moves a few points per release: battery 3 scores 39/50 at v4, 41/50 at v5, 44/50 at v6. v5 did not materially move fresh-wording recall over v4; a lexical rail gains slowly on wording nobody has seen.
 - **Failure mode it creates.**
-  1. About 1 in 6 freshly worded emergencies is missed by the rail. Battery-2 misses include infant fever, a head injury on an anticoagulant, Hinglish ideation and anaphylaxis after a sting.
-  2. Over-escalation on hard benign near-misses is 26%, against 7.9% on the committed set.
+  1. About 1 in 8 freshly worded emergencies is missed by the rail. Battery-3 misses: indirect self-harm, Hinglish child poisoning, Hinglish GI bleed, Hinglish pre-eclampsia, cord prolapse, fever on chemotherapy.
+  2. Over-escalation on hard benign near-misses: 10% on battery 3 (fiction, news and past-event framing), 26% on battery 2, against 7.3% on the committed set.
+  3. On the LLM path a rail miss reaches the model. In a worst-case stand-in (always-confident reasoner, always-agreeing verifier) battery 3's six misses end in ANSWER.
 - **Mitigation.**
-  - A rail miss never becomes an ANSWER. Every miss in both batteries ended in a CLARIFY redirect, and every redirect ends with "If this is an emergency, call 112 (India) or your local emergency number now."
-  - A final gate invariant means no question containing a danger concept can end in ANSWER.
+  - On the keyless path a rail miss has never become an ANSWER (0 of 140 blind emergencies). Every miss ended in a CLARIFY redirect ending with "If this is an emergency, call 112 (India) or your local emergency number now."
+  - Redirects that name a danger concept or a present symptom are flagged `needs_review` and listed for the doctor (review queue, no page). That caught all 8 battery-2 misses at v5 but only 1 of battery 3's 6 at v6.
+  - A final gate invariant means no question containing a danger concept, or (v6) a present body-state report, can end in ANSWER; the citation veto (v6) blocks answers citing anything outside the valid slice.
   - On the LLM path the Reasoner classifies `red_flag` itself, a second, independent chance to escalate. That path is unmeasured until the live run.
-  - We disclose the ceiling instead of tuning the battery away.
+  - We disclose the limit instead of tuning the battery away.
 
 ## 4. Fail-closed ESCALATE over a best-effort answer
 
@@ -106,13 +108,14 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - *Retry with a different prompt until confident.* That amounts to optimising for an answer, not for safety.
 - **Constraint.** The safety rule.
 - **Evidence.**
-  - Gate on HEAD: 0 missed emergencies, 0 cross-patient leaks, 0 superseded leaks, 0 injection items answered, 0 ungrounded answers.
+  - Gate at v6: 0 missed emergencies, 0 cross-patient leaks, 0 superseded leaks, 0 injection items answered, 0 ungrounded answers.
 - **Cost of the decision (measured).** On the keyless spine, every medication-grounded in-scope answer escalates:
   - Medication facts carry risk weight 0.9 (`domain/scoring/risk.py`). A medication question scores risk **0.78**, above the **0.75** ceiling (`domain/thresholds.py`).
   - "What is the dose of my paracetamol?" returns `escalate` with "Risk too high (0.78)". We reproduced this with `POST /demo/ask`.
-  - Together with the twins' inability to paraphrase, this is why keyless in-scope accuracy is **0.176**. It is deliberate, not a bug.
+  - Together with the twins' inability to paraphrase, this is why keyless in-scope accuracy is **0.167**. It is deliberate, not a bug.
+  - The LLM path uses the same blend (0.7 × fact-kind weight + 0.3 × the proposal's own risk), so a medication answer passes only if the model reports risk ≤ 0.4. The reasoner prompt does not ask for that field and nothing calibrates it.
 - **Failure mode it creates.** Doctor-queue flooding trains clinicians to ignore escalations, which is itself a hazard.
-- **Mitigation.** Over-escalation is a hard gate (≤ 15%; 7.9% on HEAD). The online monitor tracks a low-risk-escalation proxy, and small talk and non-clinical questions are redirected rather than escalated (commit `7c8acf3`).
+- **Mitigation.** Over-escalation is a hard gate (≤ 15%; 7.3% at v6). The online monitor tracks a low-risk-escalation proxy, and small talk and non-clinical questions are redirected rather than escalated (commit `7c8acf3`).
 
 ## 5. Two LLM calls (Reasoner + independent Verifier) over one
 
@@ -134,14 +137,14 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 
 **We chose** gpt-4o-mini as the default Reasoner, Verifier and judge **over** gpt-4o, gpt-4.1-mini or Claude Haiku 4.5, **because** the model never decides the verdict. Deterministic gates decide; the model proposes a grounded sentence. With the budget at $20, the cheapest competent model buys the most eval runs.
 
-- **Alternatives rejected, using the same token estimate** (`python -m scripts.cost_report --model <m>`, answered request = Reasoner + Verifier, ESTIMATE):
+- **Alternatives rejected, using the same token estimate** (`python -m scripts.cost_report --model <m> --judge-model <m>`, answered request = Reasoner + Verifier, ESTIMATE, re-run 2026-10-08):
 
 | Model | Est. $ / answered request | Requests per $20 (worst type, incl. 20% judge) |
 |---|---|---|
 | **gpt-4o-mini** | **$0.000298** | **≈ 62,500** |
 | gpt-4.1-mini | $0.000794 | ≈ 23,463 |
-| claude-haiku-4-5 | $0.002185 | ≈ 8,536 |
-| gpt-4o | $0.004962 | ≈ 3,754 |
+| claude-haiku-4-5 | $0.002186 | ≈ 8,532 |
+| gpt-4o | $0.004965 | ≈ 3,752 |
 
 - **Constraint.** Cost: $20 in total, including dev iterations and the LLM eval slice.
 - **Failure mode it creates.** A weaker model may produce more unsupported paraphrases or misclassify scope. The judge is the same model family as the Reasoner, which risks self-preference bias.
@@ -153,7 +156,7 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 
 ## 7. Shared-case regression vs a committed baseline over a moving baseline (the v3 lesson)
 
-**We chose** to compare every enforced metric against a committed baseline JSON (`evals/reports/after-policy-v5.json`). The comparison is **recomputed over the case ids present in both runs**, using the `per_case` map in each report. On top of that:
+**We chose** to compare every enforced metric against a committed baseline JSON (`evals/reports/after-policy-v7.json`). The comparison is **recomputed over the case ids present in both runs**, using the `per_case` map in each report. On top of that:
 
 - a deleted baseline case fails the gate;
 - per-split minimum case counts are enforced (emergency ≥ 60, in_scope ≥ 80, out_of_scope ≥ 40, cross_patient ≥ 20, injection ≥ 30, superseded ≥ 20);
@@ -162,13 +165,13 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 **We chose this over** comparing aggregate rates against "whatever the last accepted run was", **because** aggregate comparisons can be gamed two ways: by growing or shrinking the denominator, or by bumping the baseline in the same push as the change.
 
 - **The lesson that forced it (v3).**
-  - Policy v3 (`16c741a`) raised over-escalation from 0.0707 to 0.09375 against the v2 baseline, a regression the gate should have blocked.
+  - Policy v3 (tag `release/red-flags-v3`) raised over-escalation from 0.0707 to 0.09375 against the v2 baseline, a regression the gate should have blocked.
   - It passed only because the same review batch (`1f7aaf2`) changed CI's `--baseline` from `after-policy-v2.json` to `after-policy-v3.json`.
   - The trade-off itself was defensible: we paid about 2 points of over-escalation for recall. The *process* was not, because nobody had to approve the override.
 - **Alternatives rejected.**
   - *Aggregate-only comparison.* It reads set growth as improvement.
   - *Absolute thresholds only.* A metric could slide from 7% to 14.9% unnoticed.
-- **Constraint.** Data growth: the set grew 250 → 287 → 329 → 339 across v4 and v5. The original 250 ids are frozen in `evals/reports/baseline-v0.case_ids.txt` so historical numbers stay reproducible (`--case-ids`).
+- **Constraint.** Data growth: the set grew 250 → 287 → 329 → 339 → 376 across v4, v5 and v6. v6 passed against the v5 baseline on 339 shared cases with 0 verdict changes, while its 37 new cases were gated by the absolute thresholds. The original 250 ids are frozen in `evals/reports/baseline-v0.case_ids.txt` so historical numbers stay reproducible (`--case-ids`).
 - **Failure mode that remains.** Someone can still edit the baseline JSON in a PR.
 - **Mitigation.**
   - A baseline bump is a visible diff in `backend/evals/reports/`.
@@ -185,16 +188,16 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - 42/42 was a development-set fit, not evidence. In the review's per-category re-run against the v2 snapshot, v2 caught 0/21 of its novel emergencies.
   - An ad-hoc fresh battery in that review escalated 14/32. That run is not committed, which is exactly why we moved to committed blind batteries.
 - **Protocol now** (`backend/evals/blind/README.md`):
-  - battery-1 was blind to v4 and scored 34/40;
-  - its misses then drove v5, so battery-1 is **dev data** from v5 onwards;
-  - battery-2 was blind to v5 and scored 42/50;
-  - the next release needs a fresh battery-3.
+  - battery-1 was blind to v4 and scored 34/40; its misses drove v5, so it is **dev data** from v5 on;
+  - battery-2 was blind to v5 and scored 42/50; its misses drove v6, so it is **dev data** from v6 on (50/50 at v6 is a fit);
+  - battery-3 was blind to v6 and scored 44/50;
+  - the next release needs a fresh battery-4.
 - **Alternatives rejected.**
   - *Keep growing the committed eval set and quote it.* It measures coverage of the wording families we wrote.
   - *A public benchmark.* None exists for post-consultation follow-up triage, and copying one is disallowed.
 - **Constraint.** Data availability: there is no independent labelled source of real patient phrasings.
-- **Failure mode it creates.** Small n. With 50 emergencies, 42/50 has a wide interval: the Wilson 95% interval is 71–92% (34/40 gives 71–93%). Each battery is also single-use.
-- **Mitigation.** We quote the battery number together with its n, alongside the second battery (34/40) for consistency, and treat the "~84%" as a ceiling estimate, not a guarantee.
+- **Failure mode it creates.** Small n. With 50 emergencies the Wilson 95% interval is wide: 44/50 gives 76–94%, 42/50 gives 72–92%, 34/40 gives 71–93%. Each battery is single-use, and all three were written by LLM evaluator agents, so their wording may be correlated.
+- **Mitigation.** We quote each battery number with its n and the version it was blind to. We do not read the similar numbers across batteries as robustness: they show a lexical rail that moves a few points per release on unseen wording.
 
 ## 9. Render free tier over Fly.io / Hugging Face Spaces
 
@@ -270,7 +273,7 @@ Public-demo and production mode refuse the shared dev password and refuse dev-de
 
 - **Constraint.** The safety rule: a release is multi-metric.
 - **Failure mode it creates.** The comparison is only as exact as the arm reconstruction. A non-active arm with v3+ context layers is rebuilt **approximately**, because those layers are code, not data. The report says so.
-- **Mitigation.** `--replay <commit>` runs that commit's own gate on its own tree (byte-exact). The v1 arm reproduces baseline-v0's 58/60 misses exactly on the frozen ids.
+- **Mitigation.** `--replay <tag>` (`baseline-v0`, `release/red-flags-v4`, `release/red-flags-v5`) runs that release's own gate on its own tree (byte-exact). The v1 arm reproduces baseline-v0's 58/60 misses exactly on the frozen ids.
 
 ## 14. Single-process budget guard over distributed rate limiting
 
@@ -295,7 +298,7 @@ Public-demo and production mode refuse the shared dev password and refuse dev-de
 |---|---|---|
 | Live auto-promote canary | Unmeasurable on demo traffic (#1) | Shadow comparison + gate (#13) |
 | Vector-DB corpus RAG | Retrieval here is per-patient fact *validity*, not corpus search | Citation-groundedness + leak metrics, stated explicitly |
-| Fine-tuned emergency model | No data, no GPU, not auditable | Versioned lexical + structural rail v1→v5 (#3) |
+| Fine-tuned emergency model | No data, no GPU, not auditable | Versioned lexical + structural rail v1→v6 (#3) |
 | vLLM self-hosting | No GPU; cost and ops with no accuracy gain at this scale | Hosted API (gpt-4o-mini) |
 | Prometheus/Grafana | 512 MB, one container | In-process monitor at `GET /monitoring` (#10) |
 | SSO | No IdP for a demo | Per-doctor PBKDF2 hashes + lockout (#12) |
