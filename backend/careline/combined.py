@@ -18,9 +18,13 @@ from __future__ import annotations
 # Load .env BEFORE importing the app, so the observability adapter (which reads
 # LANGSMITH_API_KEY at import time) sees it on the standard
 # ``uvicorn careline.combined:app --factory`` launch — without this, tracing is
-# imported before the key is in the environment and silently stays disabled. The
-# offline test suite never imports this module, so it remains keyless/trace-free.
-# Optional dependency — never fatal.
+# imported before the key is in the environment and silently stays disabled.
+# This IS an import-time side effect, and the offline suite does import this
+# module (tests/api/test_console_audit_bridge.py; create_app mounts the demo
+# routes from here). The suite stays keyless because tests/conftest.py blanks
+# the provider / DB / tracing keys and turns load_dotenv into a no-op before any
+# test module is imported. load_dotenv never overrides a variable that is
+# already set. Optional dependency — never fatal.
 try:  # pragma: no cover - trivial optional import wiring
     from dotenv import load_dotenv as _load_dotenv
 

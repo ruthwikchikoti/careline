@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-# Load backend/.env (OPENAI_API_KEY, etc.) before anything reads os.environ.
+# Load backend/.env (OPENAI_API_KEY, etc.) before anything reads os.environ —
+# needed by the standalone ``uvicorn careline.demo_server:app`` launch. This is
+# an import-time side effect and the suite imports this module, so
+# tests/conftest.py blanks the provider / DB / tracing keys and turns load_dotenv
+# into a no-op first (never overrides a variable that is already set).
 try:
     from dotenv import load_dotenv
 
