@@ -13,7 +13,8 @@ START → triage → retrieve → reason → verify → gate ─┬─ answer   
 
 The crucial design rule (and the project's core IP): **the graph re-implements no
 safety logic.** Every node calls the exact same domain primitive the Brain calls —
-``check_red_flag`` / ``check_multi_condition`` in *triage*, ``patient.valid_slice``
+the shared ``run_triage`` (red-flag rail, acute-concern net, multi-condition
+tripwire, small talk) in *triage*, ``patient.valid_slice``
 in *retrieve*, the injected ``Reasoner`` / ``Verifier`` ports in *reason* / *verify*,
 and ``run_gate_chain`` in *gate*. So the graph's verdict is identical to the Brain's
 by construction — a property the parity test (RU-5) locks down. Adding the graph can
@@ -34,15 +35,14 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from careline.domain.enums import ScopeCategory, TraceStatus
+from careline.domain.brain.triage import run_triage
+from careline.domain.enums import TraceStatus
 from careline.domain.gates.chain import GateContext, run_gate_chain
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient, ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
-from careline.domain.rails.conversational import is_small_talk
-from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.retrieval import retrieval_detail, retrieve_relevant
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
@@ -85,60 +85,11 @@ def _build_compiled(reasoner: Reasoner, verifier: Verifier):
     # -- nodes (each delegates to the same domain logic as the Brain) ---------
 
     def triage(state: GraphState) -> dict:
-        question = state["question"]
-        trace = state["trace"]
-
-        matched = check_red_flag(question)
-        if matched:
-            trace.record(
-                "red_flag_rail",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail=f"emergency keyword matched: {matched!r}",
-            )
-            return {
-                "decision": Decision.escalate(
-                    f"Emergency symptom detected ({matched}) — transferring to your doctor.",
-                    scope=ScopeCategory.RED_FLAG,
-                    risk=1.0,
-                    trace=trace,
-                )
-            }
-
-        is_cross, groups = check_multi_condition(question)
-        if is_cross:
-            trace.record(
-                "multi_condition_tripwire",
-                TraceStatus.TERMINAL,
-                spec_section="§5.3",
-                detail=f"question spans conditions: {', '.join(groups)}",
-            )
-            return {
-                "decision": Decision.escalate(
-                    "Question spans multiple clinical conditions — transferring to your doctor.",
-                    scope=ScopeCategory.CROSS_CONDITION,
-                    risk=0.95,
-                    trace=trace,
-                )
-            }
-
-        # Small talk → nudge conversationally (parity with Brain), never escalate.
-        if is_small_talk(question):
-            trace.record(
-                "conversational_rail",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail="non-clinical small talk — answering conversationally",
-            )
-            return {
-                "decision": Decision.clarify(
-                    "Hi! I can help with questions about your medicines, diet, or the "
-                    "care instructions your doctor approved. What would you like to know?",
-                    scope=ScopeCategory.ADMINISTRATIVE,
-                    trace=trace,
-                )
-            }
-        return {}
+        # The exact pre-LLM triage the Brain runs (one shared function — parity
+        # by construction): red-flag rail → acute-concern net (v4: every
+        # question) → multi-condition tripwire → small talk.
+        decision = run_triage(state["question"], state["trace"])
+        return {} if decision is None else {"decision": decision}
 
     def retrieve(state: GraphState) -> dict:
         # Layer-1 source of truth, then retrieval-augmented grounding over it.

@@ -155,7 +155,18 @@ _R3_HINGLISH_TYPO = [
     "she is having a seizur",
 ]
 
-_ALL_EMERGENCIES = _R1_MIXED + _R2_SCOPED_SUPPRESSION + _R3_VOCABULARY + _R3_HINGLISH_TYPO
+# -- Found while authoring the v4 eval items (after the first v4 patterns) --
+# "pass out" never matched v3's ``passed?\s+out`` (that is "passe"/"passed"),
+# and "can't speak in full sentences" fell under the semantic threshold.
+_FOUND_DURING_EVAL_AUTHORING = [
+    "my pulse is at 160 and I feel like I'm going to pass out",
+    "I have a history of asthma attacks and right now I can't speak in full sentences",
+]
+
+_ALL_EMERGENCIES = (
+    _R1_MIXED + _R2_SCOPED_SUPPRESSION + _R3_VOCABULARY + _R3_HINGLISH_TYPO
+    + _FOUND_DURING_EVAL_AUTHORING
+)
 
 
 @pytest.mark.parametrize("question", _ALL_EMERGENCIES, ids=lambda q: q[:48])

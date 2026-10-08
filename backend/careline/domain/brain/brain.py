@@ -3,7 +3,7 @@
 One question in, one terminal :class:`Decision` out. The Brain runs the safety
 spine end to end:
 
-    red-flag rail → multi-condition tripwire → valid slice → reasoner
+    red-flag rail → acute-concern net → multi-condition tripwire → valid slice → reasoner
     → (lazy) verifier → 5-gate chain → Decision + reasoning trace
 
 It is deliberately **headless**: no telephony, no audit, no session mutation, no
@@ -30,14 +30,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from careline.domain.enums import ScopeCategory, TraceStatus
+from careline.domain.enums import TraceStatus
 from careline.domain.gates.chain import GateContext, run_gate_chain
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient
 from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verifier
-from careline.domain.rails.conversational import is_small_talk
-from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
+from careline.domain.brain.triage import run_triage
 from careline.domain.retrieval import retrieval_detail, retrieve_relevant
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
@@ -78,55 +77,13 @@ class Brain:
         now = now or datetime.now(timezone.utc)
         trace = trace if trace is not None else ReasoningTrace()
 
-        # -- Pre-LLM triage: red-flag rail (bypasses the LLM entirely) ---------
-        matched = check_red_flag(question)
-        if matched:
-            trace.record(
-                "red_flag_rail",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail=f"emergency keyword matched: {matched!r}",
-            )
-            return Decision.escalate(
-                f"Emergency symptom detected ({matched}) — transferring to your doctor.",
-                scope=ScopeCategory.RED_FLAG,
-                risk=1.0,
-                trace=trace,
-            )
-
-        # -- Pre-LLM triage: multi-condition tripwire -------------------------
-        is_cross, groups = check_multi_condition(question)
-        if is_cross:
-            trace.record(
-                "multi_condition_tripwire",
-                TraceStatus.TERMINAL,
-                spec_section="§5.3",
-                detail=f"question spans conditions: {', '.join(groups)}",
-            )
-            return Decision.escalate(
-                "Question spans multiple clinical conditions — transferring to your doctor.",
-                scope=ScopeCategory.CROSS_CONDITION,
-                risk=0.95,
-                trace=trace,
-            )
-
-        # -- Pre-LLM triage: small talk → nudge, never escalate ---------------
-        # A greeting/pleasantry is not a clinical question; without this it would
-        # be classified out-of-scope and escalated to the doctor. Runs *after* the
-        # red-flag rail so "hey, I have chest pain" still escalates correctly.
-        if is_small_talk(question):
-            trace.record(
-                "conversational_rail",
-                TraceStatus.TERMINAL,
-                spec_section="§5.1",
-                detail="non-clinical small talk — answering conversationally",
-            )
-            return Decision.clarify(
-                "Hi! I can help with questions about your medicines, diet, or the "
-                "care instructions your doctor approved. What would you like to know?",
-                scope=ScopeCategory.ADMINISTRATIVE,
-                trace=trace,
-            )
+        # -- Pre-LLM triage (shared with the graph's triage node) -----------
+        # red-flag rail → acute-concern net → multi-condition tripwire → small
+        # talk. v4: both emergency nets run on EVERY question, so an emergency
+        # mixed into an in-scope question never reaches the Reasoner.
+        triaged = run_triage(question, trace)
+        if triaged is not None:
+            return triaged
 
         # -- Retrieve the currently-valid slice for this patient + now --------
         valid_slice = patient.valid_slice(now)
