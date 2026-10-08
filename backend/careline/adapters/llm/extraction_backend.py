@@ -15,21 +15,29 @@ The heuristic extractor remains the keyless offline fallback; the factory
 (:func:`careline.adapters.factory.build_extractor`) picks this adapter when an
 OpenAI backend is configured.
 
-Owner: Srujan (scope ``llm``). Default model: ``gpt-5.5``.
+Every call is recorded in :mod:`careline.adapters.llm.usage` as agent
+``"extractor"`` (failed calls included), so extraction spend shows up in the
+cost report next to the reasoner/verifier.
+
+Owner: Srujan (scope ``llm``). Default model: ``gpt-4o-mini``.
 """
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from careline.adapters.llm import prompts
+from careline.adapters.llm import usage as usage_recorder
 from careline.domain.ports.extraction import Extractor
 from careline.domain.ports.reasoning import ReasonerUnavailable
 from careline.services.extraction_service import ExtractedFactDTO, ExtractedRecord
 
-DEFAULT_MODEL = "gpt-5.5"
+# Budget-first default (budget cap ~$20) and present in the usage price table —
+# the previous unpriced default made extraction spend invisible.
+DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class _ExtractionDTO(BaseModel):
@@ -83,6 +91,8 @@ class OpenAIExtractor(Extractor):
             )
 
         client = self._ensure_client()
+        response = None
+        start = time.perf_counter()
         try:
             response = client.responses.parse(
                 model=self._model,
@@ -94,6 +104,14 @@ class OpenAIExtractor(Extractor):
             raise
         except Exception as exc:  # SDK / transport / validation — all fail closed
             raise ReasonerUnavailable(f"openai extraction failed: {exc}") from exc
+        finally:
+            usage_recorder.record(
+                agent="extractor",
+                model=self._model,
+                usage=getattr(response, "usage", None),
+                latency_ms=(time.perf_counter() - start) * 1000.0,
+                success=response is not None,
+            )
 
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:

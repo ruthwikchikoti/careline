@@ -36,6 +36,12 @@ data = [
     "motor>=3.4",
     "dnspython>=2.4",
 ]
+# Observability (optional): Langfuse per-turn traces. Set
+# CARELINE_LANGFUSE_PUBLIC_KEY / CARELINE_LANGFUSE_SECRET_KEY (and optionally
+# CARELINE_LANGFUSE_HOST) to enable; without keys the tracer is a no-op.
+obs = [
+    "langfuse>=2",
+]
 api = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",

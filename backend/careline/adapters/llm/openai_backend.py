@@ -11,7 +11,7 @@ imported lazily (it is an optional dependency), structured outputs only (never
 free-text parsing, never ``temperature``/``top_p``), and any SDK error or a
 ``None`` parse raises :class:`ReasonerUnavailable` so the Brain fails closed.
 
-Owner: Srujan (scope ``llm``). Default model: ``gpt-5.5``.
+Owner: Srujan (scope ``llm``). Default model: ``gpt-4o-mini`` (see ``DEFAULT_MODEL``).
 """
 
 from __future__ import annotations
