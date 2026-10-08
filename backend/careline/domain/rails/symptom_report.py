@@ -32,7 +32,11 @@ Precision guards (each is a measured trade, not a guarantee):
   "blood pressure", "confused about my dose", "bad breath");
 * a MILD qualifier ("a bit", "slightly", …) directly before a SOFT symptom
   (dizzy, drowsy, weak, nausea/vomiting) does not fire — but never softens a
-  red-flag symptom ("a bit of chest pain" still fires).
+  red-flag symptom ("a bit of chest pain" still fires);
+* v5: transient-and-resolved framing ("it passes in a second", "it's gone
+  now") softens only the mild ``dizziness`` label; "donate/give blood" is not
+  bleeding; a body part in a present-progressive clause ("chest is paining")
+  counts as an implicit subject.
 
 Provenance: the lexicon was driven by DEV probes (tests/brain/
 test_review_round2.py). Passing those probes is a fit, not generalisation
@@ -44,7 +48,7 @@ question containing any danger concept, suppressed or not, never ends in
 ANSWER.
 
 Deterministic, keyless, pure — mirrored into ``backend/policies/
-red-flags.v4.yaml`` (``context.symptom_report``) and held in sync by
+red-flags.v5.yaml`` (``context.symptom_report``) and held in sync by
 ``tests/llm/test_prompt_registry.py``.
 
 Owner: Priyanshu (scope ``safety``).
@@ -55,7 +59,9 @@ from __future__ import annotations
 import re
 
 from careline.domain.rails.acute_concern import (
+    MILD_RESOLVABLE_LABELS,
     check_acute_concern,
+    resolved_transient,
     strip_denials,
     unsuppressed_text,
 )
@@ -83,6 +89,9 @@ SUBJECT_PATTERNS: tuple[str, ...] = (
     r"\b(?:operation|surgery|surgical|op)\s+(?:site|wound|area)\b",
     # transliterated Hindi / Hinglish first/third person
     r"\b(?:mujhe|mujhko|mujh|mera|meri|mere|hamein|humein|humko|usko|unko|unhe|unhein)\b",
+    # v5: an implicit subject — a body part in a present-progressive clause
+    # ("sir chest is paining very much") is the caller's own report.
+    r"\b(?:chest|head|stomach|belly|tummy|heart|arm|leg|back|throat|body|hand|face)\s+(?:is|are|keeps?|has\s+been|started)\s+(?:\w+\s+){0,2}?\w+ing\b",
 )
 
 # Framing that names "me" without making the caller the subject of a symptom
@@ -107,7 +116,7 @@ SYMPTOM_PATTERNS: tuple[tuple[str, str], ...] = (
     ("chest", r"\b(?:pain\w*|ache|aching|hurt\w*|tight\w*|pressure|weight|crush\w*|squeez\w*|heav\w*|burning|discomfort|band)\b[^.]{0,30}\b(?:chest|breastbone|sternum|ribs|ribcage)\b|\b(?:chest|breastbone|sternum|ribs|ribcage)\b[^.]{0,30}\b(?:pain\w*|ache|aching|hurt\w*|tight\w*|pressure|weight|crush\w*|squeez\w*|heav\w*|burn\w*|discomfort)\b|\bbeing\s+crushed\b|\bcrushing\s+(?:pain|feeling|sensation|weight|pressure)\b|\belephant\s+(?:is\s+)?(?:sitting|standing)\s+on\b"),
     ("heart_distress", r"\bheart\b[^.]{0,30}\b(?:explod\w*|burst\w*|going\s+to\s+stop|stopp\w*|jump\w*\s+out)\b|\b(?:heart|pulse)\b[^.]{0,20}\b(?:racing|pounding|hammering|thumping|galloping)\b[^.]{0,60}\b(?:faint\w*|pass\w*\s+out|dizz\w*|collaps\w*|sweat\w*|breath\w*|chest)\b"),
     ("sweating", r"\b(?:drenched|soaked|pouring|dripping)\s+(?:in|with)\s+(?:sweat|perspiration)\b|\bcold\s+sweats?\b|\bclammy\b"),
-    ("bleeding", r"\bbleed\w*|\bh(?:a)?emorrhag\w*|\bgush\w*|\bspurt\w*|\bclots?\b|\bpool\s+of\b|\b(?:filling|full|filled)\s+(?:up\s+)?with\s+(?:bright\s+)?(?:red|blood)\b|\bsoak(?:ed|ing)\s+(?:through|in)\b|\bred\s+(?:right\s+)?through\b|\bblood\b(?!\s*-?\s*(?:tests?|pressure|sugars?|reports?|work|group|count|counts|levels?|readings?|results?|donation|draw|samples?|thinners?|bank|type|glucose|vessels?|cells?)\b)"),
+    ("bleeding", r"\bbleed\w*|\bh(?:a)?emorrhag\w*|\bgush\w*|\bspurt\w*|\bclots?\b|\bpool\s+of\b|\b(?:filling|full|filled)\s+(?:up\s+)?with\s+(?:bright\s+)?(?:red|blood)\b|\bsoak(?:ed|ing)\s+(?:through|in)\b|\bred\s+(?:right\s+)?through\b|(?<!donate )(?<!donating )(?<!donated )(?<!give )(?<!giving )(?<!gave )\bblood\b(?!\s*-?\s*(?:tests?|pressure|sugars?|reports?|work|group|count|counts|levels?|readings?|results?|donation|donors?|camp|drive|draw|samples?|thinners?|bank|type|glucose|vessels?|cells?)\b)"),
     ("gi_bleed", r"\b(?:black|tarry|tar[\s-]like|maroon)\b[^.]{0,25}\b(?:stools?|poo\w*|motions?|faeces|feces)\b|\b(?:stools?|poo\w*|motions?)\b[^.]{0,30}\b(?:black|tarry|like\s+tar|maroon)\b|\bcoffee[\s-]grounds?\b"),
     ("breathing", r"(?<!bad )(?<!deep )\bbreath\w*\b(?!\s+(?:exercises?|tests?|freshener|mints?))|\bwheez\w*|\bgasp\w*|\bchok\w*|\bsuffocat\w*|\b(?:short\s+of|out\s+of|gasping\s+for|struggling\s+for|fighting\s+for|can'?t\s+get\s+(?:any\s+|enough\s+)?)\s*air\b|\bgurgl\w*|\brattl\w*\s+(?:breath|chest|noise)|\bribs\s+(?:are\s+)?suck\w*\s+in\b|\bsaa?ns\b"),
     ("cyanosis", r"\b(?:lips?|face|fingers?|fingertips|nails?|skin|tongue)\b[^.]{0,20}\b(?:blue|bluish|grey|gray|greyish|grayish|purple|ashen)\b"),
@@ -162,11 +171,14 @@ def _has_subject(text: str) -> bool:
     return bool(_SUBJECT_RE.search(_GENERAL_RE.sub(" ", text)))
 
 
-def _scan(text: str) -> str | None:
+def _scan(text: str, *, resolved: bool = False) -> str | None:
     for label, rx in _SYMPTOM_RES:
         if rx.search(text):
             return label
     for label, rx in _SOFT_RES:
+        # v5: transient-and-resolved framing softens only the mild labels.
+        if resolved and label in MILD_RESOLVABLE_LABELS:
+            continue
         for m in rx.finditer(text):
             if not _MILD_BEFORE_RE.search(text[max(0, m.start() - 30) : m.start()]):
                 return label
@@ -194,7 +206,7 @@ def check_symptom_report(
             live = variant
         if not live or not _has_subject(live):
             continue
-        label = _scan(live)
+        label = _scan(live, resolved=context and resolved_transient(variant))
         if label is not None:
             return label
     return None

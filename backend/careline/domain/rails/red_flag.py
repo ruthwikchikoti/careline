@@ -30,6 +30,13 @@ impersonal definitional clauses suppress suppressible concepts, and "heart
 attack risk" is not an event. The structural backstop for phrasings no list
 anticipates is ``symptom_report.py``.
 
+Policy v5 (blind battery 1, 2026-10-08) adds ``_V5_PATTERNS``: intent-to-
+overdose / stockpiling (ideation), taken-overdose quantities >= 8 with a
+medicine noun (never denial-suppressed), Indian-English progressive pain verbs,
+Hinglish limb/speech/face deficits and chest pain with intervening adverbs,
+and accidental child / someone-else's medication incl. insulin + hypo signs.
+See ``policies/red-flags.v5.yaml``.
+
 Owner: Priyanshu (scope ``safety``).
 """
 
@@ -169,7 +176,60 @@ _V4_PATTERNS: tuple[tuple[str, str], ...] = (
     ("seizure", r"\bdaur[ae]\s+(?:pad|pada|padna|padne|aa|aaya|aya)\w*|\bmirgi\b"),
 )
 
-RED_FLAG_PATTERNS = RED_FLAG_PATTERNS + tuple(p for _, p in _V4_PATTERNS)
+# v5 additions (blind battery 1, 2026-10-08) as (concept, pattern). A blind
+# battery measured v4 at 34/40 recall; these are STRUCTURAL families for the
+# six misses (now dev data — tests/brain/test_blind1_battery.py), each written
+# to cover the neighbouring phrasings, not the battery strings.
+# A medicine noun: generic forms, common Indian brand names, and drug-name
+# suffix families (…pam, …olol, …pril, …statin, …profen, …pine, …).
+_MED_NOUN = (
+    r"(?:tablets?|pills?|capsules?|tabs|caps|meds|medicines?|medications?|painkillers?"
+    r"|sleeping\s+(?:pills?|tablets?)|sleepers|paracetamol|acetaminophen|ibuprofen|aspirin"
+    r"|crocin|dolo|calpol|combiflam|disprin|metformin|insulin|antidepressants?"
+    r"|\w+(?:azepam|zolam|olol|pril|sartan|statin|formin|etamol|profen|tyline|oxetine|pine|codone|adol))"
+)
+_CHILD = (
+    r"(?:child|kid|son|daughter|baby|toddler|grandson|granddaughter|grandchild|infant|boy|girl"
+    r"|nephew|niece|little\s+one)"
+)
+_HI_NEG = r"(?:nahi|nahin|nai|na)"
+_HI_LIMB = (
+    r"(?:haath|haat|hath|haathon|baazu|bazu|baju|pair|pairon|paon|paaon|pao|paav|taang|taangein"
+    r"|tang|ungli\w*)"
+)
+_V5_PATTERNS: tuple[tuple[str, str], ...] = (
+    # (a) Intent to overdose / stockpiling (ideation family: denial-stripped).
+    ("ideation", rf"\b(?:hoard\w*|stockpil\w*|stash\w*|squirrel\w*\s+away|sav(?:e|ed|ing)\s+up|(?:been|started|start)\s+(?:collect\w*|sav(?:e|ed|ing)|gather\w*|putting\s+aside|setting\s+aside))\s+(?:up\s+|away\s+)?(?:all\s+)?(?:of\s+)?(?:(?:my|his|her|their|the|some|these|those|a\s+lot\s+of|lots\s+of)\s+)?(?:\w+\s+){{0,2}}?{_MED_NOUN}\b(?![^.]{{0,30}}\b(?:from|at)\s+(?:the\s+)?(?:pharmacy|chemist|hospital|clinic|counter|dispensary|store|shop)\b)"),
+    ("ideation", rf"\b(?:i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna|going\s+to|plan\w*\s+to|want\s+to|ready\s+to|(?:night|day|time|moment)\s+(?:i|to)|she'?ll|he'?ll|(?:she|he|they)\s+will)\s+(?:just\s+)?(?:take|swallow|down|pop|eat|have)\s+(?:them\s+all|all\s+of\s+them|every\s+(?:single\s+)?(?:one|tablet|pill)|the\s+(?:whole|entire)\s+(?:\w+\s+)?(?:lot|strip|bottle|pack\w*|box|sheet|jar)|all\s+(?:of\s+)?(?:my|his|her|the|these|those)\s+(?:\w+\s+)?{_MED_NOUN}\s+(?:at\s+once|together|in\s+one\s+go|tonight|now))\b"),
+    ("ideation", r"\b(?:tonight|today)\s+is\s+the\s+(?:night|day)\b[^.]{0,40}\b(?:take|swallow|end|do\s+it|die|go)\b"),
+    ("ideation", r"\b(?:don'?t|do\s+not|can'?t|cannot|can\s+not)\s+see\s+(?:the\s+|any\s+)?point\s+(?:anymore|any\s*more|in\s+(?:anything|living|life|going\s+on|it\s+all|carrying\s+on)|of\s+(?:anything|living|life|going\s+on|it\s+all|carrying\s+on))\b|\b(?:what'?s|what\s+is)\s+the\s+point\s+(?:anymore|any\s*more|of\s+(?:living|life|anything|going\s+on|it\s+all|carrying\s+on))\b|\bno\s+point\s+(?:anymore|any\s*more|in\s+anything)\b"),
+    # (b) A TAKEN overdose quantity (>= 8) with a medicine noun. Literal
+    # concept: matched on the WHOLE message, so no denial elsewhere ("I don't
+    # want to die") can suppress it. Units (mg, ml, days, …) never count.
+    ("", rf"\b(?:took|taken|swallow\w*|ate|eaten|popped|consumed|downed|gulped|chugged|overdos\w*\s+on)\b[^.]{{0,20}}?\b(?:[89]|[1-9]\d+|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|hundred)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?\b(?!\s*(?:mg|mcg|ml|g|gm|grams?|milligrams?|units?|iu|%|am|pm|o'?clock|days?|weeks?|months?|hours?|hrs?|minutes?|mins?|years?))\s+(?:of\s+)?(?:(?:my|his|her|their|the|these|those)\s+)?(?:\w+\s+)?{_MED_NOUN}\b"),
+    # (c) Indian-English progressive pain verbs: "chest is paining", "paining a lot".
+    ("chest_pain_cardiac", r"\bchest\b[^.]{0,20}?\b(?:is|was|are|has\s+been|keeps?|started|been)\s+(?:\w+\s+){0,3}?(?:paining|hurting|aching|pressing|burning|squeezing|throbbing)\b|\b(?:paining|hurting|aching)\s+(?:a\s+lot|very\s+much|too\s+much|so\s+much|badly|bad|like\s+anything)\b[^.]{0,25}\bchest\b|\bchest\s+(?:\w+\s+)?paining\b"),
+    # (d) Hinglish limb / speech / face deficits, one side, sudden onset.
+    ("stroke", rf"\b{_HI_LIMB}\b[^.]{{0,30}}?\b(?:kaam\s+{_HI_NEG}\s+(?:kar|kr)\w*|hil(?:a)?\s+{_HI_NEG}|uth(?:a)?\s+{_HI_NEG}|chal\s+{_HI_NEG}|sun+\s+(?:ho|pad|pada|padh|gaya|gayi|gaye|hai|hain|lag)\w*|sunn\b|bejaan|be\s+jaan|kamzor\w*|latak\w*)"),
+    ("stroke", rf"\bbol\s+(?:bhi\s+)?{_HI_NEG}\s+(?:pa|paa|sak)\w*|\b(?:zubaan|zuban|zabaan|awaaz|aawaz|awaz)\b[^.]{{0,15}}\b(?:latak|ladkhad|ladkhaa|lad?khad|tutl|atak)\w*|\bbolne\s+(?:me|mein|mai|main)\s+(?:dikkat|dikat|taklif|takleef|pareshani)"),
+    ("stroke", r"\b(?:chehra|chehera|chera|muh|munh|moonh|mooh)\b[^.]{0,15}\b(?:tedha|tedhi|terha|terhi|tircha|tirchi|latak\w*|ek\s+(?:taraf|side))\b"),
+    ("stroke", rf"\bek\s+(?:side|taraf|hissa)\b[^.]{{0,40}}\b(?:kaam\s+{_HI_NEG}|sunn?\b|kamzor|lakw?a|latak\w*|hil\s+{_HI_NEG})|\blakwa\w*|\bachanak\b[^.]{{0,40}}\b(?:kamzor\w*|sunn?\b|behosh\w*|gir\s+(?:gaya|gayi|gaye|pad\w*)|kaam\s+{_HI_NEG}|bol\s+{_HI_NEG}|dikh\w*\s+(?:{_HI_NEG}|band))"),
+    # (d) Hinglish chest pain with up to three intervening tokens ("chest
+    # mein bahut tez dard", "dil mein bahut zyada dabav").
+    ("chest_pain_cardiac", r"\b(?:chest|seene?|sine|chhati|chhaati|chaati|chati|dil)\s+(?:me|mein|mai|mei|main|men|pe|par)\s+(?:\w+\s+){0,3}?(?:dard|dabav|dabaav|dabaw|jalan|bhaari|bhari|bhaaripan|pain|pressure|ghabrahat|khinchav|chubhan)\b"),
+    # (e) Accidental medication injection / ingestion by a child; someone
+    # else's medicine; insulin followed by hypoglycaemia signs.
+    ("", rf"\b{_CHILD}\b[^.]{{0,40}}?\b(?:inject\w*|jab\w*|prick\w*|found|got\s+hold\s+of|got\s+into|got\s+at|playing\s+with|played\s+with|used)\b[^.]{{0,40}}?\b(?:insulin|syringes?|needles?|injections?|injectors?|epi-?pens?)\b"),
+    ("", r"\b(?:inject\w*|jabb\w*|prick\w*)\s+(?:him|her|them)sel(?:f|ves)\b[^.]{0,40}?\b(?:insulin|pen|syringe|needle)\b|\b(?:insulin|syringes?|needles?|epi-?pens?|injectors?)\b[^.]{0,40}?\b(?:inject\w*|jabb\w*|prick\w*)\s+(?:him|her|them)sel(?:f|ves)\b"),
+    ("", rf"\b(?:took|taken|swallow\w*|ate|eaten|drank|inject\w*|used)\b[^.]{{0,20}}?\b(?:\w+'s|someone\s+else'?s|somebody\s+else'?s)\s+(?:\w+\s+)?(?:{_MED_NOUN}|pen|injection)\b"),
+    ("", r"\binsulin\b[^.]{0,60}?\b(?:sweat\w*|sleepy|drows\w*|shak\w*|shivery|trembl\w*|confus\w*|clammy|faint\w*|unresponsive|won'?t\s+wake|not\s+waking|fitting|jittery)\b|\b(?:sweaty|sleepy|drows\w*|shaky|trembl\w*|confus\w*|clammy|jittery)\b[^.]{0,40}?\b(?:after|since|from)\s+(?:the\s+|his\s+|her\s+|my\s+|an?\s+)?(?:insulin|injection)\b"),
+)
+
+RED_FLAG_PATTERNS = (
+    RED_FLAG_PATTERNS
+    + tuple(p for _, p in _V4_PATTERNS)
+    + tuple(p for _, p in _V5_PATTERNS)
+)
 
 # Concept map for the literal patterns — used by the v3 context suppression
 # (history/denial markers in acute_concern.py). Default pseudo-concept is the
@@ -187,7 +247,7 @@ _PATTERN_CONCEPTS: dict[str, str] = {
     r"suicid": "suicid",
     r"self[- ]?harm": "self_harm",
 }
-_PATTERN_CONCEPTS.update({p: c for c, p in _V4_PATTERNS if c})
+_PATTERN_CONCEPTS.update({p: c for c, p in _V4_PATTERNS + _V5_PATTERNS if c})
 
 _COMPILED_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (

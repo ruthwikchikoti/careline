@@ -3,7 +3,7 @@ name: CI
 # The release pipeline: every PR must keep the suite green AND pass the
 # deterministic eval gate (no secrets needed — fork PRs are gated too).
 # The gate compares against the newest accepted metrics committed in
-# backend/evals/reports/after-policy-v4.json. The comparison is per case: every
+# backend/evals/reports/after-policy-v5.json. The comparison is per case: every
 # enforced metric is recomputed over the case ids present in BOTH the baseline
 # and this run (the metrics JSON carries a per_case map), so growing the eval
 # set is never read as — or used to hide — a regression; new cases are gated
@@ -54,7 +54,7 @@ jobs:
       - name: Run the gate against the newest accepted metrics (shared-case comparison)
         run: |
           python -m careline.services.eval_gate \
-            --baseline evals/reports/after-policy-v4.json \
+            --baseline evals/reports/after-policy-v5.json \
             --json evals/reports/ci.json \
             --markdown evals/reports/ci.md
       - name: Publish gate report to the job summary

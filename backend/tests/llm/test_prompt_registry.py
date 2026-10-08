@@ -49,7 +49,7 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     )
 
     policy = yaml.safe_load(load_policy("red_flags").text)
-    assert policy["version"] == "v4"
+    assert policy["version"] == "v5"
     assert tuple(policy["patterns"]) == tuple(RED_FLAG_PATTERNS), (
         "policies/red-flags YAML and domain RED_FLAG_PATTERNS have drifted — "
         "update both together and bump the policy version in the manifest"
@@ -108,6 +108,18 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     assert list(MILD_QUALIFIERS) == sr["mild_qualifiers"]
     assert list(GENERAL_KNOWLEDGE_PATTERNS) == sr["general_knowledge_patterns"]
     assert SYMPTOM_REPORT_RISK == sr["risk"]
+    # v5 (blind battery 1): third-party/media framing spans and the
+    # transient-resolved markers (mild labels only) must mirror the domain too.
+    from careline.domain.rails.acute_concern import (
+        MILD_RESOLVABLE_LABELS,
+        RESOLVED_MARKERS,
+        THIRD_PARTY_FRAMING_MARKERS,
+    )
+
+    assert list(THIRD_PARTY_FRAMING_MARKERS) == ctx["third_party_framing_markers"]
+    resolved = ctx["transient_resolved"]
+    assert list(RESOLVED_MARKERS) == resolved["markers"]
+    assert sorted(MILD_RESOLVABLE_LABELS) == resolved["mild_labels"]
 
 
 def test_policy_artifact_hash_matches_manifest():

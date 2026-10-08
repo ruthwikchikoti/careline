@@ -150,8 +150,9 @@ def test_main_report_prints_eval_set_sha256(tmp_path, capsys):
 
 
 # v3 = the last baseline before the set grew (compared on the 250 shared case
-# ids); v4 = the newest accepted baseline, the one CI gates against.
-@pytest.mark.parametrize("name", ["after-policy-v3.json", "after-policy-v4.json"])
+# ids); v4 = the previous accepted baseline; v5 = the newest, the one CI gates
+# against.
+@pytest.mark.parametrize("name", ["after-policy-v3.json", "after-policy-v4.json", "after-policy-v5.json"])
 def test_main_passes_against_committed_baseline(name):
     path = eval_gate._BACKEND_ROOT / "evals" / "reports" / name
     assert eval_gate.main(["--baseline", str(path)]) == 0
