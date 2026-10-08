@@ -144,3 +144,30 @@ def test_render_blueprint_enables_public_demo_mode():
     assert "key: CARELINE_DOCTOR_PASSWORD" not in blueprint
     # The env var Settings actually reads is CARELINE_ENVIRONMENT.
     assert "key: CARELINE_ENV\n" not in blueprint
+
+
+# -- Langfuse patient-hash salt (QA Q22): a public default salt makes the hashed
+# patient ids in traces reversible by anyone who reads the repo. --------------
+
+
+def test_hardened_mode_refuses_default_trace_salt_when_langfuse_is_on(public_env):
+    monkeypatch = public_env
+    _set_strong(monkeypatch)
+    monkeypatch.setenv("CARELINE_LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("CARELINE_LANGFUSE_SECRET_KEY", "sk")
+    monkeypatch.delenv("CARELINE_TRACE_SALT", raising=False)
+    with pytest.raises(ValueError, match="CARELINE_TRACE_SALT"):
+        Settings(_env_file=None).assert_prod_safe()
+    monkeypatch.setenv("CARELINE_TRACE_SALT", "careline-trace")
+    with pytest.raises(ValueError, match="CARELINE_TRACE_SALT"):
+        Settings(_env_file=None).assert_prod_safe()
+    monkeypatch.setenv("CARELINE_TRACE_SALT", "a-real-deployment-salt-0f3c9")
+    Settings(_env_file=None).assert_prod_safe()
+
+
+def test_trace_salt_not_required_without_langfuse(public_env):
+    monkeypatch = public_env
+    _set_strong(monkeypatch)
+    monkeypatch.delenv("CARELINE_LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("CARELINE_TRACE_SALT", raising=False)
+    Settings(_env_file=None).assert_prod_safe()
