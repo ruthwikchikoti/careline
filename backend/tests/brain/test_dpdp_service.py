@@ -55,11 +55,11 @@ class _MemorySpy(LocalMemoryProvider):
 class _AuditSpy(AuditService):
     def __init__(self) -> None:
         super().__init__()
-        self.redact_calls: list[str] = []
+        self.redact_calls: list[tuple[str, str]] = []
 
-    def redact_patient(self, patient_id: str) -> int:
-        self.redact_calls.append(patient_id)
-        return super().redact_patient(patient_id)
+    def redact_patient(self, patient_id: str, *, doctor_id: str) -> int:
+        self.redact_calls.append((doctor_id, patient_id))
+        return super().redact_patient(patient_id, doctor_id=doctor_id)
 
 
 def _run(coro):
@@ -87,7 +87,8 @@ def test_erase_calls_layers_in_order():
     )
     assert repo.soft_delete_calls == [(patient.doctor_id, patient.patient_id)]
     assert memory.forget_calls == [(patient.doctor_id, patient.patient_id)]
-    assert audit.redact_calls == [patient.patient_id]
+    # Audit redaction is tenant-scoped like every other erasure layer (REVIEW-1).
+    assert audit.redact_calls == [(patient.doctor_id, patient.patient_id)]
 
 
 def test_erase_returns_layer_counts():
