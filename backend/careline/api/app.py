@@ -18,6 +18,7 @@ from careline.adapters.memory.local import LocalMemoryProvider
 from careline.adapters.mongo.supersession import plan_supersession
 from careline.api.errors import register_exception_handlers
 from careline.api.login_throttle import LoginThrottle
+from careline.api.routers.monitoring import router as monitoring_router
 from careline.api.routers import (
     auth_router,
     brain_router,
@@ -38,6 +39,7 @@ from careline.services.consultation_service import ConsultationService
 from careline.services.dpdp_service import DpdpService
 from careline.services.extraction_service import ExtractionService
 from careline.services.patient_lookup_service import PatientLookupService
+from careline.services import online_monitor
 from careline.services.question_service import QuestionService
 
 
@@ -276,6 +278,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.dpdp_svc = dpdp_svc
     app.state.mongo_client = mongo_client
 
+    # Drift reference for the online monitor (a keyless pass over the eval
+    # set): built once on a background thread so it never lands on the first
+    # request's thread; a failed build is cached and logged once, not retried.
+    online_monitor.warm_reference_async()
+
     yield
 
     if mongo_client is not None:
@@ -293,7 +300,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     # outermost. BudgetGuard is added first so CORS wraps it — its 429/503
     # rejections must carry CORS headers or a browser console can never read
     # the carefully-worded "daily demo cap" body.
-    if cfg.rate_limit_per_minute or cfg.daily_request_cap:
+    if cfg.rate_limit_per_minute or cfg.daily_request_cap or cfg.login_rate_limit_per_minute:
         from careline.api.rate_limit import BudgetGuardMiddleware
 
         app.add_middleware(
@@ -301,6 +308,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
             per_minute=cfg.rate_limit_per_minute,
             daily_cap=cfg.daily_request_cap,
             trusted_proxy_hops=cfg.trusted_proxy_hops,
+            login_per_minute=cfg.login_rate_limit_per_minute,
         )
 
     # CORS: localhost for dev; the public deploy sets CARELINE_ALLOWED_ORIGINS.
@@ -315,6 +323,12 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last so it is outermost: behind a trusted proxy (Render) take only
+    # the scheme from X-Forwarded-Proto, so generated redirects stay https.
+    if cfg.trusted_proxy_hops:
+        from careline.api.proxy_scheme import ForwardedProtoMiddleware
+
+        app.add_middleware(ForwardedProtoMiddleware, trusted_proxy_hops=cfg.trusted_proxy_hops)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict:
@@ -344,6 +358,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(brain_router)
     app.include_router(observability_router)
     app.include_router(patient_portal_router)
+    app.include_router(monitoring_router)  # GET /monitoring (doctor auth)
 
     # Mount the keyless Live-Console demo endpoints (`/demo/*`) here so the console
     # works against *any* entrypoint, not only `careline.combined`. They are a demo

@@ -4,8 +4,9 @@ The public deploy runs ``CARELINE_ENVIRONMENT=development`` so the demo console
 stays mounted — which meant :meth:`Settings.assert_prod_safe` never ran and the
 published dev-default secrets were accepted on a public URL. Public-demo mode
 keeps the demo routes but applies the production secret guard at startup:
-dev-default JWT / internal-key / PIN-HMAC secrets and the default (or a short)
-doctor password are refused.
+dev-default JWT / internal-key / PIN-HMAC secrets are refused, per-doctor
+credentials (``CARELINE_DOCTOR_CREDENTIALS``) are required, and the shared
+``CARELINE_DOCTOR_PASSWORD`` dev fallback is refused outright (SECURITY-2).
 
 Owner: Naresh (scope ``api``).
 """
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from careline.adapters.auth.hash_password import hash_password
 from careline.api.app import create_app
 from careline.config import Settings
 
@@ -24,7 +26,9 @@ _STRONG = {
     "CARELINE_JWT_SECRET": "public-demo-jwt-secret-at-least-32-bytes!!",
     "CARELINE_INTERNAL_API_KEY": "public-demo-internal-key-at-least-32-bytes",
     "CARELINE_PIN_HMAC_SECRET": "public-demo-pin-hmac-secret-32-bytes-min!",
-    "CARELINE_DOCTOR_PASSWORD": "a-long-random-doctor-password",
+    "CARELINE_DOCTOR_CREDENTIALS": (
+        f"dr-asha:{hash_password('a-long-random-doctor-password', iterations=1_000)}"
+    ),
 }
 
 
@@ -35,7 +39,7 @@ def public_env(monkeypatch):
     # Ignore any developer .env so only this test's environment counts.
     monkeypatch.setattr(app_module, "get_settings", lambda: Settings(_env_file=None))
     monkeypatch.setenv("CARELINE_PUBLIC_DEMO", "true")
-    for key in _STRONG:
+    for key in (*_STRONG, "CARELINE_DOCTOR_PASSWORD"):
         monkeypatch.delenv(key, raising=False)
     return monkeypatch
 
@@ -68,7 +72,7 @@ def test_public_demo_rejects_dev_default_jwt_secret(public_env):
     [
         ("CARELINE_INTERNAL_API_KEY", "internal_api_key"),
         ("CARELINE_PIN_HMAC_SECRET", "pin_hmac_secret"),
-        ("CARELINE_DOCTOR_PASSWORD", "doctor_password"),
+        ("CARELINE_DOCTOR_CREDENTIALS", "doctor_credentials"),
     ],
 )
 def test_public_demo_rejects_each_dev_default(public_env, missing, match):
@@ -77,9 +81,21 @@ def test_public_demo_rejects_each_dev_default(public_env, missing, match):
         Settings(_env_file=None).assert_prod_safe()
 
 
-def test_public_demo_rejects_a_short_doctor_password(public_env):
-    _set_strong(public_env, CARELINE_DOCTOR_PASSWORD="short")
+@pytest.mark.parametrize("shared", ["short", "an-otherwise-long-shared-password"])
+def test_public_demo_refuses_the_shared_doctor_password(public_env, shared):
+    """The shared password is a dev/demo-only fallback — set at all, it is refused."""
+    _set_strong(public_env, CARELINE_DOCTOR_PASSWORD=shared)
     with pytest.raises(ValueError, match="doctor_password"):
+        Settings(_env_file=None).assert_prod_safe()
+
+
+def test_public_demo_refuses_shared_password_without_per_doctor_credentials(public_env):
+    _set_strong(
+        public_env,
+        CARELINE_DOCTOR_CREDENTIALS=None,
+        CARELINE_DOCTOR_PASSWORD="an-otherwise-long-shared-password",
+    )
+    with pytest.raises(ValueError, match="doctor_"):
         Settings(_env_file=None).assert_prod_safe()
 
 
@@ -88,9 +104,17 @@ def test_public_demo_accepts_strong_config(public_env):
     Settings(_env_file=None).assert_prod_safe()
 
 
-def test_production_also_rejects_the_default_doctor_password(monkeypatch):
+def test_production_also_requires_per_doctor_credentials(monkeypatch):
     monkeypatch.setenv("CARELINE_ENVIRONMENT", "production")
-    _set_strong(monkeypatch, CARELINE_DOCTOR_PASSWORD=None)
+    monkeypatch.delenv("CARELINE_DOCTOR_PASSWORD", raising=False)
+    _set_strong(monkeypatch, CARELINE_DOCTOR_CREDENTIALS=None)
+    with pytest.raises(ValueError, match="doctor_credentials"):
+        Settings(_env_file=None).assert_prod_safe()
+
+
+def test_production_refuses_the_shared_doctor_password(monkeypatch):
+    monkeypatch.setenv("CARELINE_ENVIRONMENT", "production")
+    _set_strong(monkeypatch, CARELINE_DOCTOR_PASSWORD="prod-shared-password-long")
     with pytest.raises(ValueError, match="doctor_password"):
         Settings(_env_file=None).assert_prod_safe()
 
@@ -115,4 +139,8 @@ def test_render_blueprint_enables_public_demo_mode():
     assert "CARELINE_PUBLIC_DEMO" in blueprint
     block = blueprint[blueprint.index("CARELINE_PUBLIC_DEMO") :]
     assert 'value: "true"' in block.splitlines()[1]
-    assert "CARELINE_DOCTOR_PASSWORD" in blueprint
+    # Per-doctor credentials, never the shared dev-fallback password (SECURITY-2).
+    assert "CARELINE_DOCTOR_CREDENTIALS" in blueprint
+    assert "key: CARELINE_DOCTOR_PASSWORD" not in blueprint
+    # The env var Settings actually reads is CARELINE_ENVIRONMENT.
+    assert "key: CARELINE_ENV\n" not in blueprint

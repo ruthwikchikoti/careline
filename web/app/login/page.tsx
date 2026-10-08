@@ -26,6 +26,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const { access_token } = await login(doctorId.trim(), password);
+      setPassword("");
       setToken(access_token);
       router.push("/dashboard");
     } catch (err) {
@@ -83,7 +84,7 @@ export default function LoginPage() {
             <div className="mb-8">
               <h2 className="text-2xl font-semibold text-ink">Sign in</h2>
               <p className="mt-1.5 text-sm text-muted">
-                Enter your doctor ID and the clinic password to access the clinical workspace.
+                Enter your doctor ID and your own password to access the clinical workspace.
               </p>
             </div>
 
@@ -111,10 +112,10 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Clinic password"
+                  placeholder="Your password"
                 />
                 <p className="mt-1.5 text-xs text-muted">
-                  Set by the deployment (<code className="rounded bg-canvas px-1">CARELINE_DOCTOR_PASSWORD</code>).
+                  Each doctor ID has its own password, issued by your deployment admin.
                 </p>
               </div>
 

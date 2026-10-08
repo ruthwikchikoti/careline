@@ -11,6 +11,7 @@ Owner: Priyanshu (scope ``eval``).
 
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -141,9 +142,16 @@ class AuditService:
     With no ``store`` (offline/tests) it is pure in-memory, exactly as before.
     With a store (Mongo), the in-memory model is hydrated on startup and mirrored
     on every write, so the audit trail survives restarts.
+
+    Thread-safe (SECURITY-2): turns are logged from threadpool workers while
+    other workers clear/redact, so every mutation, list/dict rebind and
+    read-modify-write (a call's turn count) runs under one re-entrant lock, and
+    reads take a snapshot under it. Durable write-through happens *outside* the
+    lock so a slow store never serialises live turns.
     """
 
     def __init__(self, *, store: AuditStore | None = None) -> None:
+        self._lock = threading.RLock()
         self._turns: list[AuditTurnRecord] = []
         self._calls: dict[str, AuditCallRecord] = {}
         self._events: list[AuditEventRecord] = []
@@ -187,11 +195,13 @@ class AuditService:
 
     @property
     def turns(self) -> tuple[AuditTurnRecord, ...]:
-        return tuple(self._turns)
+        with self._lock:
+            return tuple(self._turns)
 
     @property
     def events(self) -> tuple[AuditEventRecord, ...]:
-        return tuple(self._events)
+        with self._lock:
+            return tuple(self._events)
 
     def log_turn(
         self,
@@ -218,19 +228,21 @@ class AuditService:
             risk=decision.risk,
             trace_steps=_trace_to_skeleton(decision.trace),
         )
-        self._turns.append(record)
+        updated: AuditCallRecord | None = None
+        with self._lock:
+            self._turns.append(record)
+            call = self._calls.get(call_id)
+            if call is not None:
+                updated = call.model_copy(
+                    update={
+                        "turn_count": call.turn_count + 1,
+                        "final_verdict": decision.verdict,
+                        "escalated": call.escalated or decision.verdict is Verdict.ESCALATE,
+                    }
+                )
+                self._calls[call_id] = updated
         self._persist_turn(record)
-
-        if call_id in self._calls:
-            call = self._calls[call_id]
-            updated = call.model_copy(
-                update={
-                    "turn_count": call.turn_count + 1,
-                    "final_verdict": decision.verdict,
-                    "escalated": call.escalated or decision.verdict is Verdict.ESCALATE,
-                }
-            )
-            self._calls[call_id] = updated
+        if updated is not None:
             self._persist_call(updated)
         return record
 
@@ -243,15 +255,17 @@ class AuditService:
         started_at: datetime | None = None,
     ) -> AuditCallRecord:
         """Open a call record (idempotent — returns existing if already logged)."""
-        if call_id in self._calls:
-            return self._calls[call_id]
-        record = AuditCallRecord(
-            call_id=call_id,
-            patient_id=patient_id,
-            doctor_id=doctor_id,
-            started_at=started_at or datetime.now(timezone.utc),
-        )
-        self._calls[call_id] = record
+        with self._lock:
+            existing = self._calls.get(call_id)
+            if existing is not None:
+                return existing
+            record = AuditCallRecord(
+                call_id=call_id,
+                patient_id=patient_id,
+                doctor_id=doctor_id,
+                started_at=started_at or datetime.now(timezone.utc),
+            )
+            self._calls[call_id] = record
         self._persist_call(record)
         return record
 
@@ -262,11 +276,14 @@ class AuditService:
         ended_at: datetime | None = None,
     ) -> AuditCallRecord | None:
         """Close a call record."""
-        call = self._calls.get(call_id)
-        if call is None:
-            return None
-        updated = call.model_copy(update={"ended_at": ended_at or datetime.now(timezone.utc)})
-        self._calls[call_id] = updated
+        with self._lock:
+            call = self._calls.get(call_id)
+            if call is None:
+                return None
+            updated = call.model_copy(
+                update={"ended_at": ended_at or datetime.now(timezone.utc)}
+            )
+            self._calls[call_id] = updated
         self._persist_call(updated)
         return updated
 
@@ -290,12 +307,13 @@ class AuditService:
             detail=detail,
             metadata=dict(metadata or {}),
         )
-        self._events.append(record)
+        with self._lock:
+            self._events.append(record)
         self._persist_event(record)
         return record
 
     def turns_for_call(self, call_id: str) -> list[AuditTurnRecord]:
-        return [t for t in self._turns if t.call_id == call_id]
+        return [t for t in self.turns if t.call_id == call_id]
 
     def turns_for_patient(self, *, doctor_id: str, patient_id: str) -> list[AuditTurnRecord]:
         """One patient's turns under one doctor — always tenant-keyed (REVIEW-1).
@@ -305,12 +323,12 @@ class AuditService:
         unscoped variant.
         """
         return [
-            t for t in self._turns if t.doctor_id == doctor_id and t.patient_id == patient_id
+            t for t in self.turns if t.doctor_id == doctor_id and t.patient_id == patient_id
         ]
 
     def turns_for_doctor(self, doctor_id: str) -> list[AuditTurnRecord]:
         """All logged turns for one doctor, newest first."""
-        turns = [t for t in self._turns if t.doctor_id == doctor_id]
+        turns = [t for t in self.turns if t.doctor_id == doctor_id]
         return sorted(turns, key=lambda t: t.logged_at, reverse=True)
 
     def escalations_for_doctor(self, doctor_id: str) -> list[AuditTurnRecord]:
@@ -318,10 +336,13 @@ class AuditService:
         return [t for t in self.turns_for_doctor(doctor_id) if t.verdict is Verdict.ESCALATE]
 
     def calls_for_doctor(self, doctor_id: str) -> list[AuditCallRecord]:
-        return [c for c in self._calls.values() if c.doctor_id == doctor_id]
+        with self._lock:
+            calls = list(self._calls.values())
+        return [c for c in calls if c.doctor_id == doctor_id]
 
     def get_call(self, call_id: str) -> AuditCallRecord | None:
-        return self._calls.get(call_id)
+        with self._lock:
+            return self._calls.get(call_id)
 
     # --- escalation resolution (human-in-the-loop reply) ---------------------
 
@@ -338,33 +359,33 @@ class AuditService:
         Returns ``None`` if the turn is unknown. The reply is keyed to the turn so
         the patient can be shown the answer to the exact question they asked.
         """
-        turn = next((t for t in self._turns if t.turn_id == turn_id), None)
-        if turn is None:
-            return None
-        record = AuditResolutionRecord(
-            turn_id=turn_id,
-            patient_id=turn.patient_id,
-            doctor_id=turn.doctor_id,
-            reply_text=reply_text,
-            resolved_by=resolved_by,
-            resolved_at=resolved_at or datetime.now(timezone.utc),
-        )
-        self._resolutions[turn_id] = record
+        with self._lock:
+            turn = next((t for t in self._turns if t.turn_id == turn_id), None)
+            if turn is None:
+                return None
+            record = AuditResolutionRecord(
+                turn_id=turn_id,
+                patient_id=turn.patient_id,
+                doctor_id=turn.doctor_id,
+                reply_text=reply_text,
+                resolved_by=resolved_by,
+                resolved_at=resolved_at or datetime.now(timezone.utc),
+            )
+            self._resolutions[turn_id] = record
         self._persist_resolution(record)
         return record
 
     def resolution_for(self, turn_id: str) -> AuditResolutionRecord | None:
-        return self._resolutions.get(turn_id)
+        with self._lock:
+            return self._resolutions.get(turn_id)
 
     def resolutions_for_patient(
         self, *, doctor_id: str, patient_id: str
     ) -> list[AuditResolutionRecord]:
         """One patient's doctor replies under one doctor — tenant-keyed (REVIEW-1)."""
-        return [
-            r
-            for r in self._resolutions.values()
-            if r.doctor_id == doctor_id and r.patient_id == patient_id
-        ]
+        with self._lock:
+            resolutions = list(self._resolutions.values())
+        return [r for r in resolutions if r.doctor_id == doctor_id and r.patient_id == patient_id]
 
     def clear_patient(self, *, doctor_id: str, patient_id: str) -> int:
         """Remove this patient's turns + doctor replies entirely (UI 'clear history').
@@ -379,9 +400,13 @@ class AuditService:
         def _mine(record: AuditTurnRecord | AuditResolutionRecord) -> bool:
             return record.doctor_id == doctor_id and record.patient_id == patient_id
 
-        before = len(self._turns)
-        self._turns = [t for t in self._turns if not _mine(t)]
-        self._resolutions = {tid: r for tid, r in self._resolutions.items() if not _mine(r)}
+        with self._lock:
+            before = len(self._turns)
+            self._turns = [t for t in self._turns if not _mine(t)]
+            self._resolutions = {
+                tid: r for tid, r in self._resolutions.items() if not _mine(r)
+            }
+            removed = before - len(self._turns)
         # Best-effort durable delete — keep the in-memory clear even if storage hiccups.
         if self._store is not None and hasattr(self._store, "delete_patient"):
             try:
@@ -390,7 +415,7 @@ class AuditService:
                 )
             except Exception:  # noqa: BLE001
                 pass
-        return before - len(self._turns)
+        return removed
 
     def redact_patient(self, patient_id: str, *, doctor_id: str) -> int:
         """DPDP erasure — null clinical text, keep audit skeleton.
@@ -399,31 +424,46 @@ class AuditService:
         one doctor's erasure request never rewrites another tenant's audit trail.
         Returns the number of records redacted (turns + calls).
         """
-        count = 0
-        redacted_turns: list[AuditTurnRecord] = []
-        for turn in self._turns:
-            if turn.doctor_id != doctor_id or turn.patient_id != patient_id or turn.redacted:
-                redacted_turns.append(turn)
-                continue
-            redacted = turn.model_copy(
-                update={
-                    "question": None,
-                    "answer_text": None,
-                    "escalation_reason": None,
-                    "redacted": True,
-                }
-            )
-            redacted_turns.append(redacted)
-            self._persist_turn(redacted)  # overwrite the durable copy too
-            count += 1
-        self._turns = redacted_turns
+        changed_turns: list[AuditTurnRecord] = []
+        changed_calls: list[AuditCallRecord] = []
+        with self._lock:
+            redacted_turns: list[AuditTurnRecord] = []
+            for turn in self._turns:
+                if (
+                    turn.doctor_id != doctor_id
+                    or turn.patient_id != patient_id
+                    or turn.redacted
+                ):
+                    redacted_turns.append(turn)
+                    continue
+                redacted = turn.model_copy(
+                    update={
+                        "question": None,
+                        "answer_text": None,
+                        "escalation_reason": None,
+                        "redacted": True,
+                    }
+                )
+                redacted_turns.append(redacted)
+                changed_turns.append(redacted)
+            self._turns = redacted_turns
 
-        for call_id, call in list(self._calls.items()):
-            if call.doctor_id == doctor_id and call.patient_id == patient_id and not call.redacted:
-                marked = call.model_copy(update={"redacted": True})
-                self._calls[call_id] = marked
-                self._persist_call(marked)
-                count += 1
+            for call_id, call in list(self._calls.items()):
+                if (
+                    call.doctor_id == doctor_id
+                    and call.patient_id == patient_id
+                    and not call.redacted
+                ):
+                    marked = call.model_copy(update={"redacted": True})
+                    self._calls[call_id] = marked
+                    changed_calls.append(marked)
+
+        # Overwrite the durable copies too (outside the lock — best-effort I/O).
+        for redacted in changed_turns:
+            self._persist_turn(redacted)
+        for marked in changed_calls:
+            self._persist_call(marked)
+        count = len(changed_turns) + len(changed_calls)
 
         self.log_event(
             AuditEventKind.ERASURE,

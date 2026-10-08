@@ -183,3 +183,83 @@ def test_dockerfile_does_not_trust_every_forwarded_ip():
     cmd = dockerfile[dockerfile.index("CMD") :]
     assert '"--forwarded-allow-ips", "*"' not in cmd
     assert "--no-proxy-headers" in cmd
+
+
+# --- SECURITY-2: login has its own per-IP window, separate from spend ---------
+
+
+def test_spend_requests_do_not_lock_a_user_out_of_signing_in():
+    """Using up the demo-ask minute budget must not block signing in."""
+    with TestClient(_app({"rate_limit_per_minute": 2})) as client:
+        for _ in range(3):
+            client.post("/demo/ask", json={"question": "q"})
+        assert client.post("/demo/ask", json={"question": "q"}).status_code == 429
+        login = client.post(
+            "/patient/login", json={"doctor_id": "d", "patient_id": "p", "pin": "123456"}
+        )
+        assert login.status_code != 429
+        token = client.post("/auth/token", json={"doctor_id": "dr-A", "password": "x"})
+        assert token.status_code != 429
+
+
+def test_logins_do_not_eat_the_spend_minute_budget():
+    with TestClient(_app({"rate_limit_per_minute": 2})) as client:
+        for _ in range(3):
+            client.post("/auth/token", json={"doctor_id": "dr-A", "password": "x"})
+        statuses = [
+            client.post("/demo/ask", json={"question": "q"}).status_code for _ in range(2)
+        ]
+        assert 429 not in statuses
+
+
+def _guard(**kw):
+    """Bare BudgetGuard around a trivial 200 app (no app.py wiring involved)."""
+    from careline.api.rate_limit import BudgetGuardMiddleware
+
+    async def ok_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    from starlette.applications import Starlette
+
+    shell = Starlette()
+    shell.add_middleware(BudgetGuardMiddleware, **kw)
+    shell.router.mount("/", ok_app)
+    return shell
+
+
+def test_login_window_has_its_own_configurable_limit():
+    with TestClient(_guard(per_minute=1, login_per_minute=3)) as client:
+        logins = [client.post("/auth/token").status_code for _ in range(4)]
+        assert logins == [200, 200, 200, 429]
+        # The spend window is untouched by those logins.
+        assert client.post("/demo/ask").status_code == 200
+        assert client.post("/demo/ask").status_code == 429
+
+
+def test_login_limit_alone_enables_the_guard():
+    with TestClient(_guard(login_per_minute=1)) as client:
+        assert client.post("/patient/login").status_code == 200
+        assert client.post("/patient/login").status_code == 429
+        # No spend limit configured: spend routes pass.
+        assert {client.post("/demo/ask").status_code for _ in range(3)} == {200}
+
+
+def test_login_limit_defaults_to_the_spend_limit_value():
+    with TestClient(_guard(per_minute=2)) as client:
+        assert [client.post("/auth/token").status_code for _ in range(3)] == [200, 200, 429]
+        assert [client.post("/demo/ask").status_code for _ in range(3)] == [200, 200, 429]
+
+
+def test_settings_expose_a_login_rate_limit(monkeypatch):
+    monkeypatch.setenv("CARELINE_LOGIN_RATE_LIMIT_PER_MINUTE", "10")
+    assert Settings(_env_file=None).login_rate_limit_per_minute == 10
+    monkeypatch.delenv("CARELINE_LOGIN_RATE_LIMIT_PER_MINUTE")
+    assert Settings(_env_file=None).login_rate_limit_per_minute is None
+
+
+def test_render_blueprint_sets_a_separate_login_rate_limit():
+    from pathlib import Path
+
+    blueprint = (Path(__file__).resolve().parents[3] / "render.yaml").read_text()
+    assert "CARELINE_LOGIN_RATE_LIMIT_PER_MINUTE" in blueprint

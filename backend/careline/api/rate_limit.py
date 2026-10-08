@@ -2,11 +2,15 @@
 
 Every POST to a spend-bearing endpoint (/demo/ask, /internal/run-question,
 /patient/ask) is a paid LLM call on a public URL. This ASGI middleware enforces
-two independent guards before the request reaches the router:
+independent guards before the request reaches the router:
 
-* **per-minute, per-IP** sliding window (``CARELINE_RATE_LIMIT_PER_MINUTE``) —
-  also applied to the login routes (/patient/login, /auth/token), which are
-  rate-limited but are not spend and never count toward the daily cap,
+* **per-minute, per-IP** sliding window (``CARELINE_RATE_LIMIT_PER_MINUTE``) on
+  the spend routes,
+* a **separate** per-minute, per-IP window for the login routes (/patient/login,
+  /auth/token; ``CARELINE_LOGIN_RATE_LIMIT_PER_MINUTE``, defaulting to the spend
+  value). Separate counters, so six demo asks never lock a user out of signing
+  in and logins never eat the spend budget; logins never count toward the daily
+  cap either (brute-force lockout lives in :mod:`careline.api.login_throttle`),
 * **hard daily cap** across the process (``CARELINE_DAILY_REQUEST_CAP``) — the
   belt that makes the ~$20 budget a guarantee rather than a hope. When the cap
   trips the demo endpoint answers 503 with a "daily demo cap reached" body:
@@ -47,7 +51,7 @@ _DAILY_CAP = json.dumps(
 
 
 class BudgetGuardMiddleware:
-    """Pure-ASGI middleware: per-IP minute window + process-wide daily cap."""
+    """Pure-ASGI middleware: per-IP minute windows (spend / login) + daily cap."""
 
     def __init__(
         self,
@@ -62,6 +66,7 @@ class BudgetGuardMiddleware:
         ),
         limit_only_prefixes: tuple[str, ...] = ("/patient/login", "/auth/token"),
         trusted_proxy_hops: int = 0,
+        login_per_minute: int | None = None,
     ) -> None:
         self.app = app
         self.per_minute = per_minute
@@ -69,7 +74,11 @@ class BudgetGuardMiddleware:
         self.spend_prefixes = spend_prefixes
         self.limit_only_prefixes = limit_only_prefixes
         self.trusted_proxy_hops = trusted_proxy_hops
+        # Login window: its own limit (None = mirror the spend limit) and its own
+        # counters, so the two budgets never drain each other.
+        self.login_per_minute = per_minute if login_per_minute is None else login_per_minute
         self._window: dict[str, deque[float]] = defaultdict(deque)
+        self._login_window: dict[str, deque[float]] = defaultdict(deque)
         self._daily_date: str = ""
         self._daily_count = 0
 
@@ -81,12 +90,15 @@ class BudgetGuardMiddleware:
             path.startswith(p) for p in self.limit_only_prefixes
         )
 
-    def _admit(self, ip: str, now: float) -> bool:
+    @staticmethod
+    def _admit(
+        table: dict[str, deque[float]], limit: int, ip: str, now: float
+    ) -> bool:
         """Per-IP sliding minute window: record and admit, or refuse."""
-        window = self._window[ip]
+        window = table[ip]
         while window and now - window[0] > 60.0:
             window.popleft()
-        if len(window) >= self.per_minute:
+        if len(window) >= limit:
             return False
         window.append(now)
         return True
@@ -114,20 +126,23 @@ class BudgetGuardMiddleware:
         path = scope.get("path", "")
         spend = self._is_spend(method, path)
         limit_only = not spend and self._is_limit_only(method, path)
-        if not (spend or limit_only) or (not self.per_minute and not self.daily_cap):
+        if limit_only:
+            # Login routes: their own per-IP window — not spend, never counted daily.
+            if self.login_per_minute:
+                ip = client_ip_from_scope(scope, trusted_hops=self.trusted_proxy_hops)
+                if not self._admit(
+                    self._login_window, self.login_per_minute, ip, time.monotonic()
+                ):
+                    await self._reject(send, 429, _TOO_MANY)
+                    return
+            await self.app(scope, receive, send)
+            return
+        if not spend or (not self.per_minute and not self.daily_cap):
             await self.app(scope, receive, send)
             return
 
         ip = client_ip_from_scope(scope, trusted_hops=self.trusted_proxy_hops)
         now = time.monotonic()
-
-        if limit_only:
-            # Login routes: per-IP window only — not spend, never counted daily.
-            if self.per_minute and not self._admit(ip, now):
-                await self._reject(send, 429, _TOO_MANY)
-                return
-            await self.app(scope, receive, send)
-            return
 
         # Daily cap (UTC date-keyed, process-wide).
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -138,7 +153,7 @@ class BudgetGuardMiddleware:
             return
 
         # Per-IP sliding minute window.
-        if self.per_minute and not self._admit(ip, now):
+        if self.per_minute and not self._admit(self._window, self.per_minute, ip, now):
             await self._reject(send, 429, _TOO_MANY)
             return
 

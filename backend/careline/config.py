@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from careline.adapters.auth.hash_password import parse_credentials
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
 # Dev-only sentinels — must be replaced in production (see assert_prod_safe).
@@ -22,10 +23,11 @@ from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 _DEFAULT_JWT_SECRET = "dev-jwt-secret-change-in-production!!"
 _DEFAULT_INTERNAL_API_KEY = "dev-internal-api-key-change-in-production!"
 _DEFAULT_PIN_HMAC_SECRET = "dev-pin-hmac-secret-change-in-prod!!"
-# Dev-only doctor login credential (REVIEW-2). Local dev signs in with it; any
-# hardened deploy (production / public demo) refuses to start while it is in use.
+# Dev-only shared doctor login credential (REVIEW-2). It is the explicit
+# dev/local-demo fallback only: it opens *every* doctor id, so any hardened deploy
+# (production / public demo) refuses to start while it is set at all and requires
+# per-doctor hashes in CARELINE_DOCTOR_CREDENTIALS instead (SECURITY-2).
 _DEFAULT_DOCTOR_PASSWORD = "careline-dev-doctor-password"
-_MIN_DOCTOR_PASSWORD_CHARS = 12
 _MIN_SECRET_BYTES = 32
 
 
@@ -88,8 +90,20 @@ class Settings(BaseSettings):
         default=_DEFAULT_DOCTOR_PASSWORD,
         min_length=1,
         description=(
-            "Per-deployment doctor login credential (CARELINE_DOCTOR_PASSWORD). "
-            "POST /auth/token mints a doctor JWT only when it matches."
+            "Shared dev/local-demo doctor password (CARELINE_DOCTOR_PASSWORD) — "
+            "a fallback used only when CARELINE_DOCTOR_CREDENTIALS is unset and the "
+            "deploy is not hardened. It opens any doctor id, so production / public "
+            "demo refuse it."
+        ),
+    )
+    doctor_credentials: str | None = Field(
+        default=None,
+        description=(
+            "Per-doctor login hashes (CARELINE_DOCTOR_CREDENTIALS): comma-separated "
+            "'doctor_id:<hash>' entries; generate a hash with "
+            "`python -m careline.adapters.auth.hash_password`. When set, only these "
+            "ids can sign in, each with its own password; required in production / "
+            "public demo."
         ),
     )
     doctor_ids: str | None = Field(
@@ -115,8 +129,18 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "Per-IP POST limit per minute on spend-bearing endpoints "
-            "(demo ask / internal run-question). 0 = off (dev default; the public "
-            "deploy sets it)."
+            "(demo ask / internal run-question / patient ask). 0 = off (dev "
+            "default; the public deploy sets it)."
+        ),
+    )
+    login_rate_limit_per_minute: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Per-IP POST limit per minute on the login routes (/auth/token, "
+            "/patient/login) — its OWN window, separate from the spend window, so "
+            "demo asks never lock a user out of signing in and logins never eat "
+            "the spend budget. Unset = same value as rate_limit_per_minute; 0 = off."
         ),
     )
     daily_request_cap: int = Field(
@@ -153,6 +177,14 @@ class Settings(BaseSettings):
         description="Lockout window after too many failed logins (seconds).",
     )
 
+    @field_validator("doctor_credentials")
+    @classmethod
+    def _validate_doctor_credentials(cls, value: str | None) -> str | None:
+        # Fail closed at load: a malformed table must stop startup, never be
+        # half-applied (parse_credentials raises ValueError on any bad entry).
+        parse_credentials(value)
+        return value
+
     @property
     def is_production(self) -> bool:
         """True when running in the production environment."""
@@ -175,6 +207,11 @@ class Settings(BaseSettings):
         """True while the published dev doctor credential is still configured."""
         return self.doctor_password == _DEFAULT_DOCTOR_PASSWORD
 
+    @property
+    def doctor_credential_map(self) -> dict[str, str]:
+        """Parsed ``doctor_credentials`` — ``{doctor_id: hash}`` (empty = unset)."""
+        return parse_credentials(self.doctor_credentials)
+
     def to_thresholds(self) -> Thresholds:
         """Build the frozen gate-chain thresholds from current settings."""
         return Thresholds(
@@ -191,8 +228,10 @@ class Settings(BaseSettings):
         ``confidence_floor`` or raising ``risk_ceiling`` beyond the baked-in
         defaults would let the agent answer when it should clarify or escalate.
         ``max_clarify_turns`` is unconstrained — lowering it is always safer.
-        The published dev-default secrets and doctor password are refused, since
-        anyone reading the repo could forge tokens or sign in with them.
+        The published dev-default secrets are refused, since anyone reading the
+        repo could forge tokens with them. Doctor sign-in must use per-doctor
+        hashes (``doctor_credentials``); the shared ``doctor_password`` — one
+        secret that opens every doctor id — is refused outright (SECURITY-2).
         """
         if not self.requires_hardened_config:
             return
@@ -237,16 +276,18 @@ class Settings(BaseSettings):
                 f"pin_hmac_secret must be at least {_MIN_SECRET_BYTES} bytes in production"
             )
 
-        if self.uses_default_doctor_password:
+        if not self.doctor_credential_map:
             raise ValueError(
-                "doctor_password must be set (CARELINE_DOCTOR_PASSWORD) — the dev "
-                "default is refused in production / public demo"
+                "doctor_credentials must be set (CARELINE_DOCTOR_CREDENTIALS, "
+                "per-doctor 'doctor_id:<hash>' entries) in production / public demo — "
+                "the shared CARELINE_DOCTOR_PASSWORD is a dev-only fallback"
             )
 
-        if len(self.doctor_password) < _MIN_DOCTOR_PASSWORD_CHARS:
+        if not self.uses_default_doctor_password:
             raise ValueError(
-                f"doctor_password must be at least {_MIN_DOCTOR_PASSWORD_CHARS} "
-                "characters in production / public demo"
+                "doctor_password (the shared CARELINE_DOCTOR_PASSWORD) is a dev/demo-"
+                "only fallback that opens every doctor id — unset it in production / "
+                "public demo and use CARELINE_DOCTOR_CREDENTIALS"
             )
 
 

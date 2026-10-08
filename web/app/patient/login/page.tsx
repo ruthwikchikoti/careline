@@ -59,6 +59,7 @@ export default function PatientLoginPage() {
               </label>
               <input
                 id="did"
+                autoComplete="organization"
                 value={doctorId}
                 onChange={(e) => setDoctorId(e.target.value)}
                 placeholder="e.g. dr-asha"
@@ -71,6 +72,7 @@ export default function PatientLoginPage() {
               </label>
               <input
                 id="pid"
+                autoComplete="username"
                 value={patientId}
                 onChange={(e) => setPatientId(e.target.value)}
                 placeholder="e.g. ravi-kumar"
@@ -85,6 +87,8 @@ export default function PatientLoginPage() {
                 id="pin"
                 type="password"
                 inputMode="numeric"
+                autoComplete="current-password"
+                maxLength={12}
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
                 placeholder="••••••"
@@ -104,7 +108,7 @@ export default function PatientLoginPage() {
           </form>
 
           <p className="mt-4 flex items-center gap-1.5 text-xs text-muted">
-            <Phone className="h-3.5 w-3.5" /> Demo: clinic <span className="font-medium text-ink">dr-asha</span>, patient ID <span className="font-medium text-ink">ravi-kumar</span>, PIN <span className="font-medium text-ink">from your seed run</span>
+            <Phone className="h-3.5 w-3.5" /> Demo: clinic <span className="font-medium text-ink">dr-asha</span>, patient ID <span className="font-medium text-ink">ravi-kumar</span>, PIN <span className="font-medium text-ink">the 6-digit PIN from your seed run</span>
           </p>
         </div>
 
