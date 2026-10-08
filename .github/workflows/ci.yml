@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # release tags (baseline-v0, release/red-flags-vN) for replay tests
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -45,6 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # release tags (baseline-v0, release/red-flags-vN) for replay tests
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -87,6 +91,8 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # release tags (baseline-v0, release/red-flags-vN) for replay tests
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
