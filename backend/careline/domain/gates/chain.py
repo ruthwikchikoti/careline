@@ -7,8 +7,9 @@ verdict is explainable after the fact.
 
 Gate order (defense-in-depth — gates only *downgrade*, never upgrade):
 
-1. **ScopeGate** — red-flag / acute concern (re-checked for EVERY scope,
-   v4) → ESCALATE; out-of-scope → fail-closed checks, else redirect (CLARIFY)
+1. **ScopeGate** — red-flag / acute concern / symptom report (re-checked for
+   EVERY scope, v4) → ESCALATE; out-of-scope → fail-closed checks, else
+   redirect (CLARIFY)
 2. **RiskGate** — risk > ceiling even at high confidence → ESCALATE
 3. **CrossConditionGate** — question spans ≥2 condition groups → ESCALATE
 4. **ConfidenceStalenessGate** — confidence < floor, empty/stale slice, or
@@ -18,6 +19,14 @@ Gate order (defense-in-depth — gates only *downgrade*, never upgrade):
 The chain only downgrades (ANSWER → CLARIFY → ESCALATE), never upgrades.
 This is the structural guarantee of the overriding rule: uncertainty always
 resolves toward escalation.
+
+**Final invariant (v4, round 2).** Before a turn is promoted to ANSWER, the
+question is scanned by every deterministic net with ALL context guards off
+(:func:`mentions_danger_concept`). Any danger concept — live, history-
+suppressed, hypothetical, denied, or about a pet — downgrades the ANSWER to a
+CLARIFY carrying the emergency line (ESCALATE once the clarify budget is
+spent). This holds for every scope, and for the Brain and the graph alike
+(both call :func:`run_gate_chain`).
 
 Owner: Priyanshu (scope ``safety``).
 """
@@ -36,6 +45,11 @@ from careline.domain.model.patient import ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.rails.acute_concern import check_acute_concern
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
+from careline.domain.rails.symptom_report import (
+    SYMPTOM_REPORT_RISK,
+    check_symptom_report,
+    mentions_danger_concept,
+)
 from careline.domain.scoring.confidence import compute_confidence
 from careline.domain.scoring.risk import compute_risk
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
@@ -137,6 +151,25 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
             f"your doctor. {EMERGENCY_LINE}",
             scope=ctx.proposal.scope,
             risk=0.9,
+            trace=ctx.trace,
+        )
+
+    report = check_symptom_report(ctx.question)
+    if report is not None:
+        ctx.trace.record(
+            "scope_gate",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=(
+                f"current symptom report ({report}) under scope "
+                f"{ctx.proposal.scope.value} — escalating rather than answering/redirecting"
+            ),
+        )
+        return Decision.escalate(
+            "Your message may describe an urgent symptom — transferring to your "
+            f"doctor. {EMERGENCY_LINE}",
+            scope=ScopeCategory.RED_FLAG,
+            risk=SYMPTOM_REPORT_RISK,
             trace=ctx.trace,
         )
 
@@ -420,6 +453,44 @@ def run_gate_chain(ctx: GateContext) -> Decision:
 
     if terminal is not None:
         return terminal
+
+    # -- Final invariant: a danger concept never ends in ANSWER ---------------
+    danger = mentions_danger_concept(ctx.question)
+    if danger is not None:
+        if ctx.call_session is not None and not ctx.call_session.can_clarify():
+            ctx.trace.record(
+                "danger_concept_invariant",
+                TraceStatus.TERMINAL,
+                spec_section="§5.1",
+                detail=(
+                    f"danger concept ({danger}) in the question and clarify budget "
+                    "exhausted — escalating instead of answering"
+                ),
+            )
+            return Decision.escalate(
+                f"Question mentions a danger concept ({danger}) — transferring to your doctor.",
+                scope=ctx.proposal.scope,
+                risk=compute_risk(ctx.proposal, ctx.valid_slice),
+                trace=ctx.trace,
+            )
+        ctx.trace.record(
+            "danger_concept_invariant",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=(
+                f"danger concept ({danger}) in the question (suppressed or not) — "
+                "never ANSWER; clarifying with the emergency line"
+            ),
+        )
+        return Decision.clarify(
+            "Your question mentions a symptom I can't safely assess here, so I "
+            "won't answer it directly — your doctor can. Is there something "
+            "specific about your approved medicines, diet or care instructions I "
+            f"can help with? {EMERGENCY_LINE}",
+            confidence=compute_confidence(ctx.proposal, ctx.verification, ctx.valid_slice),
+            scope=ctx.proposal.scope,
+            trace=ctx.trace,
+        )
 
     # -- All gates passed → ANSWER --------------------------------------------
     confidence = compute_confidence(ctx.proposal, ctx.verification, ctx.valid_slice)

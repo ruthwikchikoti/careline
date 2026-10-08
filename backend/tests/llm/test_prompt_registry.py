@@ -31,7 +31,7 @@ _STAMP_RE = re.compile(r"^[a-z_]+@v\d+\+[0-9a-f]{12}$")
 
 def test_all_registered_artifacts_load_and_stamp():
     versions = active_versions()
-    assert set(versions) == {"reasoner", "verifier", "extractor", "red_flags"}
+    assert set(versions) == {"reasoner", "verifier", "extractor", "judge", "red_flags"}
     for name, stamp in versions.items():
         assert _STAMP_RE.match(stamp), f"malformed stamp for {name}: {stamp}"
 
@@ -88,6 +88,26 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     assert list(PRESENT_MARKERS) == ctx["present_markers"]
     assert list(DENIAL_MARKERS) == ctx["denial_markers"]
     assert list(TYPO_CANONICAL_TOKENS) == policy["typo_normalisation"]["canonical_tokens"]
+    # v4 (round 2): non-human-subject segments + the structural symptom-report
+    # layer must mirror the domain too.
+    from careline.domain.rails.acute_concern import NON_HUMAN_SUBJECT_MARKERS
+    from careline.domain.rails.symptom_report import (
+        GENERAL_KNOWLEDGE_PATTERNS,
+        MILD_QUALIFIERS,
+        SOFT_SYMPTOM_PATTERNS,
+        SUBJECT_PATTERNS,
+        SYMPTOM_PATTERNS,
+        SYMPTOM_REPORT_RISK,
+    )
+
+    assert list(NON_HUMAN_SUBJECT_MARKERS) == ctx["non_human_subject_markers"]
+    sr = ctx["symptom_report"]
+    assert list(SUBJECT_PATTERNS) == sr["subject_patterns"]
+    assert dict(SYMPTOM_PATTERNS) == sr["symptom_patterns"]
+    assert dict(SOFT_SYMPTOM_PATTERNS) == sr["soft_symptom_patterns"]
+    assert list(MILD_QUALIFIERS) == sr["mild_qualifiers"]
+    assert list(GENERAL_KNOWLEDGE_PATTERNS) == sr["general_knowledge_patterns"]
+    assert SYMPTOM_REPORT_RISK == sr["risk"]
 
 
 def test_policy_artifact_hash_matches_manifest():

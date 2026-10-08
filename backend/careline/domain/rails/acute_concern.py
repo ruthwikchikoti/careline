@@ -11,7 +11,7 @@ safe to redirect**, even when no rail phrase matched. v4: the pre-LLM triage
 for every scope; a hit escalates. (At v3 it ran only on the out-of-scope
 branch, so "soft diet avoid spicy; I want to die" could be ANSWERED.)
 
-Three context guards keep the net precise (over-escalation is its own failure
+Context guards keep the net precise (over-escalation is its own failure
 mode, and the red team measured 19% benign FPs without them):
 
 * **Definitional exemption** — "what is vitamin C", "side effects of steroids
@@ -21,7 +21,17 @@ mode, and the red team measured 19% benign FPs without them):
   about the past or other people; also used by the rail to suppress
   suppressible-concept hits. v4: **clause-scoped** (see
   :func:`unsuppressed_text`) and overridden by any present-tense marker in
-  the same clause; hypothetical framing ("if I ever get…") is treated alike.
+  the same clause.
+* **Explicit future-hypothetical framing** (v4, round 2) — ONLY "if I ever",
+  "in case I ever", "what should I do if", "what happens if", "if I were to".
+  "when/whenever/if/should + I/my X + have/get/feel" is NOT hypothetical: it
+  is a RECURRING report ("when I have chest pain…") and stays live. And a
+  hypothetical clause is never silenced outright: the triage turns a hit
+  that only a hypothetical clause carries into a CLARIFY with the emergency
+  line (``domain/brain/triage.py``), never an ANSWER.
+* **Non-human subjects** (v4, round 2) — a comma/dash segment whose only
+  subject is an animal ("my cat passed out on the sofa") is dropped from the
+  live text.
 * **Denial markers** — "I do not want to end my life" must not fire the
   ideation rail; v4 strips only the denied phrase (:func:`strip_denials`),
   so a second, undenied ideation phrase or an overdose count still fires.
@@ -129,14 +139,26 @@ HISTORY_MARKERS: tuple[str, ...] = (
     r"nearly\s+(?:fainted?|collapsed|passed\s+out)", r"almost\s+(?:fainted?|collapsed|passed\s+out)",
 )
 
-# Conditional / hypothetical framing: "what should I do if I ever get chest
-# pain", "how many puffs when I feel breathless". Treated like history (it is
-# not happening now) — and, like history, overridden by any present marker.
+# EXPLICIT future-hypothetical framing only (v4, round 2). The unreleased v4
+# draft also listed "(if|when|whenever|in case|should) (I|my X|he|she|they)
+# (feel|get|have|…)" — that silenced RECURRING reports ("When I have chest
+# pain is my review still in 2 weeks?" was ANSWERED; sev-0). "when/whenever +
+# subject + have/get/feel" describes something that happens to the caller,
+# so it is a present report. A clause carrying one of these markers (and no
+# present marker) is "softened": the triage may downgrade its ESCALATE to a
+# CLARIFY that carries the emergency line — never to an ANSWER.
+_HYPO_SUBJECT = r"(?:i|we|my\s+\w+|he|she|they|someone)"
+_HYPO_VERB = (
+    r"(?:feel|feels|get|gets|have|has|develop\w*|start\w*|notice\w*|become\w*"
+    r"|experience\w*|faint|collapse|pass\s+out)"
+)
 HYPOTHETICAL_MARKERS: tuple[str, ...] = (
-    r"\b(?:if|when|whenever|in\s+case|should)\s+(?:i|my\s+\w+|he|she|they)\s+(?:ever\s+)?"
-    r"(?:feel|feels|get|gets|have|has|develop\w*|start\w*|notice\w*|become\w*|experience\w*)\b",
-    r"\bif\s+i\s+ever\b",
-    r"\bwhat\s+if\b",
+    rf"\bif\s+{_HYPO_SUBJECT}\s+ever\b",
+    rf"\bin\s+case\s+{_HYPO_SUBJECT}\s+ever\b",
+    rf"\bif\s+{_HYPO_SUBJECT}\s+(?:were|was)\s+to\b",
+    rf"\bwhat\s+(?:should|do|would|must|can)\s+(?:i|we)\s+do\s+if"
+    rf"(?:\s+{_HYPO_SUBJECT}(?:\s+ever)?(?:\s+{_HYPO_VERB})?)?\b",
+    rf"\bwhat\s+happens\s+if(?:\s+{_HYPO_SUBJECT}(?:\s+ever)?(?:\s+{_HYPO_VERB})?)?\b",
 )
 
 # Present-tense / happening-now markers. A clause carrying one is NEVER
@@ -170,10 +192,43 @@ DENIAL_MARKERS: tuple[str, ...] = (
     r"\b(?:not|never)\s+(?:self[- ]?harm\w*|harm(?:ed|ing)?\s+my\s*self)\b",
 )
 
+# A segment (split at commas and dashes inside a clause) whose subject is an
+# animal and which names no human subject is dropped from the live text:
+# "My cat passed out on the sofa after dinner, so cute — when is my
+# follow-up?" is not a report about a person. The danger-concept invariant
+# (symptom_report.mentions_danger_concept) still sees it, so such a message
+# can be redirected or clarified but never ANSWERED.
+NON_HUMAN_SUBJECT_MARKERS: tuple[str, ...] = (
+    r"\b(?:my|our|the|his|her|their|a)\s+(?:pet\s+|little\s+|old\s+)?(?:cats?|kittens?|kitty|dogs?"
+    r"|pupp(?:y|ies)|pups?|pets?|parrots?|birds?|budgies?|hamsters?|rabbits?|bunn(?:y|ies)"
+    r"|goldfish|fish|horses?|cows?|goats?|tortoises?|turtles?|guinea\s+pigs?)\b",
+)
+# Human subject tokens that keep a segment live even if an animal is named
+# ("my cat scratched me and I'm bleeding", "the dog bit my son"). Third-person
+# pronouns are deliberately absent: next to an animal they usually refer to it
+# ("my dog's breathing is noisy when he sleeps").
+_HUMAN_TOKEN_RE = re.compile(
+    r"\b(?:i|i'?m|im|i'?ve|me|myself|we|us|mujhe|mera|meri|mere"
+    r"|son|daughter|baby|child|kid|toddler|husband|wife|partner|mum|mom|mother|dad|father"
+    r"|grandson|granddaughter|grandmother|grandfather|brother|sister)\b",
+    re.IGNORECASE,
+)
+# Any personal reference — what makes a definitional clause NOT impersonal
+# ("what causes my chest pain?" stays live for the rail).
+_PERSONAL_RE = re.compile(
+    r"\b(?:i|i'?m|im|i'?ve|me|my|myself|we|us|our|he|she|him|her|his|they|them|their"
+    r"|mujhe|mera|meri|mere)\b",
+    re.IGNORECASE,
+)
+_SEGMENT_SPLIT = re.compile(r"\s*[,\u2014\u2013]\s*|\s+-{1,2}\s+")
+
 _HISTORY_RE = re.compile("|".join(f"(?:{p})" for p in HISTORY_MARKERS), re.IGNORECASE)
 _HYPOTHETICAL_RE = re.compile("|".join(f"(?:{p})" for p in HYPOTHETICAL_MARKERS), re.IGNORECASE)
 _PRESENT_RE = re.compile("|".join(f"(?:{p})" for p in PRESENT_MARKERS), re.IGNORECASE)
 _DENIAL_RE = re.compile("|".join(f"(?:{p})" for p in DENIAL_MARKERS), re.IGNORECASE)
+_NON_HUMAN_RE = re.compile(
+    "|".join(f"(?:{p})" for p in NON_HUMAN_SUBJECT_MARKERS), re.IGNORECASE
+)
 
 _CLAUSE_SPLIT = re.compile(
     r"[.;!?\n]+"
@@ -182,9 +237,14 @@ _CLAUSE_SPLIT = re.compile(
     re.IGNORECASE,
 )
 
-# Rail concepts whose hits history context can suppress. Acute-now concepts
-# (ideation, overdose/poisoning, breathing, anaphylaxis, bleeding) are NEVER
-# history-suppressible: "I tried to end my life last year" still escalates.
+# Rail concepts whose hits history context can suppress. In the RED-FLAG RAIL
+# (literal/structural regexes + semantic library) every other concept —
+# ideation, overdose/poisoning, breathing, anaphylaxis, bleeding — is matched
+# on the whole message (ideation on the denial-stripped text), so "I tried to
+# end my life last year" still escalates there. The acute-concern net below
+# is different: it matches ALL of its terms on the live text, so a history
+# clause does silence its "bleeding"/"breathless" terms (the rail and the
+# danger-concept invariant still see them).
 SUPPRESSIBLE_CONCEPTS: frozenset[str] = frozenset(
     {
         "reduced_consciousness", "cardiac_signs", "head_injury",
@@ -212,31 +272,76 @@ def split_clauses(question: str) -> list[str]:
 
 
 def _is_present(clause: str) -> bool:
-    # Hypothetical spans are removed first: "when I feel breathless" is not a
-    # present-tense report just because it contains "I feel".
+    # Only the EXPLICIT future-hypothetical framing span is removed first
+    # ("what should I do if I have chest pain" → the framing consumes "I have").
+    # Recurring "when I have / when I feel" is no longer a marker, so its
+    # "I have"/"I feel" stays and counts as present.
     return bool(_PRESENT_RE.search(_HYPOTHETICAL_RE.sub(" ", clause)))
 
 
-def _clause_suppressed(clause: str, *, definitional: bool) -> bool:
+def _clause_suppressed(
+    clause: str, *, definitional: bool, hypothetical: bool, impersonal_definitional: bool
+) -> bool:
     marked = bool(
         _HISTORY_RE.search(clause)
-        or _HYPOTHETICAL_RE.search(clause)
+        or (hypothetical and _HYPOTHETICAL_RE.search(clause))
         or (definitional and _DEFINITIONAL.search(clause))
+        or (
+            impersonal_definitional
+            and _DEFINITIONAL.search(clause)
+            and not _PERSONAL_RE.search(clause)
+        )
     )
     return marked and not _is_present(clause)
 
 
-def unsuppressed_text(question: str, *, definitional: bool = False) -> str:
-    """The question with history/hypothetical (and optionally definitional)
-    clauses removed — what suppressible concepts are matched against.
+def _drop_non_human_segments(clause: str) -> str:
+    """Drop comma/dash segments whose only subject is an animal."""
+    if not _NON_HUMAN_RE.search(clause):
+        return clause
+    kept = [
+        seg for seg in _SEGMENT_SPLIT.split(clause)
+        if seg and not (
+            _NON_HUMAN_RE.search(seg)
+            and not _HUMAN_TOKEN_RE.search(_NON_HUMAN_RE.sub(" ", seg))
+        )
+    ]
+    return ", ".join(kept)
+
+
+def unsuppressed_text(
+    question: str,
+    *,
+    definitional: bool = False,
+    hypothetical: bool = True,
+    impersonal_definitional: bool = False,
+) -> str:
+    """The question with history (and, by default, explicit future-
+    hypothetical; optionally definitional) clauses and animal-subject segments
+    removed — what suppressible concepts are matched against.
+
+    ``hypothetical=False`` keeps hypothetical clauses live: the triage uses it
+    to find danger that ONLY a hypothetical clause carries (→ CLARIFY with the
+    emergency line, never ANSWER). ``impersonal_definitional`` suppresses a
+    definitional clause only when it names no human subject ("What causes
+    chest pain in general?" but not "what causes my chest pain?").
 
     Clauses are re-joined with ". " so a cross-clause regex cannot bridge a
     suppressed clause into a live one.
     """
-    return ". ".join(
-        c for c in split_clauses(question)
-        if not _clause_suppressed(c, definitional=definitional)
-    )
+    live: list[str] = []
+    for c in split_clauses(question):
+        if _clause_suppressed(
+            c,
+            definitional=definitional,
+            hypothetical=hypothetical,
+            impersonal_definitional=impersonal_definitional,
+        ):
+            continue
+        c = _drop_non_human_segments(c)
+        if c:
+            live.append(c)
+    return ". ".join(live)
 
 
 def strip_denials(question: str) -> str:
@@ -245,7 +350,7 @@ def strip_denials(question: str) -> str:
 
 
 def history_suppressed(question: str) -> bool:
-    """True when EVERY clause of the question is history/hypothetical context
+    """True when EVERY clause of the question is history/explicit-hypothetical context
     (a whole-message convenience; the rails use the clause-scoped
     :func:`unsuppressed_text`)."""
     return bool(question) and not unsuppressed_text(question)
@@ -256,23 +361,32 @@ def denial_suppressed(question: str) -> bool:
     return bool(_DENIAL_RE.search(question or ""))
 
 
-def check_acute_concern(question: str) -> str | None:
+def check_acute_concern(
+    question: str, *, soften_hypothetical: bool = True, context: bool = True
+) -> str | None:
     """Return the first acute-distress term label if this is a first-person
     acute concern, else ``None``.
 
     Fires only when: first person present (patient describing themselves or
     family) AND an acute-distress term in a clause that is not definitional,
-    history or hypothetical context (unless that clause is present-tense).
-    v4: runs pre-LLM on EVERY question (Brain + graph triage), is re-checked
-    by the scope gate for every scope, and scans the original and the
-    typo-normalised text.
+    history or explicit-hypothetical context (unless that clause is
+    present-tense). v4: runs pre-LLM on EVERY question (Brain + graph triage),
+    is re-checked by the scope gate for every scope, and scans the original
+    and the typo-normalised text.
+
+    ``soften_hypothetical=False`` keeps explicit-hypothetical clauses live;
+    ``context=False`` disables every context guard (the danger-concept
+    invariant's "suppressed or not" view; first person is still required).
     """
     if not question:
         return None
     for text in text_variants(question):
         if not _FIRST_PERSON.search(text):
             continue
-        live = unsuppressed_text(text, definitional=True)
+        live = (
+            unsuppressed_text(text, definitional=True, hypothetical=soften_hypothetical)
+            if context else text
+        )
         if not live:
             continue
         for label, rx in _ACUTE_RES:
@@ -285,6 +399,7 @@ __all__ = [
     "ACUTE_TERM_PATTERNS",
     "HISTORY_MARKERS",
     "HYPOTHETICAL_MARKERS",
+    "NON_HUMAN_SUBJECT_MARKERS",
     "PRESENT_MARKERS",
     "DENIAL_MARKERS",
     "SUPPRESSIBLE_CONCEPTS",

@@ -3,7 +3,8 @@
 One question in, one terminal :class:`Decision` out. The Brain runs the safety
 spine end to end:
 
-    red-flag rail → acute-concern net → multi-condition tripwire → valid slice → reasoner
+    red-flag rail → acute-concern net → symptom-report layer → multi-condition tripwire
+    → (hypothetical-only danger: CLARIFY) → valid slice → reasoner
     → (lazy) verifier → 5-gate chain → Decision + reasoning trace
 
 It is deliberately **headless**: no telephony, no audit, no session mutation, no

@@ -12,8 +12,10 @@ Constraints (false positives are safe, but not free):
 
 * **Deterministic, keyless, tiny.** Optimal-string-alignment edit distance
   (Damerau: one transposition counts as one edit) over a short canonical list.
-* **Only long, distinctive tokens** (>= 6 letters) are fuzzily matched, with
-  distance <= 1 (<= 2 at >= 10 letters). Words whose one-edit neighbours are
+* **Only distinctive tokens** are fuzzily matched: an input token must have
+  >= 5 letters (``_snap`` skips shorter ones), and it snaps to a canonical
+  token (all canonical tokens are >= 7 letters) at distance <= 1 (<= 2 when
+  the canonical token has >= 10 letters). Words whose one-edit neighbours are
   everyday English were deliberately left OUT of the list — "fainted"
   (painted), "choking" (cooking), "wheezing" (sneezing).
 * **Bigram repairs** for the two short high-risk compounds: the token after
