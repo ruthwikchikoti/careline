@@ -14,7 +14,7 @@ Every command and expected output below was run on 8 Oct 2026 at `red_flags@v7+9
 | Doctor login (hardened) | Set `CARELINE_DOCTOR_CREDENTIALS='dr-asha:<hash>'` from `python -m careline.adapters.auth.hash_password --doctor-id dr-asha`, then log in with that password. Production and `CARELINE_PUBLIC_DEMO=true` refuse the shared password |
 | Patient login | `POST /patient/login` `{"doctor_id": "dr-asha", "patient_id": "ravi-kumar", "pin": "<6 digits>"}`. Web: `/patient/login`, fields *Clinic / doctor ID*, *Patient ID*, *PIN*. **Each patient has its own PIN**, printed once in a table by `python -m scripts.seed_demo` (random; with `CARELINE_DEMO_PIN` set, derived from it so the table repeats run to run). Seeding needs `CARELINE_MONGO_URI` |
 | Lockout | 5 wrong logins per account, or 20 per IP, lock out for 15 min, and a correct PIN then gets 429. **Don't fat-finger the PIN on stage**; restart the backend to clear it (the lockout is in memory) |
-| Monitoring | `GET /monitoring` with a doctor Bearer token (JSON). `scope` reads `"process-wide, aggregate, no PHI"` |
+| Monitoring | Dashboard: web **Monitoring** page, `http://localhost:3000/monitoring` (doctor sign-in; polls every 5 s; five sections, alerts banner, scope note). Raw JSON: `GET /monitoring` with a doctor Bearer token. `scope` reads `"process-wide, aggregate, no PHI"` |
 | Review queue | `GET /escalations` → `review`, `review_waiting`; web: Escalations page, "Redirected — please review" |
 | Langfuse | Optional. No project or keys exist yet, so **do not promise a trace link** |
 
@@ -48,6 +48,9 @@ Every command and expected output below was run on 8 Oct 2026 at `red_flags@v7+9
 ```bash
 cd careline/backend && source .venv/bin/activate
 export CARELINE_MONGO_URI= OPENAI_API_KEY= ANTHROPIC_API_KEY= LANGSMITH_API_KEY= LANGSMITH_TRACING=false
+# Judge every ANSWER on stage so the Quality tiles fill during warm-up (default 0.2
+# samples ~1 in 5; with a handful of answers it can show 'Not run yet').
+export CARELINE_JUDGE_SAMPLE_RATE=1.0
 uvicorn careline.combined:app --factory --port 8000
 ```
 Wait for `Application startup complete`. Then `curl -s localhost:8000/health` should print `{"status":"ok"}`, and `curl -s localhost:8000/api/meta` should show `"fictional_data":true`.
@@ -73,7 +76,7 @@ All commands run in Terminal B. Run them in this order and point at the listed l
 | 8:20 | `python -m careline.services.eval_gate --baseline evals/reports/after-policy-v6.json` | Table: `missed_emergencies 0`, `over_escalation_rate 0.073`, `in_scope_answer_accuracy (keyless twin) 0.167`, `intersection of 376 shared cases with the baseline; 5 new case(s)`, then `## Gate verdict: PASS ✅`. Header shows `red_flags@v7+93b8295ea3c0` | "This is the v7 candidate gated against the last accepted release, v6, case by case on the 376 cases they share. 381 items, under two seconds, no API key." |
 | 8:40 | `python -m scripts.shadow_compare --a v1 --b v7 --case-ids evals/reports/baseline-v0.case_ids.txt` | Recall 0.033 → 1.000; missed 58 → 0; over-escalation 0.083 → 0.094 (A better) | "This is our canary substitute. It shows the win **and** the cost column." |
 | 9:00 | `python -m scripts.score_blind evals/blind/battery-3.json` | `recall 44/50 (88.0%)`, `false escalation 5/50 (10.0%)`, `emergencies answered (worst case) 0`, then 6 MISS and 5 FALSE lines | "Battery 3 was written blind to v6, and nobody read it while building v7: 44/50 at both. 88% is the honest number. Every miss is a redirect that carries the 112 line; none was answered on this path. Only one of the six reaches the doctor's review queue, and on the LLM path we haven't measured it." Read the cord-prolapse MISS line (checked at v6; at v7 the MISS lines were deliberately not viewed while building — glance at the capture before going on stage) |
-| 9:20 | `curl -s localhost:8000/monitoring -H "Authorization: Bearer $T" \| python -m json.tool \| head -60` | `"scope": "process-wide, aggregate, no PHI"`, then sections `operational`, `output`, `quality` (keyless judge, `sample_rate 0.2`), `drift` (after warm-up: `scope-mix PSI … > 0.2`), `cost`, `alerts` | "Five categories, live. The drift alert is real: the load generator asks six questions in rotation, which looks nothing like our eval mix." |
+| 9:20 | `curl -s localhost:8000/monitoring -H "Authorization: Bearer $T" \| python -m json.tool \| head -60` | `"scope": "process-wide, aggregate, no PHI"`, then sections `operational`, `output`, `quality` (keyless judge, `sample_rate 0.2`), `drift` (after warm-up: `scope-mix PSI … > 0.2`), `cost`, `alerts` | "Five categories, live. The drift alert is real: the load generator asks six questions in rotation, which looks nothing like our eval mix." If the web app is running, show the same snapshot on the **Monitoring** page (`localhost:3000/monitoring`): latency p50/p95/p99 and $ per request tiles, verdict-mix bar, judge mode, drift banner. |
 
 **Optional extra beat (only if ahead of time): a block on a branch.** Do this in a scratch worktree, never on `main`. It shows a code change being blocked rather than a replay:
 ```bash
@@ -115,7 +118,7 @@ pip install -e ".[obs]"
 export CARELINE_LANGFUSE_PUBLIC_KEY=pk-... CARELINE_LANGFUSE_SECRET_KEY=sk-... CARELINE_LANGFUSE_HOST=https://cloud.langfuse.com
 # restart Terminal A, ask one question, open the trace: model, latency, per-turn cost, artifact stamps, salted patient hash
 ```
-Status today: **no project and no keys**. If asked, say: "Langfuse is wired and tested with a fake client; we have no project yet, so `/monitoring` and the usage JSONL are our evidence today."
+Status today: **no project and no keys**. If asked, say: "Langfuse is wired and tested with a fake client; we have no project yet, so the Monitoring dashboard page (`/monitoring`) and the usage JSONL are our evidence today."
 
 ## 6. Fallbacks
 

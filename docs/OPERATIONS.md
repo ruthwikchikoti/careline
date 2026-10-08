@@ -151,6 +151,8 @@ The table has one row per `/monitoring` section, in the endpoint's order. The "i
 | **`drift`** (includes input) | Scope-category mix PSI vs the eval reference, OOV-token rate vs the dev vocabulary, mean-length shift | PSI > 0.2 (`CARELINE_DRIFT_PSI`), OOV > baseline + 0.15, length shift > 50%; needs ≥ 30 turns | Sample recent questions; write a new blind battery from the drifted wording; re-score |
 | **`cost`** | Tokens and $ per request (Reasoner + Verifier + sampled judge), mean and p95 | **No alert.** The daily cap of 300 requests is a hard 429 in the budget guard, not a monitor alert | Investigate a spike in the usage JSONL (`CARELINE_USAGE_LOG`, `python -m scripts.cost_report --usage-log <file>`); lower caps |
 
+**Where visible.** The web app's **Monitoring** page (`/monitoring`, doctor sign-in, [`web/app/monitoring/page.tsx`](../web/app/monitoring/page.tsx)) is the observability dashboard. It polls `GET /monitoring` every 5 s and lays out the five sections above: **Operational** (latency p50/p95/p99 tiles and a latency trend for the browser session, error and fail-closed rate, throughput), **Output** (verdict-mix bar, escalation rate, low-risk-escalation proxy), **Quality** (judge mode keyless or LLM, judged samples, faithfulness rate), **Input & drift** (reference status, PSI, OOV rate, length shift, drift flag) and **Cost** (tokens and $ per request, mean and p95, window total). Active `alerts[]` appear as a banner, the `scope` note is shown on the page, and every section has an empty state before the first turn. The raw JSON stays available at `GET /monitoring` for scripts. Langfuse traces (below) are optional.
+
 Offline quality is separate from `/monitoring`: the CI gate (8 absolute gates + regression + split floors on 381 items; the LLM slice adds in-scope accuracy ≥ 0.85 and judge faithfulness ≥ 0.90) publishes to the CI job summary, the `eval-gate-report` artifact and `evals/reports/*.md`.
 
 **Online judge sampling.** `CARELINE_JUDGE_SAMPLE_RATE` (default 0.2) of ANSWER turns are judged on a background thread. A full queue drops samples (counted) and never blocks. Without a key, the deterministic keyless judge twin runs, so the pipeline is exercised offline. **The live gpt-4o-mini judge has never run.**
@@ -174,7 +176,7 @@ Offline quality is separate from `/monitoring`: the CI gate (8 absolute gates + 
 
 **Pending:** no Langfuse project or keys exist, so there is no trace link. The Docker image does not install `obs` yet.
 
-**What is missing.** No pager or push alerting (alerts are visible when polled), no history beyond the window, and no dashboard UI for `/monitoring` (it is JSON).
+**What is missing.** No pager or push alerting (alerts are visible when polled, on the Monitoring page or the JSON), and no history beyond the window (the page's latency trend covers only the current browser session).
 
 ## 6. What breaks at 10× and how we would scale
 

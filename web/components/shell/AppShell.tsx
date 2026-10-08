@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   ClipboardList,
+  Gauge,
   LayoutDashboard,
   MessageSquareText,
   ShieldAlert,
@@ -30,6 +31,7 @@ const NAV = [
   { href: "/escalations", label: "Escalations", icon: ShieldAlert, ready: true, owner: "Priyanshu" },
   { href: "/audit", label: "Audit", icon: Activity, ready: true, owner: "Priyanshu" },
   { href: "/eval", label: "Eval", icon: TestTube2, ready: true, owner: "Priyanshu" },
+  { href: "/monitoring", label: "Monitoring", icon: Gauge, ready: true, owner: "Naresh" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
