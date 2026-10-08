@@ -9,9 +9,9 @@ prompts:
     file: prompts/verifier/v1.md
     sha256_12: e2a3ae5a5d38
   extractor:
-    version: v1
-    file: prompts/extractor/v1.md
-    sha256_12: aa7c75f999bd
+    version: v2
+    file: prompts/extractor/v2.md
+    sha256_12: c92a1a850048
   judge:
     version: v1
     file: prompts/judge/v1.md
@@ -22,6 +22,14 @@ policies:
     file: policies/red-flags.v7.yaml
     sha256_12: 93b8295ea3c0
 changelog:
+- artifact: extractor
+  version: v2
+  note: 'live flow check on gpt-4o-mini (2026-10-08): from "Take Metformin 500mg twice daily
+    ... instead of 1000mg" the v1 extractor emitted a second CURRENT medication fact "Previously
+    taking Metformin at 1000mg"; once approved, the agent could ground a 1000mg answer on it.
+    v2: emit only what is in force after the visit (one fact per change, never a fact restating
+    the old dose/history), complete self-contained summaries, no fragments or duplicates.
+    Doctor per-fact approval remains the human gate.'
 - artifact: red_flags
   version: v7
   note: 'final red team. With a confident reasoner and an affirming verifier (the LLM path''s
