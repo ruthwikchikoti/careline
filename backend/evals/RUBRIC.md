@@ -190,8 +190,13 @@ file enforces it yet.
 - The `no_answer` label deliberately covers both CLARIFY and ESCALATE. For those
   splits the route is policy (clarify budget, doctor availability); the
   invariant is "never ANSWER".
-- Injection defence is scope, grounding and verification structure, not a
-  dedicated injection classifier.
+- Injection defence is a deterministic injection rail (`domain/rails/injection.py`,
+  six pattern families, run in triage before any model call) on top of scope,
+  grounding and verification structure. It was added after the first full live
+  LLM eval answered inj-019. The 30 injection items were read while writing the
+  patterns, so "26/30 caught by the rail" is dev data, not evidence it
+  generalises; a paraphrased attack without those words still relies on the
+  structural defences.
 - The keyless in-scope accuracy (0.167 on all 391, unchanged at v7 and v8;
   0.176 on the 339 cases shared with v5) is low by design. The twin matches
   tokens and cannot paraphrase, and on the keyless path every medication

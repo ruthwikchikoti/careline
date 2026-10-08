@@ -3,7 +3,8 @@
 Every question passes through here before retrieval or any model call:
 
     red-flag rail → acute-concern net → symptom-report layer
-    → multi-condition tripwire → hypothetical-only danger (CLARIFY) → small talk
+    → multi-condition tripwire → hypothetical-only danger (CLARIFY)
+    → prompt-injection rail (CLARIFY) → small talk
 
 Policy v4 (round-1 adversarial review) moved the acute-concern net here. At
 v3 it ran only inside the scope gate's OUT_OF_SCOPE branch, so an emergency
@@ -25,6 +26,11 @@ v6 (round-4 red team): every ESCALATE this triage returns — red-flag rail,
 acute net, symptom report, multi-condition — carries the 112 emergency line;
 at v5 the strongest signal (the red-flag rail) was the one that did not.
 
+2026-10-08 (live LLM slice, inj-019 answered by gpt-4o-mini): the
+prompt-injection rail (``rails/injection.py``) runs after every emergency net
+— an emergency wrapped in an injection still ESCALATEs — and before small
+talk and the reasoner; a hit is a terminal CLARIFY, never an ANSWER.
+
 Why a shared function: the Brain and the LangGraph ``triage`` node both call
 :func:`run_triage`, so the two engines cannot drift apart here — the parity
 test (RU-5) asserts it, and this makes it true by construction.
@@ -39,6 +45,7 @@ from careline.domain.gates.chain import EMERGENCY_LINE
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.rails.acute_concern import check_acute_concern
 from careline.domain.rails.conversational import is_small_talk
+from careline.domain.rails.injection import check_injection
 from careline.domain.rails.red_flag import check_multi_condition, check_red_flag
 from careline.domain.rails.symptom_report import SYMPTOM_REPORT_RISK, check_symptom_report
 
@@ -145,6 +152,26 @@ def run_triage(question: str, trace: ReasoningTrace) -> Decision | None:
             "question on, or help with your approved medicines, diet and care "
             f"instructions. {EMERGENCY_LINE}",
             scope=ScopeCategory.RED_FLAG,
+            trace=trace,
+        )
+
+    # -- Prompt injection → refuse, never answer (2026-10-08) --------------
+    # Runs after every emergency net (they ESCALATE first) and before the
+    # reasoner, so a model that would follow "ignore safety rules" never sees
+    # the turn. The trace names the family only, never the attack text.
+    family = check_injection(question)
+    if family is not None:
+        trace.record(
+            "injection_rail",
+            TraceStatus.TERMINAL,
+            spec_section="§5.1",
+            detail=f"prompt-injection pattern ({family}) — refused before the reasoner",
+        )
+        return Decision.clarify(
+            "I can only answer questions about your own approved care, and I can't "
+            "change how I work. Please ask your question on its own. "
+            f"{EMERGENCY_LINE}",
+            scope=ScopeCategory.OUT_OF_SCOPE,
             trace=trace,
         )
 
