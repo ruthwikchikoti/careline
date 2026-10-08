@@ -94,28 +94,19 @@ is green with or without a developer `.env`.
   commit: no `Co-Authored-By` trailers, session links or "generated with" lines.
 
 ## Status (2026-10-08)
-Active: `red_flags@v7+93b8295ea3c0` (on disk, not yet committed or tagged; v6
-is also uncommitted), reasoner/verifier/extractor/judge v1. The 381-item gate
-passes, and against the v6 baseline it passes with 0 verdict changes on the 376
-shared cases. CI baseline: `after-policy-v7.json`. Keyless suite: 1512 passed,
-2 skipped (with or without the env prefix). v7 adds the final red-team rail
-families and a deterministic **answer-text grounding check** in the gate chain
-(every dose / number / drug name in an ANSWER must appear in a cited current
-fact). Blind battery 3 (blind to v6 and v7): 44/50 recall, 5/50 false
-escalation, 0 emergencies answered on the keyless path at both versions.
-Battery 2 is dev data from v6 on (its honest number stays 42/50 at v5). On a
-worst-case LLM-path stand-in, battery 3's 6 rail misses still end in ANSWER at
-v7; only 1 of the 6 lands in the doctor review queue (measured at v6).
-LLM-path protection is measured only with stand-ins (no live key).
+Active: `red_flags@v7+93b8295ea3c0` (tags `baseline-v0`, `release/red-flags-v2`..`v7`),
+reasoner/verifier/judge v1, **extractor v2**. The 381-item gate passes; CI green
+on `main`; branch `demo/blocked-by-eval-gate` shows the gate failing a
+regression. Keyless suite fully green. Blind battery 3 (blind to v6/v7): 44/50
+recall, 5/50 false escalation, 0 answered. **Live flow check on gpt-4o-mini**
+(`scripts/live_flow_check.py`, `evals/reports/live-flow-gpt-4o-mini.md`): 13/13
+safety expectations, 5/5 answerable answered, judge 6/6 faithful, $0.00024 per
+question, p50 1.6 s / p95 3.6 s. Every OpenAI client: 20 s timeout, one retry.
 
-Pending:
-- commit v6 and v7 + product fixes; tag `release/red-flags-v2`,
-  `release/red-flags-v3`, `release/red-flags-v6`, `release/red-flags-v7`
-- live LLM-slice run (needs a valid key; the local `.env` key is rejected)
-- Langfuse project
-- public deploy; `autoDeployTrigger: checksPass` in `render.yaml`
-- branch protection and a blocked-PR screenshot
-- Cohen's κ
-- rotate the Atlas password (it was printed in local tooling output before the test_config fix)
-- set `OpenAI(timeout=10, max_retries=1)`; refuse the default `CARELINE_TRACE_SALT` in public demo
-- battery 4 before any v8 is quoted (battery 3 is blind to v7 too, and v7 did not move it)
+Pending (need a person or an account): public deploy, Langfuse project, branch
+protection, Cohen's κ (second human labeller), full LLM slice over the eval set,
+battery 4 before any v8 is quoted.
+
+Live runs: `scripts/live_flow_check.py` forces an in-memory store and blanks
+tracing keys. Never run live checks with `CARELINE_MONGO_URI` merely unset:
+`Settings` falls back to `backend/.env` and writes to the real database.
