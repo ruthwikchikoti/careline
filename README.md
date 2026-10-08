@@ -2,7 +2,7 @@
 
 A release pipeline for CareLine, our team's clinical follow-up agent: every
 prompt and safety-policy change is a versioned, hash-stamped artifact that has
-to pass a 391-item hand-labelled safety eval in CI before it merges.
+to pass a 391-item labelled safety eval in CI before it merges.
 
 CareLine is the system under test. A patient asks a question after a
 consultation. CareLine answers only from that one patient's doctor-approved,
@@ -546,7 +546,7 @@ now fails closed to ESCALATE in well under a minute.
 | Observability dashboard | **Done (in-app, local)** | The web app's **Monitoring** page (`/monitoring`) shows cost and latency per request, verdict mix, online-judge quality and input drift, polled live from `GET /monitoring`. It runs locally; with no deploy there is no public link |
 | Langfuse project / trace link | **Done** | Traces export to Langfuse Cloud (ingestion confirmed: HTTP 200 from `/api/public/otel/v1/traces`); live run 2 produced 18, e.g. [this public trace](https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec). The in-app `/monitoring` page is the second view. Caveats: the trace input carries the raw question text (fictional data only; the patient id is salted-hashed), and the Docker image does not install `obs` yet |
 | Full LLM slice over the eval set | **Not run** | `eval_gate --mode llm` is implemented but the 391-item slice has not been run. Two live end-to-end flow checks ran on gpt-4o-mini (18 questions each; $0.0052 and $0.0049; reports linked in Numbers). LLM-path emergency safety beyond the rails is measured only with stand-ins: none of battery 3's rail misses has been sent to the real model. In CI the LLM-slice job shows green when skipped (see LLMOps) |
-| Second-labeller agreement (Cohen's κ) | **Pending** | Labels have one author per split plus an AI-assisted audit. κ has not been computed |
+| Human labelling check (Cohen's κ) | **Kit ready, human labels pending** | Labels have one author per split, written with AI assistance plus an AI-assisted audit. Blind 60-item stratified sample + scorer in [`backend/evals/human/`](backend/evals/human/README.md). **AI second labeller (not human):** a separate model, blind to our labels, agreed on 60/60 (κ 1.00 on EMERGENCY / ANSWER / OTHER; 0 missed emergencies, 0 unsafe answers) — a consistency check, not independent validation ([`agreement.md`](backend/evals/human/agreement.md)). Human κ is reported once teammates commit `labels-<name>.csv` |
 | Judge–human agreement | **Pending** | The judge ran live on 6 + 4 answers (all faithful) but has not been compared with human labels |
 | GitHub repo description | **Pending** | Still the old agent pitch; it should name CareLine Ops and the eval-gated releases |
 | Corpus RAG / vector DB metrics (recall@k) | **N/A** | Retrieval is per-patient fact validity, not similarity search. We report groundedness and leak counts instead. Layer-2 `MemoryProvider` is indexed on approval but not read on the answer path |
@@ -571,7 +571,7 @@ claims.
 ## Resume line
 
 > Built an eval-gated release pipeline for a clinical AI agent: every versioned
-> prompt and safety-policy change must pass a 391-item hand-labelled safety eval
+> prompt and safety-policy change must pass a 391-item labelled safety eval
 > in GitHub Actions (0 missed emergencies, 0 cross-patient leaks). Measured
 > generalisation on blind red-team batteries (90% emergency recall on the latest)
 > and added shadow comparison, online drift and LLM-judge monitoring, and

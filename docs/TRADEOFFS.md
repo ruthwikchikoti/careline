@@ -33,7 +33,7 @@ Every entry has the same five parts:
 
 ## 1. Offline eval gate over a live canary deploy
 
-**We chose** an offline eval gate, run on every PR against 391 hand-labelled items and designed to block the merge (branch protection is still pending, see #7), plus an offline shadow comparison of candidate and incumbent policy, **over** a live canary that routes a slice of real traffic to the candidate and promotes on live metrics, **because** the metric that matters, emergency recall, cannot be measured on organic traffic. Emergencies are rare by definition, and our traffic is a fictional demo with near-zero volume. A canary would need weeks to see a single missed emergency. The emergency split puts 160 in front of every candidate; the whole gate takes about 1.7 s.
+**We chose** an offline eval gate, run on every PR against 391 labelled items and designed to block the merge (branch protection is still pending, see #7), plus an offline shadow comparison of candidate and incumbent policy, **over** a live canary that routes a slice of real traffic to the candidate and promotes on live metrics, **because** the metric that matters, emergency recall, cannot be measured on organic traffic. Emergencies are rare by definition, and our traffic is a fictional demo with near-zero volume. A canary would need weeks to see a single missed emergency. The emergency split puts 160 in front of every candidate; the whole gate takes about 1.7 s.
 
 - **Alternatives rejected.**
   - *Canary at 10% with auto-rollback.* There is no traffic to split, and a missed emergency would be discovered by harming a patient.
