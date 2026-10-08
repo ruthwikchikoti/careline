@@ -81,8 +81,18 @@ def test_report_states_reproduction_scope():
 # -- tags, not SHAs: history rewrites must not break the demo commands ----
 
 
+def _require_tag(ref: str) -> None:
+    """Skip when the release tags are absent (a tarball, or a shallow clone
+    without tags) — the tag contract is checked wherever the tags exist."""
+    try:
+        shadow_compare.resolve_ref(ref)
+    except SystemExit:
+        pytest.skip(f"release tag {ref!r} not present in this checkout")
+
+
 def test_baseline_v0_is_the_annotated_tag_resolving_to_the_original_commit():
     assert shadow_compare.BASELINE_V0_TAG == "baseline-v0"
+    _require_tag("baseline-v0")
     ref, note = shadow_compare.resolve_baseline_v0()
     assert ref == "baseline-v0" and note is None
     assert shadow_compare.resolve_ref("baseline-v0").startswith(
@@ -99,6 +109,7 @@ def test_baseline_v0_falls_back_to_the_sha_with_a_clear_message(monkeypatch):
 
 @pytest.mark.parametrize("ref", ["baseline-v0", "release/red-flags-v4", "release/red-flags-v5"])
 def test_replay_refs_accept_release_tag_names(ref):
+    _require_tag(ref)
     sha = shadow_compare.resolve_ref(ref)
     assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha)
 
