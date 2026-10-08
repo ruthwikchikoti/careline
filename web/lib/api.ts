@@ -183,11 +183,11 @@ async function authFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function login(doctorId: string): Promise<TokenResponse> {
+export async function login(doctorId: string, password: string): Promise<TokenResponse> {
   const res = await fetch(`${BASE}/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ doctor_id: doctorId }),
+    body: JSON.stringify({ doctor_id: doctorId, password }),
   });
   if (!res.ok) {
     let detail = `Login failed (${res.status})`;

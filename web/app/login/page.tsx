@@ -12,6 +12,7 @@ import { Input, Label } from "@/components/ui/Input";
 export default function LoginPage() {
   const router = useRouter();
   const [doctorId, setDoctorId] = useState("dr-asha");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +25,7 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const { access_token } = await login(doctorId.trim());
+      const { access_token } = await login(doctorId.trim(), password);
       setToken(access_token);
       router.push("/dashboard");
     } catch (err) {
@@ -82,7 +83,7 @@ export default function LoginPage() {
             <div className="mb-8">
               <h2 className="text-2xl font-semibold text-ink">Sign in</h2>
               <p className="mt-1.5 text-sm text-muted">
-                Enter your doctor ID to access the clinical workspace.
+                Enter your doctor ID and the clinic password to access the clinical workspace.
               </p>
             </div>
 
@@ -99,6 +100,22 @@ export default function LoginPage() {
                   placeholder="dr-asha"
                 />
                 <p className="mt-1.5 text-xs text-muted">Demo: use <code className="rounded bg-canvas px-1">dr-asha</code></p>
+              </div>
+
+              <div>
+                <Label htmlFor="doctor-password">Password</Label>
+                <Input
+                  id="doctor-password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Clinic password"
+                />
+                <p className="mt-1.5 text-xs text-muted">
+                  Set by the deployment (<code className="rounded bg-canvas px-1">CARELINE_DOCTOR_PASSWORD</code>).
+                </p>
               </div>
 
               {error ? (
