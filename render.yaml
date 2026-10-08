@@ -17,6 +17,15 @@ services:
         value: "6" # per IP, spend-bearing POSTs
       - key: CARELINE_DAILY_REQUEST_CAP
         value: "300" # process-wide, resets at UTC midnight
+      # Render's proxy APPENDS the client IP to X-Forwarded-For; per-IP guards
+      # key on that rightmost hop, never the client-controlled leftmost entry.
+      - key: CARELINE_TRUSTED_PROXY_HOPS
+        value: "1"
+      # Login brute-force lockout (defaults shown; per account + per IP):
+      - key: CARELINE_LOGIN_MAX_FAILURES
+        value: "5"
+      - key: CARELINE_LOGIN_LOCKOUT_SECONDS
+        value: "900"
       - key: CARELINE_ALLOWED_ORIGINS
         sync: false # set to your deployed web origin(s), comma-separated
       # Secrets (set in the dashboard, not here):

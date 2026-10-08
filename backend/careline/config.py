@@ -119,6 +119,31 @@ class Settings(BaseSettings):
             ">$20 budget guard. 0 = off (dev default; the public deploy sets it)."
         ),
     )
+    trusted_proxy_hops: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        description=(
+            "Number of trusted reverse proxies that APPEND to X-Forwarded-For "
+            "(1 on Render). Per-IP guards key on the N-th entry from the right; "
+            "0 = ignore XFF and use the socket peer (dev/tests)."
+        ),
+    )
+    login_max_failures: int = Field(
+        default=5,
+        ge=1,
+        description="Failed logins per account before lockout (patient PIN / doctor).",
+    )
+    login_max_failures_per_ip: int = Field(
+        default=20,
+        ge=1,
+        description="Failed logins per client IP (any account) before lockout.",
+    )
+    login_lockout_seconds: int = Field(
+        default=900,
+        ge=1,
+        description="Lockout window after too many failed logins (seconds).",
+    )
 
     @property
     def is_production(self) -> bool:

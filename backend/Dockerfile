@@ -29,10 +29,13 @@ USER careline
 # is baked into the image.
 EXPOSE 8000
 
-# Gunicorn-free single process keeps the in-memory rate-limit/daily-cap
-# counters meaningful (documented README limitation for multi-process).
-# --proxy-headers: behind Render's router the socket peer is the router, so
-# per-IP limits need the forwarded client IP (single trusted hop).
+# Gunicorn-free single process keeps the in-memory rate-limit/daily-cap and
+# login-lockout counters meaningful (documented limitation for multi-process).
+# --no-proxy-headers: uvicorn must NOT rewrite the client address from
+# X-Forwarded-For — with "--forwarded-allow-ips *" it trusted the leftmost,
+# client-controlled entry, so rotating a spoofed XFF bypassed every per-IP
+# limit. The app's guards instead key on the rightmost hop appended by the
+# trusted proxy (CARELINE_TRUSTED_PROXY_HOPS=1 in render.yaml).
 CMD ["uvicorn", "careline.api.app:create_app", "--factory", \
      "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+     "--no-proxy-headers"]
