@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 from careline.api.app import create_app
 from careline.config import Settings
 
+# Doctor login now requires the per-deployment credential (REVIEW-2). Tests set it
+# through the environment so the suite stays keyless and never relies on a default.
+TEST_DOCTOR_PASSWORD = "test-doctor-password-for-offline-suite"
+
 _DR_A = "dr-A"
 _DR_B = "dr-B"
 _PATIENT = "patient-A"
@@ -25,6 +29,22 @@ _TRANSCRIPT = (
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def _doctor_password_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every API test runs with a known doctor credential configured."""
+    monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", TEST_DOCTOR_PASSWORD)
+
+
+def doctor_headers(client: TestClient, doctor_id: str) -> dict[str, str]:
+    """Log a doctor in with the deployment credential and return bearer headers."""
+    response = client.post(
+        "/auth/token",
+        json={"doctor_id": doctor_id, "password": TEST_DOCTOR_PASSWORD},
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 @pytest.fixture()
@@ -41,26 +61,17 @@ def settings() -> Settings:
 
 @pytest.fixture()
 def dr_x_headers(client: TestClient) -> dict[str, str]:
-    response = client.post("/auth/token", json={"doctor_id": "dr-X"})
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return doctor_headers(client, "dr-X")
 
 
 @pytest.fixture()
 def authed_headers(client: TestClient) -> dict[str, str]:
-    response = client.post("/auth/token", json={"doctor_id": _DR_A})
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return doctor_headers(client, _DR_A)
 
 
 @pytest.fixture()
 def other_doctor_headers(client: TestClient) -> dict[str, str]:
-    response = client.post("/auth/token", json={"doctor_id": _DR_B})
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return doctor_headers(client, _DR_B)
 
 
 @pytest.fixture()

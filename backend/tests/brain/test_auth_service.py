@@ -89,3 +89,66 @@ def test_assert_prod_safe_rejects_default_internal_api_key_in_production(monkeyp
     settings = Settings()
     with pytest.raises(ValueError, match="internal_api_key"):
         settings.assert_prod_safe()
+
+
+# --- REVIEW-2/3: doctor credential + role claims -----------------------------
+
+
+def test_doctor_token_carries_doctor_role_claim():
+    settings = Settings()
+    token = AuthService(settings=settings).issue_doctor_token("dr-A")
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+    assert payload["role"] == "doctor"
+
+
+def test_patient_token_is_rejected_as_doctor_token():
+    svc = _auth()
+    token = svc.issue_patient_token(patient_id="p-1", doctor_id="dr-A")
+    with pytest.raises(TokenInvalid):
+        svc.authenticate_doctor(token)
+
+
+def test_roleless_token_is_rejected_as_doctor_token():
+    """A signed token with no role claim is not a doctor session (fail closed)."""
+    settings = Settings()
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {"sub": "dr-A", "iat": now, "exp": now + timedelta(hours=1)},
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(TokenInvalid):
+        AuthService(settings=settings).authenticate_doctor(token)
+
+
+def test_doctor_token_is_rejected_as_patient_token():
+    svc = _auth()
+    token = svc.issue_doctor_token("dr-A")
+    with pytest.raises(TokenInvalid):
+        svc.authenticate_patient(token)
+
+
+def test_verify_doctor_credentials(monkeypatch):
+    monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", "correct-horse-battery-staple")
+    svc = AuthService(settings=Settings())
+    assert svc.verify_doctor_credentials(
+        doctor_id="dr-A", password="correct-horse-battery-staple"
+    )
+    assert not svc.verify_doctor_credentials(doctor_id="dr-A", password="wrong")
+    assert not svc.verify_doctor_credentials(doctor_id="dr-A", password="")
+    # Reserved anonymous-demo tenant can never sign in.
+    assert not svc.verify_doctor_credentials(
+        doctor_id="demo-doctor", password="correct-horse-battery-staple"
+    )
+
+
+def test_verify_doctor_credentials_honours_allowlist(monkeypatch):
+    monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", "correct-horse-battery-staple")
+    monkeypatch.setenv("CARELINE_DOCTOR_IDS", "dr-asha")
+    svc = AuthService(settings=Settings())
+    assert svc.verify_doctor_credentials(
+        doctor_id="dr-asha", password="correct-horse-battery-staple"
+    )
+    assert not svc.verify_doctor_credentials(
+        doctor_id="dr-evil", password="correct-horse-battery-staple"
+    )

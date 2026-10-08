@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from careline.combined import app as build_combined_app
+from tests.api.conftest import doctor_headers
 
 
 @pytest.fixture()
@@ -38,9 +39,7 @@ def combined_client(monkeypatch) -> TestClient:
 
 
 def _token(client: TestClient, doctor_id: str) -> dict[str, str]:
-    response = client.post("/auth/token", json={"doctor_id": doctor_id})
-    assert response.status_code == 200
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+    return doctor_headers(client, doctor_id)
 
 
 def test_console_escalation_appears_in_doctor_queue(combined_client: TestClient):
