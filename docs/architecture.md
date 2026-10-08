@@ -231,7 +231,7 @@ Gaps we disclose:
 | Pre-LLM rails | Deterministic regex, structural and lexical-paraphrase rules | F2, F3, N3, N6 | An emergency is caught before any model call, so it costs $0 and adds no model latency, and CI can measure it without a key. The limit (blind recall 88% at v6 and v7, 90% at v8, battery 3) is disclosed |
 | Gate chain | Citation veto, 5 ordered gates that only downgrade, and a final danger + body-state invariant | F3, F5, F6, N8 | The model proposes and never routes. Every route is reviewable code that the gate can test |
 | Orchestration | LangGraph `StateGraph` | observability | Explicit agent nodes and per-node traces. Parity tests keep it equal to the Brain |
-| Reasoner + separate Verifier | Two structured LLM calls | F6 (no ungrounded answers) | An independent veto against the full slice catches answers the reasoner over-reached on. It costs about +50% $ per answered request (estimate $0.000101 per verifier call) and a second sequential round trip: on the one live run, model-handled questions took 1.3–3.6 s end to end and p95/max 3.6 s misses the 3 s target |
+| Reasoner + separate Verifier | Two structured LLM calls | F6 (no ungrounded answers) | An independent veto against the full slice catches answers the reasoner over-reached on. It costs about +50% $ per answered request (estimate $0.000101 per verifier call) and a second sequential round trip: on two live runs, model-handled questions took 1.3–5.3 s end to end and p95/max 3.6 s and 5.3 s miss the 3 s target |
 | Model | gpt-4o-mini (claude-haiku-4-5 as the alternative) | N6, N7 | Budget-first. Answers are short and grounded, and the gate never trusts the model's routing |
 | Structured outputs | Responses API `responses.parse` with Pydantic `text_format` | F1 | Every handoff is a validated object, never free text. Any parse failure fails closed |
 | Layer-1 store | MongoDB (motor) with temporal validity and approval stamps | F4, F5 | Validity is a property of the data, not of retrieval scoring |
@@ -239,9 +239,9 @@ Gaps we disclose:
 | Auth | Per-doctor pbkdf2 hashes; patient `{doctor_id, patient_id, pin}`; JWT `role` claim; login lockout | F4 | Fixes the review findings: password-less doctor tokens, cross-tenant portal login, PIN brute force |
 | Budget guard | Per-IP minute windows (spend and login separate), daily cap, rightmost-XFF client IP | N7 | Spend is capped by configuration, and a spoofed XFF cannot dodge the limit |
 | Eval gate | Keyless deterministic slice in CI | F2–F8, N1 | No secrets, so fork PRs are gated. Reproducible, and the 391 items run in about 1.7 s |
-| LLM slice | Live model + LLM-as-judge with an sqlite response cache | N2 | Measures what the keyless twin cannot (answer accuracy, faithfulness). The full 391-item slice has not been run; one live end-to-end flow check (18 questions, judge 6/6 faithful) has |
+| LLM slice | Live model + LLM-as-judge with an sqlite response cache | N2 | Measures what the keyless twin cannot (answer accuracy, faithfulness). The full 391-item slice has not been run; two live end-to-end flow checks (18 questions each, judge 6/6 and 4/4 faithful) have |
 | Online monitor | In-process ring buffers and a sampled judge thread | N1, N4, N6 | Five monitoring categories with no extra infrastructure on a free tier. Per-process only |
-| Tracing | Langfuse (optional `obs` extra) | N4, N6 | Per-turn cost and latency traces. No project is configured yet |
+| Tracing | Langfuse Cloud (optional `obs` extra, SDK v3) | N4, N6 | Per-turn cost and latency traces, live: run 2 of the live flow check exported 18 ([example trace](https://cloud.langfuse.com/project/cmuzr90o901dpad0htql4lfli/traces/112e8db367c1c28c0c4b86ffd1e444ec)). Trace input includes the question text (fictional data); the patient id is salted-hashed |
 | Deploy | Render Docker blueprint, free tier | live URL | One file and fictional data. Not deployed yet |
 
 ## 7. Failure behaviour (fail closed)

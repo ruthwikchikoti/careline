@@ -17,7 +17,7 @@ recorder and the run aborts before ``--budget-usd`` (default $0.50) is crossed.
 
 Usage (needs OPENAI_API_KEY; writes a markdown report)::
 
-    python -m scripts.live_flow_check --markdown evals/reports/live-flow-gpt-4o-mini.md
+    python -m scripts.live_flow_check --markdown evals/reports/live-flow-gpt-4o-mini-runN.md [--langfuse]
 """
 
 from __future__ import annotations
@@ -82,15 +82,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def run(budget_usd: float) -> dict:
+def run(budget_usd: float, langfuse: bool = False) -> dict:
     os.environ.setdefault("CARELINE_LLM_BACKEND", "openai")
     os.environ.setdefault("CARELINE_LLM_MODEL", "gpt-4o-mini")
     os.environ["CARELINE_DOCTOR_PASSWORD"] = _PASSWORD
     os.environ["CARELINE_JUDGE_SAMPLE_RATE"] = "1.0"  # judge every live ANSWER
     # Isolation: an empty value (not a missing one) wins over backend/.env, so the
     # store is in-memory and no real database is touched; tracing exporters off.
-    for var in ("CARELINE_MONGO_URI", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY",
-                "CARELINE_LANGFUSE_PUBLIC_KEY", "CARELINE_LANGFUSE_SECRET_KEY"):
+    blanked = ["CARELINE_MONGO_URI", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"]
+    if not langfuse:  # Langfuse stays on only when explicitly requested
+        blanked += ["CARELINE_LANGFUSE_PUBLIC_KEY", "CARELINE_LANGFUSE_SECRET_KEY",
+                    "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]
+    for var in blanked:
         os.environ[var] = ""
     os.environ["LANGSMITH_TRACING"] = os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
@@ -199,6 +202,11 @@ def run(budget_usd: float) -> dict:
         log["monitoring"] = step("monitoring", c.get("/monitoring", headers=dr))
 
     log["usage"] = usage.summary()
+    if langfuse:
+        from careline.adapters.observability import langfuse_tracer
+
+        langfuse_tracer.flush()
+        log["langfuse_trace_urls"] = list(langfuse_tracer.TRACE_URLS)
     return log
 
 
@@ -299,6 +307,9 @@ def _markdown(log: dict, budget: float) -> str:
         f"escalations, {len(esc.get('review', []) or [])} for review |",
         f"| Other doctor sees this patient's turns | {'**YES (leak)**' if leak else 'no'} |",
         "",
+        *([f"Langfuse traces ({len(log['langfuse_trace_urls'])}): "
+           + ", ".join(f"[{i + 1}]({u})" for i, u in enumerate(log["langfuse_trace_urls"])), ""]
+          if log.get("langfuse_trace_urls") else []),
         "One live run on fictional data; LLM outputs vary run to run. This measures the "
         "flow, not clinical accuracy. Raw JSON: the sibling `.json` file.",
     ]
@@ -308,12 +319,14 @@ def _markdown(log: dict, budget: float) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--budget-usd", type=float, default=0.50)
+    parser.add_argument("--langfuse", action="store_true",
+                        help="keep Langfuse keys and send one trace per portal question")
     parser.add_argument("--markdown", help="write the report here (+ .json beside it)")
     args = parser.parse_args(argv)
     if not os.environ.get("OPENAI_API_KEY", "").strip():
         print("OPENAI_API_KEY not set — nothing to run.", file=sys.stderr)
         return 2
-    log = run(args.budget_usd)
+    log = run(args.budget_usd, langfuse=args.langfuse)
     report = _markdown(log, args.budget_usd)
     print(report)
     if args.markdown:

@@ -16,7 +16,7 @@ that always agrees — the v7 grounding check ANSWERED:
 Every string the red team reported is pinned verbatim below and must not
 ANSWER through the Brain or the graph (parity asserted field-for-field). The
 legitimate paraphrases (including the six live gpt-4o-mini answers from
-``evals/reports/live-flow-gpt-4o-mini.json`` replayed against the record's
+``evals/reports/live-flow-gpt-4o-mini-run1.json`` replayed against the record's
 current facts) must still ANSWER.
 """
 
@@ -286,7 +286,7 @@ def test_legitimate_answers_still_answer(factory, text):
 
 
 # The six ANSWER turns of the live gpt-4o-mini run (evals/reports/
-# live-flow-gpt-4o-mini.json), replayed against the record's facts: current
+# live-flow-gpt-4o-mini-run1.json), replayed against the record's facts: current
 # facts as returned by GET /patients/{id}/record, the superseded Metformin
 # 1000mg fact as non-current. Citations reconstructed as the fact whose text
 # the answer paraphrases.

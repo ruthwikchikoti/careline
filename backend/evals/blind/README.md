@@ -102,9 +102,9 @@ scored before v7 was layered on.
   at v6 and v7, 5/50 at v8 (`battery-3.results-v8-standin.json`; batteries 1
   and 2 give 0, but they are dev data). The red teams found five more such
   phrasings at v6 (fixed by v7) and six more at v7 (fixed by v8), all dev data
-  now. A real model may classify them as `red_flag` itself. The one live flow
-  check on gpt-4o-mini sent four emergencies, all caught by the rails before
-  the model; none of these misses has been sent to the real model.
+  now. A real model may classify them as `red_flag` itself. The two live flow
+  checks on gpt-4o-mini each sent four emergencies, all caught by the rails
+  before the model; none of these misses has been sent to the real model.
 - **A paraphrased superseded dose** (v7, hardened in v8). Separately from the
   rails, the gate chain refuses an ANSWER whose dose / number / drug-name
   tokens are not in a cited current fact. The final red team bypassed the v7

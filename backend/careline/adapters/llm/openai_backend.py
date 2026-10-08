@@ -32,7 +32,7 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 # The SDK default is a 600 s timeout with 2 retries: a hung provider would hold a
 # patient for ten minutes before the Brain could fail closed. Live calls measured
-# p99 ~6 s (evals/reports/live-flow-gpt-4o-mini.md), so 20 s + one retry bounds
+# p99 ~6 s (evals/reports/live-flow-gpt-4o-mini-run1.md), so 20 s + one retry bounds
 # the worst case to well under a minute. Override with CARELINE_LLM_TIMEOUT_S.
 DEFAULT_TIMEOUT_S = 20.0
 _MAX_TIMEOUT_S = 30.0
