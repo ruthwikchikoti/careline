@@ -101,11 +101,15 @@ class _InMemoryPatientRepository(PatientRepository):
                 counts[pid] = sum(1 for f in patient.facts if getattr(f, "approved_by", None))
         return sorted(counts.items())
 
-    async def find_by_patient_id(self, *, patient_id: str) -> PatientIdentity | None:
+    async def find_identity(
+        self, *, doctor_id: str, patient_id: str
+    ) -> PatientIdentity | None:
+        # Tenant-scoped: the latest registration for this (doctor, patient) wins.
+        match = None
         for ident in self._identities.values():
-            if ident.patient_id == patient_id:
-                return ident
-        return None
+            if ident.doctor_id == doctor_id and ident.patient_id == patient_id:
+                match = ident
+        return match
 
     async def exists(self, *, doctor_id: str, patient_id: str) -> bool:
         return self._key(doctor_id=doctor_id, patient_id=patient_id) in self._store

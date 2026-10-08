@@ -45,11 +45,14 @@ class PatientRepository(ABC):
         """
         return []
 
-    async def find_by_patient_id(self, *, patient_id: str) -> PatientIdentity | None:
-        """Resolve a registered patient's identity by ``patient_id`` (portal login).
+    async def find_identity(
+        self, *, doctor_id: str, patient_id: str
+    ) -> PatientIdentity | None:
+        """Resolve a registered patient's identity under one doctor (portal login).
 
-        Used by the patient portal to look up the doctor scope + PIN hash for a
-        patient signing in with their patient id. Concrete default returns ``None``
+        Tenant-scoped like every other read: ``patient_id`` is only unique within a
+        doctor, so the portal names the doctor/clinic id at login and the lookup is
+        keyed by both (REVIEW-1). Concrete default returns ``None`` (fail closed)
         so existing implementations/test doubles keep working; real repos override.
         """
         return None

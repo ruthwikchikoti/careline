@@ -20,6 +20,7 @@ from careline.api.dto.patients import (
     PatientRegisterIn,
 )
 from careline.domain.model.patient import PatientIdentity
+from careline.services.auth_service import is_reserved_patient_id
 from careline.services.patient_lookup_service import hash_pin
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -31,7 +32,16 @@ async def register_patient(
     request: Request,
     principal: Annotated[DoctorPrincipal, Depends(get_current_doctor)],
 ) -> PatientOut:
-    """Register caller-id + PIN for a patient under the authenticated doctor."""
+    """Register caller-id + PIN for a patient under the authenticated doctor.
+
+    ``demo-patient`` is reserved for the anonymous Live-Console demo: registering
+    it would make anonymous demo turns reachable through a portal session, so it
+    is refused (REVIEW-1).
+    """
+    if is_reserved_patient_id(body.patient_id):
+        raise HTTPException(
+            status_code=400, detail=f"patient_id '{body.patient_id.strip()}' is reserved"
+        )
     settings = request.app.state.settings
     pin_hmac = hash_pin(pin=body.pin, secret=settings.pin_hmac_secret)
     identity = PatientIdentity(

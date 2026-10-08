@@ -16,22 +16,33 @@ from careline.adapters.auth.principals import (
     InternalPrincipal,
     PatientPrincipal,
 )
+from careline.services.auth_service import is_reserved_doctor_id, is_reserved_patient_id
 
 
 def get_current_patient(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> PatientPrincipal:
-    """Decode a patient bearer JWT via :attr:`app.state.auth_svc` (patient portal)."""
+    """Decode a patient bearer JWT via :attr:`app.state.auth_svc` (patient portal).
+
+    Defence in depth: a session naming the reserved anonymous-demo tenant or
+    patient is refused even if validly signed, so anonymous ``/demo/ask`` turns
+    are never reachable through the portal (REVIEW-1).
+    """
     if authorization is None or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="unauthorized")
     token = authorization.removeprefix("Bearer ").strip()
     if not token:
         raise HTTPException(status_code=401, detail="unauthorized")
     try:
-        return request.app.state.auth_svc.authenticate_patient(token)
+        principal = request.app.state.auth_svc.authenticate_patient(token)
     except TokenInvalid:
         raise HTTPException(status_code=401, detail="unauthorized") from None
+    if is_reserved_doctor_id(principal.doctor_id) or is_reserved_patient_id(
+        principal.patient_id
+    ):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return principal
 
 
 def get_current_doctor(

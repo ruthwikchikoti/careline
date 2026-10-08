@@ -81,8 +81,13 @@ class MongoPatientRepository(PatientRepository):
             counts[d["patient_id"]] = counts.get(d["patient_id"], 0) + 1
         return sorted(counts.items())
 
-    async def find_by_patient_id(self, *, patient_id: str) -> PatientIdentity | None:
-        doc = await self._patients.find_one({"patient_id": patient_id})
+    async def find_identity(
+        self, *, doctor_id: str, patient_id: str
+    ) -> PatientIdentity | None:
+        """Tenant-scoped identity lookup — never resolves another doctor's patient."""
+        doc = await self._patients.find_one(
+            scoped_filter(doctor_id=doctor_id, patient_id=patient_id)
+        )
         return _doc_to_identity(doc) if doc else None
 
     async def exists(self, *, doctor_id: str, patient_id: str) -> bool:

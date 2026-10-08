@@ -402,11 +402,15 @@ async function patientFetch<T>(path: string, init: RequestInit = {}): Promise<T>
   return res.json() as Promise<T>;
 }
 
-export async function patientLogin(patientId: string, pin: string): Promise<PatientLoginOut> {
+export async function patientLogin(
+  doctorId: string,
+  patientId: string,
+  pin: string,
+): Promise<PatientLoginOut> {
   const res = await fetch(`${BASE}/patient/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ patient_id: patientId, pin }),
+    body: JSON.stringify({ doctor_id: doctorId, patient_id: patientId, pin }),
   });
   if (!res.ok) {
     let detail = `Sign in failed (${res.status})`;
