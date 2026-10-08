@@ -54,6 +54,9 @@ Never push red to the shared branch.
    any baseline or label change before merge.
 6. After merge, tag the release (`git tag -a release/red-flags-vN <commit>` and
    `git push origin --tags`).
+7. **One policy version per release commit.** v6 and v7 were committed together
+   (`1aed531`, both tags point to it), so v7 cannot be rolled back to v6 alone and
+   the v6 numbers cannot be regenerated from a tag. Never bundle two versions again.
 
 Eval items added to fix a failure are **dev data** (`held_out=false`, with a
 note saying why). Generalisation is measured only on a blind battery written

@@ -51,9 +51,9 @@ backend/careline/
   services/      question_service, eval_gate, llm_eval, online_monitor, audit, auth, approval, dpdp, ...
   api/           FastAPI app + routers (auth, patients, consultations, brain, observability, monitoring, patient_portal)
 backend/prompts/    versioned prompts + manifest.yaml (pins, sha256_12, changelog)
-backend/policies/   red-flags.v1..v7.yaml
-backend/evals/      cases/ (381 items), blind/ (blind batteries), reports/ (gate reports per release)
-backend/scripts/    seed_demo, shadow_compare, score_blind, load_test, cost_report
+backend/policies/   red-flags.v1..v8.yaml
+backend/evals/      cases/ (391 items), blind/ (blind batteries), reports/ (gate reports per release)
+backend/scripts/    seed_demo, shadow_compare, score_blind, load_test, cost_report, live_flow_check
 backend/tests/      offline, keyless pytest suite
 web/                Next.js doctor console + patient portal
 ```
@@ -94,18 +94,28 @@ is green with or without a developer `.env`.
   commit: no `Co-Authored-By` trailers, session links or "generated with" lines.
 
 ## Status (2026-10-08)
-Active: `red_flags@v7+93b8295ea3c0` (tags `baseline-v0`, `release/red-flags-v2`..`v7`),
-reasoner/verifier/judge v1, **extractor v2**. The 381-item gate passes; CI green
-on `main`; branch `demo/blocked-by-eval-gate` shows the gate failing a
-regression. Keyless suite fully green. Blind battery 3 (blind to v6/v7): 44/50
-recall, 5/50 false escalation, 0 answered. **Live flow check on gpt-4o-mini**
-(`scripts/live_flow_check.py`, `evals/reports/live-flow-gpt-4o-mini.md`): 13/13
-safety expectations, 5/5 answerable answered, judge 6/6 faithful, $0.00024 per
-question, p50 1.6 s / p95 3.6 s. Every OpenAI client: 20 s timeout, one retry.
+Active: `red_flags@v8+8dd13f40326f` (tags `baseline-v0`, `release/red-flags-v2`..`v8`;
+**v6 and v7 share commit `1aed531`**, so the durable rollback from v7 goes to v5),
+reasoner/verifier/judge v1, **extractor v2**. The 391-item gate passes (PASS vs
+v7 on 381 shared cases, 0 verdict changes; CI baseline `after-policy-v8.json`);
+branch `demo/blocked-by-eval-gate` shows the gate failing a regression on push.
+Keyless suite: 1692 passed, 2 skipped. Blind battery 3 (blind to v6/v7/v8):
+45/50 recall at v8, 5/50 false escalation, 0 answered keyless; LLM-path
+stand-in (`score_blind --stand-in confident`) 5/50 answered. Grounding v8
+closes the final red team's 13 bypasses but is still lexical. Portal patients
+see a plain message, never the internal escalation reason; the extract route is
+spend-guarded; the keyless extractor records a dose change ("Reduce X to N mg").
+**One live flow check on gpt-4o-mini** (`scripts/live_flow_check.py`,
+`evals/reports/live-flow-gpt-4o-mini.md`): 18 questions, 29 calls, 13/13 safety
+expectations, 5/5 answerable answered, judge 6/6 faithful, $0.00024 per question
+($0.00031 per model-handled question), p50 1.6 s, p95/max 3.6 s (misses the
+3 s target). Every OpenAI client: 20 s timeout, one retry.
 
-Pending (need a person or an account): public deploy, Langfuse project, branch
-protection, Cohen's κ (second human labeller), full LLM slice over the eval set,
-battery 4 before any v8 is quoted.
+Pending (need a person or an account): public deploy, `autoDeployTrigger:
+checksPass`, branch protection + a PR blocked by the gate, Langfuse project,
+Cohen's κ (second human labeller), judge–human agreement, the full 391-item LLM
+slice, sending the rail misses to the real model, GitHub repo description, and
+a fresh battery 4 for the next policy release.
 
 Live runs: `scripts/live_flow_check.py` forces an in-memory store and blanks
 tracing keys. Never run live checks with `CARELINE_MONGO_URI` merely unset:

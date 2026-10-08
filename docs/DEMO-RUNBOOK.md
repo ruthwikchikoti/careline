@@ -2,7 +2,7 @@
 
 **Format.** A short live demo. Every command in it is keyless and offline, so a dead wifi connection does not stop it.
 
-Every command and expected output below was run on 8 Oct 2026 at `red_flags@v7+93b8295ea3c0` (on disk; re-check after the v6/v7 commits and after any history rewrite).
+Every command and expected output below was run on 8 Oct 2026 at `red_flags@v8+8dd13f40326f` (on disk, before the v8 commit; re-check after the lead commits v8 and after any history rewrite).
 
 ## Key facts
 
@@ -24,7 +24,7 @@ Every command and expected output below was run on 8 Oct 2026 at `red_flags@v7+9
 
 - [ ] `cd careline && git pull --ff-only && git log -1 --oneline`. The HEAD you demo must equal GitHub `main`.
 - [ ] `cd backend && source .venv/bin/activate && pip install -e ".[dev,api,llm]"`. It must finish clean.
-- [ ] Export the keyless demo env in **every** terminal you will use. Blanking these matters: a `backend/.env` with a Mongo URI or keys would change the numbers, and the key currently in our local `.env` is rejected (401), which makes the live console fail closed ("Unable to process your question safely") instead of answering.
+- [ ] Export the keyless demo env in **every** terminal you will use. Blanking these matters: a `backend/.env` with a Mongo URI or an OpenAI key would change the numbers, send the demo to the real database, and spend money on every question. The demo is keyless by design.
   ```bash
   export CARELINE_MONGO_URI= OPENAI_API_KEY= ANTHROPIC_API_KEY= LANGSMITH_API_KEY= LANGSMITH_TRACING=false
   ```
@@ -37,7 +37,7 @@ Every command and expected output below was run on 8 Oct 2026 at `red_flags@v7+9
   ```bash
   python -m pytest -q -o addopts="" -p no:cacheprovider
   ```
-  Expect **1512 passed, 2 skipped**, 0 failed (about 45 s). Since v7 `tests/conftest.py` ignores `backend/.env`, so plain `python -m pytest -q` gives the same result.
+  Expect **1692 passed, 2 skipped**, 0 failed (about 50 s). `tests/conftest.py` ignores `backend/.env`, so plain `python -m pytest` gives the same result (plain `python -m pytest -q` hides the summary line, because `pyproject.toml` already adds `-q`).
 - [ ] **Capture fallback outputs** (§6) into `~/careline-demo-capture/`. That folder is local, not committed.
 - [ ] Terminal font ≥ 18 pt, dark theme, window at least 120 columns wide. Clear the scrollback.
 - [ ] Pre-type the five demo commands into shell history (§3), so on stage it is just ↑ + Enter.
@@ -66,17 +66,17 @@ The token lasts 1 hour (`CARELINE_JWT_TTL_SECONDS`), so mint it no earlier than 
 
 **Terminal C (optional): web.** `cd careline/web && npm run dev`, then open `http://localhost:3000`.
 
-## 3. The live demo, 8:00–9:40 (Naresh)
+## 3. The live demo, 7:30–9:50 (Naresh)
 
 All commands run in Terminal B. Run them in this order and point at the listed line. Don't scroll hunting for output; say the line out loud.
 
 | Time | Command | Expected (verified 8 Oct) | Say |
 |---|---|---|---|
-| 8:00 | `python -m scripts.shadow_compare --replay baseline-v0` | JSON ending `"missed_emergencies": 58`, `"replayed_ref": "baseline-v0"`, `"replayed_commit": "b8476c9…"`, `"replay_gate_exit_code": 1` (≈ 0.5 s) | "This replays the gate on the tagged commit that shipped the old regex rail. 58 of 60 emergencies missed: blocked." |
-| 8:20 | `python -m careline.services.eval_gate --baseline evals/reports/after-policy-v6.json` | Table: `missed_emergencies 0`, `over_escalation_rate 0.073`, `in_scope_answer_accuracy (keyless twin) 0.167`, `intersection of 376 shared cases with the baseline; 5 new case(s)`, then `## Gate verdict: PASS ✅`. Header shows `red_flags@v7+93b8295ea3c0` | "This is the v7 candidate gated against the last accepted release, v6, case by case on the 376 cases they share. 381 items, under two seconds, no API key." |
-| 8:40 | `python -m scripts.shadow_compare --a v1 --b v7 --case-ids evals/reports/baseline-v0.case_ids.txt` | Recall 0.033 → 1.000; missed 58 → 0; over-escalation 0.083 → 0.094 (A better) | "This is our canary substitute. It shows the win **and** the cost column." |
-| 9:00 | `python -m scripts.score_blind evals/blind/battery-3.json` | `recall 44/50 (88.0%)`, `false escalation 5/50 (10.0%)`, `emergencies answered (worst case) 0`, then 6 MISS and 5 FALSE lines | "Battery 3 was written blind to v6, and nobody read it while building v7: 44/50 at both. 88% is the honest number. Every miss is a redirect that carries the 112 line; none was answered on this path. Only one of the six reaches the doctor's review queue, and on the LLM path we haven't measured it." Read the cord-prolapse MISS line (checked at v6; at v7 the MISS lines were deliberately not viewed while building — glance at the capture before going on stage) |
-| 9:20 | `curl -s localhost:8000/monitoring -H "Authorization: Bearer $T" \| python -m json.tool \| head -60` | `"scope": "process-wide, aggregate, no PHI"`, then sections `operational`, `output`, `quality` (keyless judge, `sample_rate 0.2`), `drift` (after warm-up: `scope-mix PSI … > 0.2`), `cost`, `alerts` | "Five categories, live. The drift alert is real: the load generator asks six questions in rotation, which looks nothing like our eval mix." If the web app is running, show the same snapshot on the **Monitoring** page (`localhost:3000/monitoring`): latency p50/p95/p99 and $ per request tiles, verdict-mix bar, judge mode, drift banner. |
+| 7:40 | `python -m scripts.shadow_compare --replay baseline-v0` | JSON ending `"missed_emergencies": 58`, `"replayed_ref": "baseline-v0"`, `"replayed_commit": "b8476c9…"`, `"replay_gate_exit_code": 1` (≈ 0.5 s) | "This replays the gate on the tagged commit that shipped the old regex rail. 58 of 60 emergencies missed: blocked." |
+| 8:05 | `python -m careline.services.eval_gate --baseline evals/reports/after-policy-v7.json` | Table: `missed_emergencies 0`, `over_escalation_rate 0.073`, `in_scope_answer_accuracy (keyless twin) 0.167`, `intersection of 381 shared cases with the baseline; 10 new case(s)`, then `## Gate verdict: PASS ✅`. Header shows `red_flags@v8+8dd13f40326f` | "This is the v8 candidate gated against the last accepted release, v7, case by case on the 381 cases they share. 391 items, under two seconds, no API key." |
+| 8:30 | `python -m scripts.shadow_compare --a v1 --b v8 --case-ids evals/reports/baseline-v0.case_ids.txt` | Recall 0.033 → 1.000; missed 58 → 0; over-escalation 0.083 → 0.094 (A better) | "This is our canary substitute. It shows the win **and** the cost column." |
+| 8:55 | `python -m scripts.score_blind evals/blind/battery-3.json` then `python -m scripts.score_blind evals/blind/battery-3.json --stand-in confident \| grep -v -e MISS -e FALSE -e ANSWERED` | First: `recall 45/50 (90.0%)`, `false escalation 5/50 (10.0%)`, `emergencies answered (keyless) 0`, then 5 MISS and 5 FALSE lines. Second: `emergencies answered (stand-in: confident reasoner + affirming verifier) 5`, `brain/graph verdict parity True` | "Battery 3 was written blind to v6, and nobody opened it while building v7 or v8: 44, 44, 45 of 50. 90% is the honest number. Every miss is a redirect with the 112 line. But with a worst-case model stand-in, the five misses are answered. That is our open risk." Read the cord-prolapse MISS line (`I'm 30 weeks…`) |
+| 9:25 | `curl -s localhost:8000/monitoring -H "Authorization: Bearer $T" \| python -m json.tool \| head -60` | `"scope": "process-wide, aggregate, no PHI"`, then sections `operational`, `output`, `quality` (keyless judge, `sample_rate 0.2`), `drift` (after warm-up: `scope-mix PSI … > 0.2`), `cost`, `alerts` | "Five categories, live. The drift alert is real: the load generator asks six questions in rotation, which looks nothing like our eval mix." If the web app is running, show the same snapshot on the **Monitoring** page (`localhost:3000/monitoring`): latency p50/p95/p99 and $ per request tiles, verdict-mix bar, judge mode, drift banner. |
 
 **Optional extra beat (only if ahead of time): a block on a branch.** Do this in a scratch worktree, never on `main`. It shows a code change being blocked rather than a replay:
 ```bash
@@ -118,7 +118,7 @@ pip install -e ".[obs]"
 export CARELINE_LANGFUSE_PUBLIC_KEY=pk-... CARELINE_LANGFUSE_SECRET_KEY=sk-... CARELINE_LANGFUSE_HOST=https://cloud.langfuse.com
 # restart Terminal A, ask one question, open the trace: model, latency, per-turn cost, artifact stamps, salted patient hash
 ```
-Status today: **no project and no keys**. If asked, say: "Langfuse is wired and tested with a fake client; we have no project yet, so the Monitoring dashboard page (`/monitoring`) and the usage JSONL are our evidence today."
+Status today: **no project and no keys**. The one live run (gpt-4o-mini, 18 questions) is documented in `backend/evals/reports/live-flow-gpt-4o-mini.md`; point at that file if asked for measured cost and latency. If asked, say: "Langfuse is wired and tested with a fake client; we have no project yet, so the Monitoring dashboard page (`/monitoring`) and the usage JSONL are our evidence today."
 
 ## 6. Fallbacks
 
@@ -137,9 +137,10 @@ Status today: **no project and no keys**. If asked, say: "Langfuse is wired and 
 ```bash
 mkdir -p ~/careline-demo-capture && cd careline/backend
 python -m scripts.shadow_compare --replay baseline-v0 > ~/careline-demo-capture/1-replay.txt 2>&1
-python -m careline.services.eval_gate --baseline evals/reports/after-policy-v6.json > ~/careline-demo-capture/2-gate.txt 2>&1
-python -m scripts.shadow_compare --a v1 --b v7 --case-ids evals/reports/baseline-v0.case_ids.txt > ~/careline-demo-capture/3-shadow.txt 2>&1
+python -m careline.services.eval_gate --baseline evals/reports/after-policy-v7.json > ~/careline-demo-capture/2-gate.txt 2>&1
+python -m scripts.shadow_compare --a v1 --b v8 --case-ids evals/reports/baseline-v0.case_ids.txt > ~/careline-demo-capture/3-shadow.txt 2>&1
 python -m scripts.score_blind evals/blind/battery-3.json > ~/careline-demo-capture/4-blind.txt 2>&1
+python -m scripts.score_blind evals/blind/battery-3.json --stand-in confident > ~/careline-demo-capture/4b-standin.txt 2>&1
 curl -s localhost:8000/monitoring -H "Authorization: Bearer $T" | python -m json.tool > ~/careline-demo-capture/5-monitoring.json
 ```
 

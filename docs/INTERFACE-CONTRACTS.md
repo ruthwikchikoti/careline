@@ -131,7 +131,7 @@ minute window, separate from the spend window.
 | Route | Request | Response |
 |---|---|---|
 | `GET /patient/me` | none | `CarePlanOut {patient_id, as_of, facts: [FactOut]}` |
-| `POST /patient/ask` | `{question}` (1–2000 chars) | `PatientAnswerOut {verdict, answer_text, escalation_reason, citations, patient_message, emergency}`. `patient_message` is `answer_text or escalation_reason`; `emergency` is true when the decision's scope is `red_flag` (the portal then shows the 112 banner). Runs on the threadpool with a clarify budget of 0. Counted as a spend route by the budget guard |
+| `POST /patient/ask` | `{question}` (1–2000 chars) | `PatientAnswerOut {verdict, answer_text, escalation_reason, citations, patient_message, emergency}`. `escalation_reason` is always `null` here (the internal gate reason stays in the audit and the doctor's view). `patient_message` comes from `api/patient_text.py`: on a `red_flag` ESCALATE "This may be an emergency. …call 112… Your message has also been sent to your doctor."; on any other ESCALATE "Your question has been sent to your doctor, who will reply here." plus the 112 line; otherwise the answer or redirect text, unless it contains a decimal score or a gate word (risk, confidence, threshold, gate, verifier, reasoner, trace), in which case the escalation message (fail closed); `emergency` is true when the decision's scope is `red_flag` (the portal then shows the 112 banner). Runs on the threadpool with a clarify budget of 0. Counted as a spend route by the budget guard |
 | `GET /patient/questions` | none | `[PatientQuestionOut {turn_id, asked_at, question, verdict, answer_text, escalated, doctor_reply, replied_at, patient_message, emergency}]` |
 | `DELETE /patient/history` | none | `204` |
 
@@ -146,7 +146,7 @@ minute window, separate from the spend window.
 | `GET /audit`, `GET /audit/events` | Audit. Each turn carries `scope`, `needs_review` and `review_reason` (defaults keep older Mongo rows loadable) |
 | `GET /escalations` | `EscalationsOut {…, waiting, patients_waiting, review_waiting, review: [AuditTurnOut]}`. `review` is this doctor's redirected (CLARIFY) turns flagged `needs_review`, newest first, tenant-scoped |
 | `POST /escalations/{turn_id}/resolve` | Reply to and close one of this doctor's escalated **or review-flagged** turns. Any other turn id (another tenant's, or an unflagged redirect) is `404` |
-| `GET /eval` | Live re-run of the eight T1–T8 gate-chain scenarios at production thresholds (not the 376-item gate) |
+| `GET /eval` | Live re-run of the eight T1–T8 gate-chain scenarios at production thresholds (not the 391-item gate) |
 | `GET /monitoring` | Online monitor snapshot: `{scope: "process-wide, aggregate, no PHI", generated_at, operational, output, quality, drift, cost, alerts}`. Aggregate only, with no question text and no patient ids. Process-wide: every doctor sees the deployment's aggregates, not a per-tenant slice |
 
 ### Internal and demo
@@ -154,7 +154,7 @@ minute window, separate from the spend window.
 | Route | Auth | Request | Response |
 |---|---|---|---|
 | `POST /internal/run-question` | `X-Internal-Key` (service principal) | `QuestionIn {doctor_id, patient_id, call_id, question}` | `AnswerOut {verdict, answer_text, escalation_reason, confidence, risk, citations, trace: [TraceStepOut]}` |
-| `POST /demo/ask` | none (an optional doctor JWT lets it use a real `patient_id`) | `{question, patient_id?}` | `{verdict, answer_text, escalation_reason, confidence, risk, citations, trace}` |
+| `POST /demo/ask` | none (an optional doctor JWT lets it use a real `patient_id`) | `{question, patient_id?}` | `{verdict, answer_text, escalation_reason, patient_message, confidence, risk, citations, trace}`. The console shows `patient_message` as what the patient sees and labels `escalation_reason` as the doctor view |
 | `GET /demo/patient` | none | — | the bundled fictional demo patient |
 | `GET /health`, `GET /api/meta` | none | — | liveness, and the fictional-data banner |
 
@@ -208,7 +208,8 @@ patient_id)`.
   back. This applies to every route; the web client reads that list shape.
 - An unhandled error returns **500** with no traceback in the body.
   `ReasonerUnavailable` maps to **503** where it escapes the graph.
-- Spend routes (`/demo/ask`, `/internal/run-question`, `/patient/ask`) count
+- Spend routes (`/demo/ask`, `/internal/run-question`, `/patient/ask`, and
+  `POST /consultations/{id}/extract`, which calls the LLM extractor when a key is set) count
   toward the per-IP minute limit and the daily cap. Client IP is the rightmost
   trusted `X-Forwarded-For` hop (`CARELINE_TRUSTED_PROXY_HOPS`), never the
   client-supplied leftmost entry.

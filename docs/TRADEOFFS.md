@@ -10,7 +10,7 @@ Every entry has the same five parts:
 
 **Constraints behind all of them.** About $20 of LLM spend in total. A free-tier deploy (Render free web service: 512 MB RAM, no GPU, one container). No real patient data: five fictional patients and one doctor. A fixed timeline. And the safety rule that outranks everything else: *uncertainty resolves to ESCALATE, never answer from a superseded fact, zero cross-patient reachability.*
 
-**Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` on `red_flags@v6+2df6ecd24fda` (re-run 2026-10-08); the active policy is now `red_flags@v7+93b8295ea3c0`, which changed no verdict on those cases (`evals/reports/after-policy-v7.md`). Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Costs are **ESTIMATES** from `python -m scripts.cost_report`: tokens are counted as chars/4 and priced from the versioned table in `careline/adapters/llm/usage.py`. No live LLM run has happened yet (see #6).
+**Where the numbers come from.** Every number below can be reproduced from `backend/` with a keyless environment (`CARELINE_MONGO_URI= OPENAI_API_KEY= ...`). Gate figures are from `python -m careline.services.eval_gate` at the active policy `red_flags@v8+8dd13f40326f` (391 items, re-run 2026-10-08; `evals/reports/after-policy-v8.md`). Blind-battery figures are from `python -m scripts.score_blind evals/blind/battery-N.json`. Model-comparison costs are pre-run **estimates** from `python -m scripts.cost_report` (tokens counted as chars/4, priced from the versioned table in `careline/adapters/llm/usage.py`). Measured gpt-4o-mini numbers come from one live end-to-end flow check on 2026-10-08 (`evals/reports/live-flow-gpt-4o-mini.md`: 18 portal questions, 29 calls, $0.00024 per question, $0.00031 per model-handled question, p50 1.6 s, p95/max 3.6 s). The full 391-item LLM slice has not been run.
 
 | # | We chose | Over | Constraint that forced it |
 |---|---|---|---|
@@ -20,7 +20,7 @@ Every entry has the same five parts:
 | 4 | Fail-closed ESCALATE | Best-effort answer | Safety rule; the cost of a wrong answer |
 | 5 | Two LLM calls (Reasoner + independent Verifier) | One self-checking call | Safety rule against hallucinated grounding |
 | 6 | gpt-4o-mini | Stronger or pricier models | Cost ($20) |
-| 7 | Shared-case regression vs a committed baseline | A moving baseline | Data growth (the set went 250 → 376) |
+| 7 | Shared-case regression vs a committed baseline | A moving baseline | Data growth (the set went 250 → 391) |
 | 8 | Blind batteries | Self-written probes | Honest generalisation numbers |
 | 9 | Render free tier | Fly.io / HF Spaces | Cost ($0), blueprint-as-code |
 | 10 | In-process monitor (`GET /monitoring`) | Prometheus + Grafana | 512 MB, one container |
@@ -33,17 +33,17 @@ Every entry has the same five parts:
 
 ## 1. Offline eval gate over a live canary deploy
 
-**We chose** an offline eval gate, run on every PR against 376 hand-labelled items and designed to block the merge (branch protection is still pending, see #7), plus an offline shadow comparison of candidate and incumbent policy, **over** a live canary that routes a slice of real traffic to the candidate and promotes on live metrics, **because** the metric that matters, emergency recall, cannot be measured on organic traffic. Emergencies are rare by definition, and our traffic is a fictional demo with near-zero volume. A canary would need weeks to see a single missed emergency. The emergency split puts 145 in front of every candidate; the whole gate takes about 1.6 s.
+**We chose** an offline eval gate, run on every PR against 391 hand-labelled items and designed to block the merge (branch protection is still pending, see #7), plus an offline shadow comparison of candidate and incumbent policy, **over** a live canary that routes a slice of real traffic to the candidate and promotes on live metrics, **because** the metric that matters, emergency recall, cannot be measured on organic traffic. Emergencies are rare by definition, and our traffic is a fictional demo with near-zero volume. A canary would need weeks to see a single missed emergency. The emergency split puts 160 in front of every candidate; the whole gate takes about 1.7 s.
 
 - **Alternatives rejected.**
   - *Canary at 10% with auto-rollback.* There is no traffic to split, and a missed emergency would be discovered by harming a patient.
   - *A/B test on user feedback.* Patients cannot judge whether an escalation was clinically right.
 - **Constraint.** Data availability: there are no real calls and no labelled production traffic.
 - **Evidence.**
-  - `python -m scripts.shadow_compare --a v1 --b v6 --case-ids evals/reports/baseline-v0.case_ids.txt` scores the frozen 250 original items. Emergency recall goes 0.033 → 1.000 (58 → 0 missed). Over-escalation goes 0.083 → 0.094: the cost column a canary would also have to show.
+  - `python -m scripts.shadow_compare --a v1 --b v8 --case-ids evals/reports/baseline-v0.case_ids.txt` scores the frozen 250 original items. Emergency recall goes 0.033 → 1.000 (58 → 0 missed). Over-escalation goes 0.083 → 0.094: the cost column a canary would also have to show.
 - **Failure mode it creates.** The gate measures our own eval distribution, not live users. If live wording drifts away from the eval set, the gate stays green while recall drops.
 - **Mitigation.**
-  - Blind batteries (#8) measure recall on wording nobody tuned against. The current number is 44/50 (battery 3, blind to v6).
+  - Blind batteries (#8) measure recall on wording nobody tuned against. The current number is 45/50 (battery 3, blind to v6, v7 and v8; 44/50 at v6 and v7).
   - The online monitor (`GET /monitoring`) computes input drift against the eval set: PSI over the scope mix, OOV rate and length shift. It raises an alert at PSI > 0.2.
   - Any fresh miss becomes an eval item before the next release.
 
@@ -52,18 +52,18 @@ Every entry has the same five parts:
 **We chose** to make the merge-blocking check a deterministic slice with no secrets at all: the full Brain, offline heuristic Reasoner and Verifier twins, and temperature-free rails. **We chose this over** calling GPT-4o-mini in the blocking path, **because** a merge-blocking check has to be reproducible (same commit, same verdict), free, and available to fork PRs, which get no secrets. A check that flakes when the provider is slow or down gets switched off by annoyed humans, and that is how gates die.
 
 - **Alternatives rejected.**
-  - *LLM-in-CI on every PR.* About $0.0003 × 381 items × every push, plus provider nondeterminism and outages, would make the check unreliable.
+  - *LLM-in-CI on every PR.* About $0.0003 × 391 items × every push, plus provider nondeterminism and outages, would make the check unreliable.
   - *No CI eval, manual testing only.* That is exactly how baseline-v0 shipped with 58/60 emergencies missed.
 - **Constraint.** Cost: $20 in total. Reproducibility. Fork PRs carry no secrets.
 - **Evidence.**
-  - The gate runs in about 1.6 s wall on a laptop (`time python -m careline.services.eval_gate`). Per-case latency is p50 ≈ 3.9 ms / p99 ≈ 10 ms. Cost: $0.
+  - The gate runs in about 1.7 s wall on a laptop (`time python -m careline.services.eval_gate`). Per-case latency is p50 ≈ 4.0 ms / p99 ≈ 11 ms. Cost: $0.
   - Replaying the tagged commit that produced baseline-v0, `python -m scripts.shadow_compare --replay baseline-v0`, exits with gate code 1: 58/60 missed.
 - **Failure mode it creates.** The keyless twins cannot paraphrase, so the keyless slice cannot measure answer quality. Keyless in-scope answer accuracy is **0.167** (0.176 on the 339 cases shared with v5), and a change to a *prompt* (`prompts/reasoner/v1.md`) is not exercised by the twins.
 - **Mitigation.**
   - In-scope accuracy is a regression-only gate: it must not drop against the baseline.
   - Prompt files are hash-stamped in `prompts/manifest.yaml`, and a mismatch fails at import, so a prompt change is always visible.
-  - The LLM slice (`eval_gate --mode llm`: live Reasoner + Verifier + LLM-as-judge, gates in-scope accuracy ≥ 0.85 and judge faithfulness ≥ 0.90, on-disk response cache) is **implemented but has never run live**, because we have no valid key. In CI it runs on pushes to our own repo with `continue-on-error` and reports SKIPPED explicitly when no `OPENAI_API_KEY` secret exists.
-  - We say plainly that prompt and model changes are not gated until that slice has run.
+  - The LLM slice (`eval_gate --mode llm`: live Reasoner + Verifier + LLM-as-judge, gates in-scope accuracy ≥ 0.85 and judge faithfulness ≥ 0.90, on-disk response cache) is implemented, but **the full 391-item slice has not been run**. One live end-to-end flow check (18 questions) has run, and it caught a prompt bug the keyless slice could not: extractor v1 recorded "instead of 1000mg" as a second current fact (fixed in extractor v2). In CI the slice runs on pushes to our own repo with `continue-on-error`; with no `OPENAI_API_KEY` secret it exits 0, so the job shows **green**, and it writes SKIPPED to the job summary plus a warning annotation.
+  - We say plainly that prompt and model changes are not gated until that slice runs.
 
 ## 3. Lexical + structural emergency rail over a fine-tuned classifier
 
@@ -71,7 +71,7 @@ Every entry has the same five parts:
 
 - literal patterns;
 - since v6, de-obfuscation (letter-, hyphen- and dot-spaced words, leetspeak inside words) and a generic distress / help-seeking family;
-- a curated danger-phrase library scored by token coverage + character-trigram cosine (lexical, not semantic, despite the original plan's wording);
+- a curated danger-phrase library scored by token coverage + character-trigram cosine: lexical and deterministic. The approved plan and the v2 tag message call it "semantic"; we chose lexical because of the 512 MB / no-GPU limit and to keep a diffable YAML;
 - clause-scoped history, denial and media suppression;
 - Hinglish and typo normalisation;
 - a structural symptom-report layer;
@@ -85,18 +85,18 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - *LLM as the pre-rail.* It needs a key, so it would not be keyless in CI, and it adds latency and cost before triage.
 - **Constraint.** Data availability, the free-tier 512 MB memory limit, and auditability.
 - **Evidence: the limit is real and we measured it.**
-  - Blind battery 3 (50 emergencies + 50 benign near-misses, written by an evaluator that never read the rail code) against v6: **recall 44/50 (88%)**, **false escalation 5/50 (10%)**, **0 emergencies answered** on the keyless path.
+  - Blind battery 3 (50 emergencies + 50 benign near-misses, written by an evaluator that never read the rail code) against v6 and v7: **recall 44/50 (88%)**; against v8: **45/50 (90%)**; **false escalation 5/50 (10%)** and **0 emergencies answered** on the keyless path at all three.
   - Earlier batteries at the version each was blind to: battery 1 at v4 34/40 (85%); battery 2 at v5 42/50 (84%).
-  - On batteries those versions never saw, recall moves a few points per release: battery 3 scores 39/50 at v4, 41/50 at v5, 44/50 at v6. v5 did not materially move fresh-wording recall over v4; a lexical rail gains slowly on wording nobody has seen.
+  - On batteries those versions never saw, recall moves a few points per release: battery 3 scores 39/50 at v4, 41/50 at v5, 44/50 at v6, 44/50 at v7, 45/50 at v8. v5 did not materially move fresh-wording recall over v4; a lexical rail gains slowly on wording nobody has seen.
 - **Failure mode it creates.**
-  1. About 1 in 8 freshly worded emergencies is missed by the rail. Battery-3 misses: indirect self-harm, Hinglish child poisoning, Hinglish GI bleed, Hinglish pre-eclampsia, cord prolapse, fever on chemotherapy.
+  1. About 1 in 10 freshly worded emergencies is missed by the rail. Battery-3 misses at v6 and v7: indirect self-harm (escalates at v8), Hinglish child poisoning, Hinglish GI bleed, Hinglish pre-eclampsia, cord prolapse, fever on chemotherapy.
   2. Over-escalation on hard benign near-misses: 10% on battery 3 (fiction, news and past-event framing), 26% on battery 2, against 7.3% on the committed set.
-  3. On the LLM path a rail miss reaches the model. In a worst-case stand-in (always-confident reasoner, always-agreeing verifier) battery 3's six misses end in ANSWER.
+  3. On the LLM path a rail miss reaches the model. In a worst-case stand-in (always-confident reasoner, always-agreeing verifier; `score_blind --stand-in confident`) battery 3's rail misses end in ANSWER: 6/50 at v6 and v7, 5/50 at v8.
 - **Mitigation.**
   - On the keyless path a rail miss has never become an ANSWER (0 of 140 blind emergencies). Every miss ended in a CLARIFY redirect ending with "If this is an emergency, call 112 (India) or your local emergency number now."
   - Redirects that name a danger concept or a present symptom are flagged `needs_review` and listed for the doctor (review queue, no page). That caught all 8 battery-2 misses at v5 but only 1 of battery 3's 6 at v6.
   - A final gate invariant means no question containing a danger concept, or (v6) a present body-state report, can end in ANSWER; the citation veto (v6) blocks answers citing anything outside the valid slice.
-  - On the LLM path the Reasoner classifies `red_flag` itself, a second, independent chance to escalate. That path is unmeasured until the live run.
+  - On the LLM path the Reasoner classifies `red_flag` itself, a second, independent chance to escalate. That is unmeasured: the live flow check sent four emergencies and the rails caught all four before the model, so none of the rail misses has reached the real model.
   - We disclose the limit instead of tuning the battery away.
 
 ## 4. Fail-closed ESCALATE over a best-effort answer
@@ -108,14 +108,14 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - *Retry with a different prompt until confident.* That amounts to optimising for an answer, not for safety.
 - **Constraint.** The safety rule.
 - **Evidence.**
-  - Gate at v6: 0 missed emergencies, 0 cross-patient leaks, 0 superseded leaks, 0 injection items answered, 0 ungrounded answers.
+  - Gate at v8: 0 missed emergencies, 0 cross-patient leaks, 0 superseded leaks, 0 injection items answered, 0 ungrounded answers.
 - **Cost of the decision (measured).** On the keyless spine, every medication-grounded in-scope answer escalates:
   - Medication facts carry risk weight 0.9 (`domain/scoring/risk.py`). A medication question scores risk **0.78**, above the **0.75** ceiling (`domain/thresholds.py`).
   - "What is the dose of my paracetamol?" returns `escalate` with "Risk too high (0.78)". We reproduced this with `POST /demo/ask`.
   - Together with the twins' inability to paraphrase, this is why keyless in-scope accuracy is **0.167**. It is deliberate, not a bug.
-  - The LLM path uses the same blend (0.7 × fact-kind weight + 0.3 × the proposal's own risk), so a medication answer passes only if the model reports risk ≤ 0.4. The reasoner prompt does not ask for that field and nothing calibrates it.
+  - The LLM path uses the same blend (0.7 × fact-kind weight + 0.3 × the proposal's own risk), so a medication answer passes when the model reports risk ≤ 0.4. But the schema field defaults to **0.0** and the reasoner prompt never asks for it, so a model that omits it gets 0.63 and is answered. In the live run both dosing questions grounded in a current fact were answered (2/2). On the LLM path the risk ceiling does little for medication answers; the verifier, citation veto and answer-text grounding check bound them.
 - **Failure mode it creates.** Doctor-queue flooding trains clinicians to ignore escalations, which is itself a hazard.
-- **Mitigation.** Over-escalation is a hard gate (≤ 15%; 7.3% at v6). The online monitor tracks a low-risk-escalation proxy, and small talk and non-clinical questions are redirected rather than escalated (commit `7c8acf3`).
+- **Mitigation.** Over-escalation is a hard gate (≤ 15%; 7.3% at v8). The online monitor tracks a low-risk-escalation proxy, and small talk and non-clinical questions are redirected rather than escalated (commit `7c8acf3`).
 
 ## 5. Two LLM calls (Reasoner + independent Verifier) over one
 
@@ -125,13 +125,14 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - *Single call with "cite your sources".* Citations get invented.
   - *Deterministic citation check only.* It catches fake ids but not an answer that misstates a real fact.
 - **Constraint.** The safety rule. Cost pushed back the other way, and the price stayed acceptable.
-- **Evidence (ESTIMATE).**
-  - Reasoner ≈ $0.000197 per call and Verifier ≈ $0.000101 per call on gpt-4o-mini, so an answered request costs ≈ $0.000298, against ≈ $0.000197 for one call.
+- **Evidence.**
+  - Pre-run estimate: Reasoner ≈ $0.000197 per call and Verifier ≈ $0.000101 per call on gpt-4o-mini, so an answered request costs ≈ $0.000298, against ≈ $0.000197 for one call.
+  - Measured (live flow check): $0.00031 per model-handled question including the sampled judge; model-handled questions took 1.3–3.6 s end to end with the two sequential calls.
   - The Verifier runs only when the Reasoner proposes an answer. Red-flag escalations make no LLM call at all ($0).
 - **Failure mode it creates.**
   1. Roughly 1.5× tokens and a second network round trip on answered turns, so higher p99.
   2. If both calls hit the same provider outage, there is no answer at all.
-- **Mitigation.** The second round trip only happens on the minority of turns that answer. On an outage both calls raise `ReasonerUnavailable` and the turn fails closed to ESCALATE, counted as `fail_closed_rate` on `/monitoring` with an alert above 5%. LLM-path latency has **not been measured** because there has been no live run, and we say so.
+- **Mitigation.** The second round trip only happens on the minority of turns that answer. On an outage both calls raise `ReasonerUnavailable` and the turn fails closed to ESCALATE, counted as `fail_closed_rate` on `/monitoring` with an alert above 5%. The cost is real: on the one live run the end-to-end p95/max was 3.6 s, which **misses** the 3 s p99 target (n = 18). Running the Verifier in parallel with a draft answer, skipping it for low-risk fact kinds, or streaming would be the next steps.
 
 ## 6. gpt-4o-mini over stronger models
 
@@ -152,11 +153,11 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
   - The Verifier and the deterministic gates bound the damage: an answer that cites nothing valid cannot pass.
   - The model is a config value (`CARELINE_LLM_MODEL`), and the cost table makes a swap a reviewed number.
   - Judge calibration against a human-labelled subset is planned and not yet done.
-  - **Not yet measured:** live accuracy, live cost and live latency of any model.
+  - **Measured once, for gpt-4o-mini only:** cost and latency from the live flow check (n = 18). Not measured: accuracy on the eval set for any model, and the other models' live cost and latency.
 
 ## 7. Shared-case regression vs a committed baseline over a moving baseline (the v3 lesson)
 
-**We chose** to compare every enforced metric against a committed baseline JSON (`evals/reports/after-policy-v7.json`). The comparison is **recomputed over the case ids present in both runs**, using the `per_case` map in each report. On top of that:
+**We chose** to compare every enforced metric against a committed baseline JSON (`evals/reports/after-policy-v8.json`). The comparison is **recomputed over the case ids present in both runs**, using the `per_case` map in each report. On top of that:
 
 - a deleted baseline case fails the gate;
 - per-split minimum case counts are enforced (emergency ≥ 60, in_scope ≥ 80, out_of_scope ≥ 40, cross_patient ≥ 20, injection ≥ 30, superseded ≥ 20);
@@ -171,7 +172,7 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Alternatives rejected.**
   - *Aggregate-only comparison.* It reads set growth as improvement.
   - *Absolute thresholds only.* A metric could slide from 7% to 14.9% unnoticed.
-- **Constraint.** Data growth: the set grew 250 → 287 → 329 → 339 → 376 across v4, v5 and v6. v6 passed against the v5 baseline on 339 shared cases with 0 verdict changes, while its 37 new cases were gated by the absolute thresholds. The original 250 ids are frozen in `evals/reports/baseline-v0.case_ids.txt` so historical numbers stay reproducible (`--case-ids`).
+- **Constraint.** Data growth: the set grew 250 → 287 → 329 → 339 → 376 → 381 → 391 across v4 to v8. v8 passed against the v7 baseline on 381 shared cases with 0 verdict changes, while its 10 new cases were gated by the absolute thresholds. The original 250 ids are frozen in `evals/reports/baseline-v0.case_ids.txt` so historical numbers stay reproducible (`--case-ids`).
 - **Failure mode that remains.** Someone can still edit the baseline JSON in a PR.
 - **Mitigation.**
   - A baseline bump is a visible diff in `backend/evals/reports/`.
@@ -190,13 +191,13 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Protocol now** (`backend/evals/blind/README.md`):
   - battery-1 was blind to v4 and scored 34/40; its misses drove v5, so it is **dev data** from v5 on;
   - battery-2 was blind to v5 and scored 42/50; its misses drove v6, so it is **dev data** from v6 on (50/50 at v6 is a fit);
-  - battery-3 was blind to v6 and scored 44/50;
-  - the next release needs a fresh battery-4.
+  - battery-3 was blind to v6 and scored 44/50; nobody opened it while building v7 (44/50) or v8 (45/50);
+  - the next policy release needs a fresh battery-4.
 - **Alternatives rejected.**
   - *Keep growing the committed eval set and quote it.* It measures coverage of the wording families we wrote.
   - *A public benchmark.* None exists for post-consultation follow-up triage, and copying one is disallowed.
 - **Constraint.** Data availability: there is no independent labelled source of real patient phrasings.
-- **Failure mode it creates.** Small n. With 50 emergencies the Wilson 95% interval is wide: 44/50 gives 76–94%, 42/50 gives 72–92%, 34/40 gives 71–93%. Each battery is single-use, and all three were written by LLM evaluator agents, so their wording may be correlated.
+- **Failure mode it creates.** Small n. With 50 emergencies the Wilson 95% interval is wide: 45/50 gives 79–96%, 44/50 gives 76–94%, 42/50 gives 72–92%, 34/40 gives 71–93%. Each battery is single-use, and all three were written by LLM evaluator agents, so their wording may be correlated.
 - **Mitigation.** We quote each battery number with its n and the version it was blind to. We do not read the similar numbers across batteries as robustness: they show a lexical rail that moves a few points per release on unseen wording.
 
 ## 9. Render free tier over Fly.io / Hugging Face Spaces
@@ -298,7 +299,7 @@ Public-demo and production mode refuse the shared dev password and refuse dev-de
 |---|---|---|
 | Live auto-promote canary | Unmeasurable on demo traffic (#1) | Shadow comparison + gate (#13) |
 | Vector-DB corpus RAG | Retrieval here is per-patient fact *validity*, not corpus search | Citation-groundedness + leak metrics, stated explicitly |
-| Fine-tuned emergency model | No data, no GPU, not auditable | Versioned lexical + structural rail v1→v6 (#3) |
+| Fine-tuned emergency model | No data, no GPU, not auditable | Versioned lexical + structural rail v1→v8 (#3) |
 | vLLM self-hosting | No GPU; cost and ops with no accuracy gain at this scale | Hosted API (gpt-4o-mini) |
 | Prometheus/Grafana | 512 MB, one container | In-process monitor at `GET /monitoring` (#10) |
 | SSO | No IdP for a demo | Per-doctor PBKDF2 hashes + lockout (#12) |
