@@ -216,4 +216,5 @@ def test_cache_dir_is_gitignored(tmp_path):
     cache = llm_eval.ResponseCache(tmp_path / "sub" / "c.sqlite")
     cache.put("k", {"a": 1})
     assert cache.get("k") == {"a": 1}
+    cache.close()
     assert (tmp_path / "sub" / ".gitignore").read_text().strip() == "*"

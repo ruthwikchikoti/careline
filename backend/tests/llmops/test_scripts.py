@@ -126,6 +126,7 @@ def server():
     t.start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}"
     httpd.shutdown()
+    httpd.server_close()
 
 
 def test_run_honours_both_minimums_and_reports_conditions(server):
