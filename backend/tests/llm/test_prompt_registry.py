@@ -49,7 +49,7 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     )
 
     policy = yaml.safe_load(load_policy("red_flags").text)
-    assert policy["version"] == "v3"
+    assert policy["version"] == "v4"
     assert tuple(policy["patterns"]) == tuple(RED_FLAG_PATTERNS), (
         "policies/red-flags YAML and domain RED_FLAG_PATTERNS have drifted — "
         "update both together and bump the policy version in the manifest"
@@ -74,6 +74,20 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     assert dict(ACUTE_TERM_PATTERNS) == {
         k: v for k, v in ctx["acute_concern"]["term_patterns"].items()
     }
+    # v4 clause-scoped context markers + typo normalisation must mirror too.
+    from careline.domain.rails.acute_concern import (
+        DENIAL_MARKERS,
+        HISTORY_MARKERS,
+        HYPOTHETICAL_MARKERS,
+        PRESENT_MARKERS,
+    )
+    from careline.domain.rails.red_flag import TYPO_CANONICAL_TOKENS
+
+    assert list(HISTORY_MARKERS) == ctx["history_markers"]
+    assert list(HYPOTHETICAL_MARKERS) == ctx["hypothetical_markers"]
+    assert list(PRESENT_MARKERS) == ctx["present_markers"]
+    assert list(DENIAL_MARKERS) == ctx["denial_markers"]
+    assert list(TYPO_CANONICAL_TOKENS) == policy["typo_normalisation"]["canonical_tokens"]
 
 
 def test_policy_artifact_hash_matches_manifest():
