@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 
 from careline.domain.enums import TraceStatus
 from careline.domain.gates.chain import GateContext, run_gate_chain
+from careline.domain.gates.grounding import non_current_facts
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
 from careline.domain.model.patient import Patient
@@ -146,6 +147,7 @@ class Brain:
             proposal=proposal,
             verification=verification,
             valid_slice=valid_slice,
+            non_current_facts=non_current_facts(patient, now),
             thresholds=self._thresholds,
             now=now,
             call_session=session,

@@ -20,13 +20,24 @@ The chain only downgrades (ANSWER → CLARIFY → ESCALATE), never upgrades.
 This is the structural guarantee of the overriding rule: uncertainty always
 resolves toward escalation.
 
-**Final invariant (v4, round 2).** Before a turn is promoted to ANSWER, the
+**Final invariants (v4 round 2; v6).** Before a turn is promoted to ANSWER, the
 question is scanned by every deterministic net with ALL context guards off
 (:func:`mentions_danger_concept`). Any danger concept — live, history-
 suppressed, hypothetical, denied, or about a pet — downgrades the ANSWER to a
 CLARIFY carrying the emergency line (ESCALATE once the clarify budget is
 spent). This holds for every scope, and for the Brain and the graph alike
-(both call :func:`run_gate_chain`).
+(both call :func:`run_gate_chain`). v6 adds two more, run in the same place:
+a **deterministic citation veto** (every cited id must be EXACTLY an id of the
+current valid slice, case-sensitive, no duplicates — else CLARIFY, or
+ESCALATE with a danger concept / spent budget), and the **LLM-path backstop**
+(:func:`mentions_present_body_report`: a present first-person or care-
+recipient body-state report is never ANSWERED even when no lexicon names the
+symptom). Every RED_FLAG and cross-condition escalation text carries the
+112 emergency line (v6). v7 adds the **answer-text grounding check**
+(:mod:`careline.domain.gates.grounding`): every dose / strength / frequency /
+number token and every drug name in the answer text must appear in a CITED
+fact of the current valid slice — a superseded dose behind a current fact's id
+is never ANSWERED (CLARIFY, or ESCALATE with a danger concept / spent budget).
 
 Owner: Priyanshu (scope ``safety``).
 """
@@ -39,8 +50,14 @@ from typing import Callable
 from pydantic import BaseModel, ConfigDict, Field
 
 from careline.domain.enums import ScopeCategory, TraceStatus, Verdict
+from careline.domain.gates.grounding import (
+    facts_containing,
+    medication_names,
+    ungrounded_tokens,
+)
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision, ReasoningTrace
+from careline.domain.model.fact import Fact
 from careline.domain.model.patient import ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.rails.acute_concern import check_acute_concern
@@ -49,6 +66,7 @@ from careline.domain.rails.symptom_report import (
     SYMPTOM_REPORT_RISK,
     check_symptom_report,
     mentions_danger_concept,
+    mentions_present_body_report,
 )
 from careline.domain.scoring.confidence import compute_confidence
 from careline.domain.scoring.risk import compute_risk
@@ -79,6 +97,10 @@ class GateContext(BaseModel):
     proposal: ClassifierProposal
     verification: VerificationResult | None = None
     valid_slice: ValidSlice
+    #: v7: this patient's facts that are NOT current at ``now`` (superseded,
+    #: not yet valid, unapproved). Never answer material — used only by the
+    #: grounding check to recognise a retired drug and name the fact.
+    non_current_facts: tuple[Fact, ...] = ()
     thresholds: Thresholds = Field(default_factory=lambda: DEFAULT_THRESHOLDS)
     now: datetime
     call_session: CallSession | None = None
@@ -105,7 +127,8 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
             detail=f"red-flag scope: {ctx.proposal.rationale or 'emergency tripwire'}",
         )
         return Decision.escalate(
-            f"Red-flag detected: {ctx.proposal.rationale or 'emergency keyword matched'}",
+            f"Red-flag detected: {ctx.proposal.rationale or 'emergency keyword matched'}. "
+            f"{EMERGENCY_LINE}",
             scope=ScopeCategory.RED_FLAG,
             risk=1.0,
             trace=ctx.trace,
@@ -128,7 +151,7 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
             ),
         )
         return Decision.escalate(
-            f"Red-flag detected: {matched}",
+            f"Red-flag detected: {matched}. {EMERGENCY_LINE}",
             scope=ScopeCategory.RED_FLAG,
             risk=1.0,
             trace=ctx.trace,
@@ -196,7 +219,8 @@ def _scope_gate(ctx: GateContext) -> Decision | None:
                 ),
             )
             return Decision.escalate(
-                "Question spans multiple clinical conditions — cannot safely merge guidance.",
+                "Question spans multiple clinical conditions — cannot safely merge guidance. "
+            f"{EMERGENCY_LINE}",
                 scope=ScopeCategory.CROSS_CONDITION,
                 risk=0.95,
                 trace=ctx.trace,
@@ -274,7 +298,8 @@ def _cross_condition_gate(ctx: GateContext) -> Decision | None:
             detail="question spans multiple clinical conditions",
         )
         return Decision.escalate(
-            "Question spans multiple clinical conditions — cannot safely merge guidance.",
+            "Question spans multiple clinical conditions — cannot safely merge guidance. "
+            f"{EMERGENCY_LINE}",
             scope=ScopeCategory.CROSS_CONDITION,
             risk=0.95,
             trace=ctx.trace,
@@ -421,6 +446,149 @@ def _independent_verification_gate(ctx: GateContext) -> Decision | None:
 
 
 # ---------------------------------------------------------------------------
+# Final invariants (v6)
+# ---------------------------------------------------------------------------
+
+
+def _danger(question: str) -> str | None:
+    """Any danger concept (every net, all context guards off), else a present
+    body-state report no lexicon names (the v6 LLM-path backstop)."""
+    danger = mentions_danger_concept(question)
+    if danger is not None:
+        return danger
+    body = mentions_present_body_report(question)
+    return f"body_state:{body}" if body is not None else None
+
+
+def _citation_veto(ctx: GateContext, danger: str | None) -> Decision | None:
+    """Deterministic citation veto (v6): an ANSWER may cite only ids that are
+    EXACTLY ids of the current valid slice (case-sensitive), each at most once.
+
+    At v5 citation validity was only a 0.5 grounding ratio inside the
+    confidence score; a confident reasoner citing a superseded fact (or a
+    case-mangled id) with an affirming LLM verifier was ANSWERED. The keyless
+    HeuristicVerifier vetoed stray ids, the live verifiers did not. This runs
+    for every engine because the Brain and the graph both call
+    :func:`run_gate_chain`. Never ANSWER: CLARIFY with the emergency line, or
+    ESCALATE when a danger concept is present or the clarify budget is spent.
+    """
+    valid_ids = set(ctx.valid_slice.citations)
+    cited = list(ctx.proposal.citations)
+    stray = [c for c in cited if c not in valid_ids]
+    duplicates = sorted({c for c in cited if cited.count(c) > 1})
+    if not stray and not duplicates:
+        ctx.trace.record(
+            "citation_veto",
+            TraceStatus.PASS,
+            spec_section="§5.5",
+            detail=f"all {len(cited)} citation(s) are exact ids in the valid slice",
+        )
+        return None
+    problem = ", ".join(
+        [f"not in the valid slice: {stray!r}"] * bool(stray)
+        + [f"duplicated: {duplicates!r}"] * bool(duplicates)
+    )
+    budget_spent = ctx.call_session is not None and not ctx.call_session.can_clarify()
+    if danger is not None or budget_spent:
+        why = f"danger concept ({danger})" if danger is not None else "clarify budget exhausted"
+        ctx.trace.record(
+            "citation_veto",
+            TraceStatus.TERMINAL,
+            spec_section="§5.5",
+            detail=f"citation(s) {problem} and {why} — escalating",
+        )
+        return Decision.escalate(
+            "The answer could not be traced to your doctor's current approved "
+            f"record — transferring to your doctor. {EMERGENCY_LINE}",
+            scope=ctx.proposal.scope,
+            risk=compute_risk(ctx.proposal, ctx.valid_slice),
+            trace=ctx.trace,
+        )
+    ctx.trace.record(
+        "citation_veto",
+        TraceStatus.TERMINAL,
+        spec_section="§5.5",
+        detail=f"citation(s) {problem} — never ANSWER; clarifying",
+    )
+    return Decision.clarify(
+        "I couldn't match that answer to your doctor's current approved record, "
+        "so I won't give it. Could you rephrase, or ask about a specific "
+        f"medicine, diet or care instruction? {EMERGENCY_LINE}",
+        confidence=0.0,
+        scope=ctx.proposal.scope,
+        trace=ctx.trace,
+    )
+
+
+def _grounding_veto(ctx: GateContext, danger: str | None) -> Decision | None:
+    """Deterministic answer-text grounding (v7): every quantity / frequency /
+    number token and every drug name in the answer text must appear in the
+    text of a CITED fact of the current valid slice.
+
+    At v6 a confident reasoner could repeat a SUPERSEDED dose ("Metformin
+    1000mg") while citing the current fact's id (500mg); with an affirming
+    LLM verifier it was ANSWERED. Never ANSWER an ungrounded token: CLARIFY
+    with the emergency line, or ESCALATE when a danger concept is present or
+    the clarify budget is spent.
+    """
+    cited_ids = set(ctx.proposal.citations)
+    cited = [f for f in ctx.valid_slice.facts if f.id in cited_ids]
+    known = medication_names((*ctx.valid_slice.facts, *ctx.non_current_facts))
+    missing = ungrounded_tokens(ctx.proposal.candidate_answer or "", cited, known)
+    if not missing:
+        ctx.trace.record(
+            "answer_grounding",
+            TraceStatus.PASS,
+            spec_section="§5.5",
+            detail=f"every dose/number/drug token grounded in {len(cited)} cited fact(s)",
+        )
+        return None
+    notes = []
+    for token in missing:
+        retired = facts_containing(token, ctx.non_current_facts, known)
+        uncited = facts_containing(
+            token, [f for f in ctx.valid_slice.facts if f.id not in cited_ids], known
+        )
+        where = (
+            f"only in non-current fact(s) {', '.join(retired)}" if retired
+            else f"only in uncited fact(s) {', '.join(uncited)}" if uncited
+            else "in no fact"
+        )
+        notes.append(f"{token!r} {where}")
+    problem = "; ".join(notes)
+    budget_spent = ctx.call_session is not None and not ctx.call_session.can_clarify()
+    if danger is not None or budget_spent:
+        why = f"danger concept ({danger})" if danger is not None else "clarify budget exhausted"
+        ctx.trace.record(
+            "answer_grounding",
+            TraceStatus.TERMINAL,
+            spec_section="§5.5",
+            detail=f"ungrounded answer token(s): {problem}; and {why} — escalating",
+        )
+        return Decision.escalate(
+            "The answer could not be traced to your doctor's current approved "
+            f"record — transferring to your doctor. {EMERGENCY_LINE}",
+            scope=ctx.proposal.scope,
+            risk=compute_risk(ctx.proposal, ctx.valid_slice),
+            trace=ctx.trace,
+        )
+    ctx.trace.record(
+        "answer_grounding",
+        TraceStatus.TERMINAL,
+        spec_section="§5.5",
+        detail=f"ungrounded answer token(s): {problem} — never ANSWER; clarifying",
+    )
+    return Decision.clarify(
+        "I couldn't match that answer to your doctor's current approved record, "
+        "so I won't give it. Could you rephrase, or ask about a specific "
+        f"medicine, diet or care instruction? {EMERGENCY_LINE}",
+        confidence=0.0,
+        scope=ctx.proposal.scope,
+        trace=ctx.trace,
+    )
+
+
+# ---------------------------------------------------------------------------
 # The chain
 # ---------------------------------------------------------------------------
 
@@ -454,8 +622,21 @@ def run_gate_chain(ctx: GateContext) -> Decision:
     if terminal is not None:
         return terminal
 
-    # -- Final invariant: a danger concept never ends in ANSWER ---------------
-    danger = mentions_danger_concept(ctx.question)
+    # -- Final invariants (v4 round 2, v6) -----------------------------------
+    # (a) a danger concept never ends in ANSWER; (b) v6: nor does a present
+    # body-state report the lexicons do not know (the LLM-path backstop);
+    # (c) v6: nor does a citation outside the valid slice; (d) v7: nor does an
+    # answer-text dose / number / drug token absent from every cited fact.
+    danger = _danger(ctx.question)
+
+    veto = _citation_veto(ctx, danger)
+    if veto is not None:
+        return veto
+
+    veto = _grounding_veto(ctx, danger)
+    if veto is not None:
+        return veto
+
     if danger is not None:
         if ctx.call_session is not None and not ctx.call_session.can_clarify():
             ctx.trace.record(
@@ -468,7 +649,8 @@ def run_gate_chain(ctx: GateContext) -> Decision:
                 ),
             )
             return Decision.escalate(
-                f"Question mentions a danger concept ({danger}) — transferring to your doctor.",
+                f"Question mentions a danger concept ({danger}) — transferring to your "
+                f"doctor. {EMERGENCY_LINE}",
                 scope=ctx.proposal.scope,
                 risk=compute_risk(ctx.proposal, ctx.valid_slice),
                 trace=ctx.trace,
