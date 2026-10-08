@@ -15,7 +15,7 @@ This conftest is loaded before any test module is imported, and:
 1. sets every provider / tracing key to an EMPTY value — present-but-empty,
    so ``load_dotenv()`` (``override=False``) can never fill it, and every
    "is a key configured?" check reads it as absent — and removes
-   ``CARELINE_MONGO_URI`` (unset, not empty, as CLAUDE.md asks);
+   ``CARELINE_MONGO_URI`` (unset, not empty);
 2. turns ``dotenv.load_dotenv`` into a no-op for the session, so no other
    ``.env`` key reaches ``os.environ`` through an import side effect;
 3. stops pydantic-settings reading ``backend/.env`` for ``Settings()``.

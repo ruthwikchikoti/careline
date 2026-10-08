@@ -16,7 +16,7 @@ ownership. It is not an authorship record.
 | **Srujan** | LLM adapters (`llm`) | `careline/adapters/llm/`, `careline/adapters/factory.py`, `careline/domain/ports/reasoning.py`, `careline/domain/model/proposal.py`, `prompts/` |
 | **Priyanshu** | safety and eval (`safety`, `eval`) | `careline/domain/rails/`, `careline/domain/gates/`, `careline/domain/scoring/`, `careline/domain/thresholds.py`, `careline/domain/model/call_session.py`, `careline/adapters/telephony/`, `policies/`, `evals/` |
 
-Stage only files inside your area. A shared file (`CLAUDE.md`, the DI wiring in
+Stage only files inside your area. A shared file (the DI wiring in
 `api/app.py`, `adapters/factory.py`, `prompts/manifest.yaml`) is edited by its
 owner after a heads-up to the team.
 
