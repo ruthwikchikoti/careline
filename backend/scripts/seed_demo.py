@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -50,18 +51,26 @@ def _v(effective_from: datetime = PAST, superseded_at: datetime | None = None) -
     return Validity(effective_from=effective_from, superseded_at=superseded_at)
 
 
+_GENERATED_PIN_DIGITS = 6  # matches the portal's 6-digit PIN field
+_DEMO_PIN_RE = re.compile(r"[0-9]{4,6}")
+
+
 def _demo_pin() -> tuple[str, bool]:
     """Demo PIN: fixed via ``CARELINE_DEMO_PIN``, else freshly random per seed run.
 
     A hardcoded default published in the repo means anyone could log in as any
-    seeded patient on a public deployment — so there is no default. For local
-    demos, set ``CARELINE_DEMO_PIN`` yourself; the web console's prefilled hint
-    only matches if you set it to the same value.
+    seeded patient on a public deployment — so there is no default. A generated
+    PIN is 6 random digits (1M combinations, matching the portal's 6-digit
+    field); an explicit ``CARELINE_DEMO_PIN`` must be 4–6 digits, else the seed
+    refuses to run rather than register an unusable PIN.
     """
     pin = os.environ.get("CARELINE_DEMO_PIN", "").strip()
     if pin:
+        if not _DEMO_PIN_RE.fullmatch(pin):
+            raise SystemExit("CARELINE_DEMO_PIN must be 4–6 digits (e.g. 482913).")
         return pin, True
-    return f"{secrets.randbelow(9000) + 1000:04d}", False
+    bound = 10**_GENERATED_PIN_DIGITS
+    return f"{secrets.randbelow(bound):0{_GENERATED_PIN_DIGITS}d}", False
 
 
 def _approved(**kw: object) -> dict[str, object]:

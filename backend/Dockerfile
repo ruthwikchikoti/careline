@@ -41,7 +41,10 @@ EXPOSE 8000
 # X-Forwarded-For — with "--forwarded-allow-ips *" it trusted the leftmost,
 # client-controlled entry, so rotating a spoofed XFF bypassed every per-IP
 # limit. The app's guards instead key on the rightmost hop appended by the
-# trusted proxy (CARELINE_TRUSTED_PROXY_HOPS=1 in render.yaml).
+# trusted proxy (CARELINE_TRUSTED_PROXY_HOPS=1 in render.yaml). Because this
+# also drops X-Forwarded-Proto, the app's ForwardedProtoMiddleware restores the
+# request scheme ONLY (never the client address) from the trusted hop, so
+# generated redirects stay https:// behind Render's TLS proxy.
 CMD ["uvicorn", "careline.api.app:create_app", "--factory", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--no-proxy-headers"]

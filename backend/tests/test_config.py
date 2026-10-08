@@ -54,7 +54,13 @@ def test_assert_prod_safe_passes_with_defaults_in_production(monkeypatch):
     monkeypatch.setenv("CARELINE_INTERNAL_API_KEY", "prod-internal-api-key-32bytes-min!!")
     monkeypatch.setenv("CARELINE_PIN_HMAC_SECRET", "prod-pin-hmac-secret-32bytes-min!!")
     # Production also requires a non-default doctor login credential (REVIEW-6).
-    monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", "prod-doctor-password-long")
+    from careline.adapters.auth.hash_password import hash_password
+
+    monkeypatch.delenv("CARELINE_DOCTOR_PASSWORD", raising=False)
+    monkeypatch.setenv(
+        "CARELINE_DOCTOR_CREDENTIALS",
+        f"dr-asha:{hash_password('prod-doctor-password-long', iterations=1000)}",
+    )
     settings = Settings()
     settings.assert_prod_safe()
 

@@ -15,30 +15,41 @@ services:
       # Public demo guards (the ~$20 budget is a config guarantee, not a hope):
       - key: CARELINE_RATE_LIMIT_PER_MINUTE
         value: "6" # per IP, spend-bearing POSTs
+      # Logins get their OWN per-IP minute window (separate counter), so demo
+      # asks never lock a user out of signing in and logins never eat spend.
+      - key: CARELINE_LOGIN_RATE_LIMIT_PER_MINUTE
+        value: "10"
       - key: CARELINE_DAILY_REQUEST_CAP
         value: "300" # process-wide, resets at UTC midnight
       # Render's proxy APPENDS the client IP to X-Forwarded-For; per-IP guards
       # key on that rightmost hop, never the client-controlled leftmost entry.
       - key: CARELINE_TRUSTED_PROXY_HOPS
         value: "1"
-      # Login brute-force lockout (defaults shown; per account + per IP):
+      # Login brute-force lockout (defaults shown): 5 failures per account
+      # (doctor id / doctor+patient) from any IP, and 20 per client IP across ALL
+      # accounts, each locking for the window below.
       - key: CARELINE_LOGIN_MAX_FAILURES
         value: "5"
+      - key: CARELINE_LOGIN_MAX_FAILURES_PER_IP
+        value: "20"
       - key: CARELINE_LOGIN_LOCKOUT_SECONDS
         value: "900"
       - key: CARELINE_ALLOWED_ORIGINS
         sync: false # set to your deployed web origin(s), comma-separated
       # Secrets (set in the dashboard, not here):
-      - key: CARELINE_ENV
+      - key: CARELINE_ENVIRONMENT
         value: development # keeps the demo console mounted
       # Public-demo hardening: startup REFUSES the dev-default JWT / internal-key /
-      # PIN-HMAC secrets and the default doctor password — set all four below.
+      # PIN-HMAC secrets, REQUIRES per-doctor credentials, and refuses the shared
+      # CARELINE_DOCTOR_PASSWORD dev fallback if it is set at all.
       - key: CARELINE_PUBLIC_DEMO
         value: "true"
       - key: CARELINE_JWT_SECRET
         sync: false
-      - key: CARELINE_DOCTOR_PASSWORD
-        sync: false # doctor console login credential (>= 12 chars)
+      # Per-doctor login hashes: "dr-asha:<hash>,dr-x:<hash>"; generate each with
+      #   python -m careline.adapters.auth.hash_password --doctor-id dr-asha
+      - key: CARELINE_DOCTOR_CREDENTIALS
+        sync: false
       - key: CARELINE_INTERNAL_API_KEY
         sync: false
       - key: CARELINE_PIN_HMAC_SECRET
