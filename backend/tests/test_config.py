@@ -2,6 +2,11 @@
 
 Pins offline behaviour: defaults match Thresholds, to_thresholds()
 bridges correctly, assert_prod_safe() raises on unsafe prod overrides.
+
+Hermetic (claims-02): every test builds ``Settings(_env_file=None)`` with all
+``CARELINE_*`` variables removed from the process environment, so a developer's
+``backend/.env`` (or exported shell vars) can neither change an outcome nor be
+echoed into an assertion message. The suite is green with or without a .env.
 """
 
 from __future__ import annotations
@@ -13,11 +18,26 @@ from careline.config import Environment, Settings, get_settings
 from careline.domain.thresholds import DEFAULT_THRESHOLDS, Thresholds
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip every CARELINE_* variable so only what a test sets is visible."""
+    import os
+
+    for key in list(os.environ):
+        if key.startswith("CARELINE_"):
+            monkeypatch.delenv(key, raising=False)
+
+
+def _settings() -> Settings:
+    """Settings from the (hermetic) process env only — never reads backend/.env."""
+    return Settings(_env_file=None)
+
+
 # -- T1: default parity ------------------------------------------------------
 
 
 def test_settings_defaults_match_default_thresholds():
-    settings = Settings()
+    settings = _settings()
     assert settings.confidence_floor == DEFAULT_THRESHOLDS.confidence_floor
     assert settings.risk_ceiling == DEFAULT_THRESHOLDS.risk_ceiling
     assert settings.max_clarify_turns == DEFAULT_THRESHOLDS.max_clarify_turns
@@ -28,7 +48,7 @@ def test_settings_defaults_match_default_thresholds():
 
 
 def test_to_thresholds_with_defaults_matches_default_thresholds():
-    thresholds = Settings().to_thresholds()
+    thresholds = _settings().to_thresholds()
     assert thresholds == DEFAULT_THRESHOLDS
     assert isinstance(thresholds, Thresholds)
 
@@ -38,7 +58,7 @@ def test_to_thresholds_with_defaults_matches_default_thresholds():
 
 def test_to_thresholds_reads_env_overrides(monkeypatch):
     monkeypatch.setenv("CARELINE_CONFIDENCE_FLOOR", "0.85")
-    settings = Settings()
+    settings = _settings()
     thresholds = settings.to_thresholds()
     assert thresholds.confidence_floor == 0.85
     assert thresholds.risk_ceiling == DEFAULT_THRESHOLDS.risk_ceiling
@@ -61,14 +81,14 @@ def test_assert_prod_safe_passes_with_defaults_in_production(monkeypatch):
         "CARELINE_DOCTOR_CREDENTIALS",
         f"dr-asha:{hash_password('prod-doctor-password-long', iterations=1000)}",
     )
-    settings = Settings()
+    settings = _settings()
     settings.assert_prod_safe()
 
 
 def test_assert_prod_safe_rejects_lowered_confidence_floor_in_production(monkeypatch):
     monkeypatch.setenv("CARELINE_ENVIRONMENT", "production")
     monkeypatch.setenv("CARELINE_CONFIDENCE_FLOOR", "0.5")
-    settings = Settings()
+    settings = _settings()
     with pytest.raises(ValueError, match="confidence_floor"):
         settings.assert_prod_safe()
 
@@ -76,7 +96,7 @@ def test_assert_prod_safe_rejects_lowered_confidence_floor_in_production(monkeyp
 def test_assert_prod_safe_rejects_raised_risk_ceiling_in_production(monkeypatch):
     monkeypatch.setenv("CARELINE_ENVIRONMENT", "production")
     monkeypatch.setenv("CARELINE_RISK_CEILING", "0.9")
-    settings = Settings()
+    settings = _settings()
     with pytest.raises(ValueError, match="risk_ceiling"):
         settings.assert_prod_safe()
 
@@ -85,7 +105,7 @@ def test_assert_prod_safe_is_noop_in_development_with_unsafe_values(monkeypatch)
     monkeypatch.setenv("CARELINE_ENVIRONMENT", "development")
     monkeypatch.setenv("CARELINE_CONFIDENCE_FLOOR", "0.5")
     monkeypatch.setenv("CARELINE_RISK_CEILING", "0.9")
-    settings = Settings()
+    settings = _settings()
     settings.assert_prod_safe()
 
 
@@ -102,7 +122,7 @@ def test_assert_prod_safe_is_noop_in_development_with_unsafe_values(monkeypatch)
 )
 def test_is_production(monkeypatch, env_value, expected):
     monkeypatch.setenv("CARELINE_ENVIRONMENT", env_value)
-    settings = Settings()
+    settings = _settings()
     assert settings.is_production is expected
 
 
@@ -111,7 +131,7 @@ def test_is_production(monkeypatch, env_value, expected):
 
 def test_settings_ignores_unknown_env_fields(monkeypatch):
     monkeypatch.setenv("CARELINE_SURPRISE_FIELD", "nope")
-    settings = Settings()
+    settings = _settings()
     assert not hasattr(settings, "surprise_field")
 
 
@@ -119,19 +139,20 @@ def test_settings_ignores_unknown_env_fields(monkeypatch):
 
 
 def test_to_thresholds_result_is_frozen():
-    thresholds = Settings().to_thresholds()
+    thresholds = _settings().to_thresholds()
     with pytest.raises(ValidationError):
         thresholds.confidence_floor = 0.99
 
 
 def test_settings_mongo_uri_defaults_to_none():
-    settings = Settings()
-    assert settings.mongo_uri is None
+    settings = _settings()
+    # Never echo the value: a real URI carries credentials (claims-02).
+    assert settings.mongo_uri is None, "mongo_uri must default to None with no env/.env"
 
 
 def test_settings_mongo_uri_reads_env(monkeypatch):
     monkeypatch.setenv("CARELINE_MONGO_URI", "mongodb://localhost:27017")
-    settings = Settings()
+    settings = _settings()
     assert settings.mongo_uri == "mongodb://localhost:27017"
 
 
@@ -141,3 +162,10 @@ def test_settings_mongo_uri_reads_env(monkeypatch):
 def test_get_settings_returns_settings_instance():
     settings = get_settings()
     assert isinstance(settings, Settings)
+
+
+def test_settings_ignore_dotenv_when_env_file_disabled(tmp_path, monkeypatch):
+    """The hermetic constructor really skips a .env in the working directory."""
+    (tmp_path / ".env").write_text("CARELINE_MONGO_URI=mongodb://from-dotenv:27017\n")
+    monkeypatch.chdir(tmp_path)
+    assert _settings().mongo_uri is None, "a .env file leaked into hermetic Settings"
