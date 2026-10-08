@@ -16,6 +16,7 @@ Owner: Srujan (scope ``llm``). Default model: ``gpt-4o-mini`` (see ``DEFAULT_MOD
 
 from __future__ import annotations
 
+import os
 import time
 
 from careline.adapters.llm import prompts
@@ -28,6 +29,26 @@ from careline.domain.ports.reasoning import Reasoner, ReasonerUnavailable, Verif
 # Budget-first default (budget cap ~$20): swap via CARELINE_LLM_MODEL when a
 # stronger model is wanted; the price table + usage recorder keep the bill visible.
 DEFAULT_MODEL = "gpt-4o-mini"
+
+# The SDK default is a 600 s timeout with 2 retries: a hung provider would hold a
+# patient for ten minutes before the Brain could fail closed. Live calls measured
+# p99 ~6 s (evals/reports/live-flow-gpt-4o-mini.md), so 20 s + one retry bounds
+# the worst case to well under a minute. Override with CARELINE_LLM_TIMEOUT_S.
+DEFAULT_TIMEOUT_S = 20.0
+_MAX_TIMEOUT_S = 30.0
+MAX_RETRIES = 1
+
+
+def openai_client_kwargs(*, api_key: str | None) -> dict:
+    """Constructor kwargs every OpenAI client in CareLine uses (one timeout policy)."""
+    raw = os.environ.get("CARELINE_LLM_TIMEOUT_S", "")
+    try:
+        timeout = float(raw) if raw else DEFAULT_TIMEOUT_S
+    except ValueError:
+        timeout = DEFAULT_TIMEOUT_S
+    if not (0 < timeout <= _MAX_TIMEOUT_S):  # also rejects nan
+        timeout = DEFAULT_TIMEOUT_S
+    return {"api_key": api_key, "timeout": timeout, "max_retries": MAX_RETRIES}
 
 
 class _OpenAIBase:
@@ -52,7 +73,7 @@ class _OpenAIBase:
             from openai import OpenAI  # lazy: optional dependency
         except ImportError as exc:  # pragma: no cover - only without the SDK
             raise ReasonerUnavailable("openai SDK is not installed") from exc
-        self._client = OpenAI(api_key=self._api_key)
+        self._client = OpenAI(**openai_client_kwargs(api_key=self._api_key))
         return self._client
 
     def _parse(self, *, agent: str, instructions: str, user_message: str, text_format):

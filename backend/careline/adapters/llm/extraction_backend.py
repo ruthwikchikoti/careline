@@ -30,6 +30,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from careline.adapters.llm import prompts
+from careline.adapters.llm.openai_backend import openai_client_kwargs
 from careline.adapters.llm import usage as usage_recorder
 from careline.domain.ports.extraction import Extractor
 from careline.domain.ports.reasoning import ReasonerUnavailable
@@ -74,7 +75,7 @@ class OpenAIExtractor(Extractor):
             from openai import OpenAI  # lazy: optional dependency
         except ImportError as exc:  # pragma: no cover - only without the SDK
             raise ReasonerUnavailable("openai SDK is not installed") from exc
-        self._client = OpenAI(api_key=self._api_key)
+        self._client = OpenAI(**openai_client_kwargs(api_key=self._api_key))
         return self._client
 
     def extract(
