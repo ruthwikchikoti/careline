@@ -176,7 +176,7 @@ All of it runs pre-LLM on every question. **We chose it over** fine-tuning a sma
 - **Mitigation.**
   - A baseline bump is a visible diff in `backend/evals/reports/`.
   - Our stated rule: a baseline change is its own commit, with the regression it accepts written in the message.
-  - **Not enforced by tooling yet:** `main` has no branch protection and no CODEOWNERS, and no PR has run CI. Both are pending (see `docs/OPERATIONS.md`).
+  - **Not enforced by tooling yet:** `main` has no branch protection and no CODEOWNERS, and no PR has run CI (the gate failing on the `demo/blocked-by-eval-gate` push is the CI evidence). Both are pending (see `docs/OPERATIONS.md`).
 
 ## 8. Blind batteries over self-written probes (the "42/42" lesson)
 
