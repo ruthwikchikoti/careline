@@ -49,7 +49,7 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     )
 
     policy = yaml.safe_load(load_policy("red_flags").text)
-    assert policy["version"] == "v7"
+    assert policy["version"] == "v8"
     assert tuple(policy["patterns"]) == tuple(RED_FLAG_PATTERNS), (
         "policies/red-flags YAML and domain RED_FLAG_PATTERNS have drifted — "
         "update both together and bump the policy version in the manifest"
@@ -159,6 +159,17 @@ def test_red_flag_policy_artifact_matches_domain_constant():
     assert sorted(grounding.DRUG_LEXICON) == ag["drug_lexicon"]
     assert dict(grounding.DRUG_SYNONYMS) == ag["drug_synonyms"]
     assert list(grounding.DRUG_SUFFIXES) == ag["drug_suffixes"]
+    # v8 (final evaluator red team): grounding hardening vocabulary.
+    assert dict(grounding._SCALE_WORDS) == ag["scale_words"]
+    assert {k: [u, str(f)] for k, (u, f) in grounding._UNIT_SCALE.items()} == ag["unit_value_scale"]
+    assert dict(grounding.CHANGE_WORDS) == ag["change_words"]
+    pol = ag["polarity"]
+    assert sorted(grounding._STOP_CUES) == pol["stop_cues"]
+    assert sorted(grounding._TAKE_CUES) == pol["take_cues"]
+    assert sorted(grounding._NEGATIONS) == pol["negations"]
+    assert sorted(grounding._LIMIT_WORDS) == pol["limit_words"]
+    assert sorted(grounding._OTHER_PRODUCT) == pol["other_product_before"]
+    assert sorted(grounding._PRODUCT_SUFFIX) == pol["other_product_after"]
 
 
 def test_policy_artifact_hash_matches_manifest():

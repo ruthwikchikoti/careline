@@ -46,7 +46,7 @@ get their g back, and apostrophe-less contractions (:data:`APOSTROPHE_LESS`:
 "Ive", "cant", "wont", "hes", "isnt") get their apostrophe back. Closed
 lists only — no generic "-in" -> "-ing" rewrite ("cabin", "begin" stay).
 
-Mirrored into ``backend/policies/red-flags.v7.yaml`` (``typo_normalisation``;
+Mirrored into ``backend/policies/red-flags.v8.yaml`` (``typo_normalisation``;
 sync enforced by ``tests/llm/test_prompt_registry.py``).
 
 Owner: Priyanshu (scope ``safety``).

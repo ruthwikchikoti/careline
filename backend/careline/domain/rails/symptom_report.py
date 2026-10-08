@@ -52,7 +52,7 @@ vocabulary + present structure — which the gate chain's final invariant uses
 as the LLM-path backstop (never ANSWER a present body-state report).
 
 Deterministic, keyless, pure — mirrored into ``backend/policies/
-red-flags.v7.yaml`` (``context.symptom_report``) and held in sync by
+red-flags.v8.yaml`` (``context.symptom_report``) and held in sync by
 ``tests/llm/test_prompt_registry.py``.
 
 Owner: Priyanshu (scope ``safety``).
