@@ -103,7 +103,10 @@ accuracy 0.167 — the same metrics as at v5 and v6.
    kit is ready: a blind, stratified 60-item sample in
    [`human/sample-blind.csv`](human/README.md) and `python -m scripts.human_label
    agree`, which reports κ against the reference and between labellers, plus
-   missed emergencies and unsafe answers.
+   missed emergencies and unsafe answers. An **AI second labeller** (a separate
+   model, blind to the reference) agreed on 60/60 (κ 1.00, 0 missed
+   emergencies, 0 unsafe answers): evidence the labels are consistent and
+   unambiguous, not human agreement (same model family helped write items).
 5. The original emergency wording was sourced from NHS 111 / WHO danger-sign
    lists and then paraphrased, so literal keyword overlap with the v1 rail is low
    by construction (baseline-v0 caught 2 of 60).

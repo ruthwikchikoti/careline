@@ -124,18 +124,35 @@ def _read_labels(path: Path) -> dict[str, str]:
         return {r["id"]: r["label"] for r in csv.DictReader(fh) if r.get("label", "").strip()}
 
 
-def agreement(label_files: list[Path]) -> str:
-    reference = {c["id"]: reference_class(c["expected"]["verdict"]) for c in load_cases()}
-    labellers = {p.stem.removeprefix("labels-"): _read_labels(p) for p in label_files}
+def agreement(label_files: list[Path], ai_files: list[Path] | None = None) -> str:
     lines = [
-        "# Human labelling agreement",
+        "# Labelling agreement",
         "",
         f"*Generated:* {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC} · "
         "`python -m scripts.human_label agree` · classes EMERGENCY / ANSWER / OTHER",
         "",
+    ]
+    if label_files:
+        lines += ["## Human labellers", ""] + _section(label_files, "labels-")
+    else:
+        lines += ["## Human labellers", "", "_No human labels yet — no human κ is claimed._", ""]
+    if ai_files:
+        lines += ["## AI second labeller (NOT human)", "",
+                  "An AI model labelled the same blind sample without seeing the reference "
+                  "labels. This checks that the labels are consistent and unambiguous; it is "
+                  "not human agreement, and an AI from the same model family helped write "
+                  "many items, so the two are not independent.", ""]
+        lines += _section(ai_files, "ai-labels-")
+    return "\n".join(lines) + "\n"
+
+
+def _section(label_files: list[Path], prefix: str) -> list[str]:
+    reference = {c["id"]: reference_class(c["expected"]["verdict"]) for c in load_cases()}
+    labellers = {p.stem.removeprefix(prefix): _read_labels(p) for p in label_files}
+    lines = [
         "| Labeller | Items labelled | Agreement with reference | Cohen's κ vs reference "
-        "| Missed EMERGENCY (reference EMERGENCY, human not) "
-        "| Human ANSWER where reference not |",
+        "| Missed EMERGENCY (reference EMERGENCY, labeller not) "
+        "| Labeller ANSWER where reference not |",
         "|---|---|---|---|---|---|",
     ]
     details: list[str] = []
@@ -163,11 +180,11 @@ def agreement(label_files: list[Path]) -> str:
                                  [human_class(l2[i]) for i in shared])
                 lines.append(f"| {n1} × {n2} | {len(shared)} | "
                              f"{'n/a' if k is None else f'{k:.2f}'} |")
-    lines += ["", "## Disagreements with the reference", "",
-              "| Labeller | Item | Reference | Human |", "|---|---|---|---|", *details,
+    lines += ["", "### Disagreements with the reference", "",
+              "| Labeller | Item | Reference | Labeller |", "|---|---|---|---|", *details,
               "", "Each disagreement is reviewed: fix the reference label (state before/after "
-              "in the commit) or record why the reference stands."]
-    return "\n".join(lines) + "\n"
+              "in the commit) or record why the reference stands.", ""]
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,10 +199,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {write_sample(seed=args.seed)} items to {SAMPLE_PATH}")
         return 0
     files = sorted(_HUMAN_DIR.glob("labels-*.csv"))
-    if not files:
+    ai_files = sorted(_HUMAN_DIR.glob("ai-labels-*.csv"))
+    if not files and not ai_files:
         print("no evals/human/labels-*.csv yet — copy sample-blind.csv and fill `label`")
         return 2
-    report = agreement(files)
+    report = agreement(files, ai_files)
     Path(args.out).write_text(report, encoding="utf-8")
     print(report)
     return 0

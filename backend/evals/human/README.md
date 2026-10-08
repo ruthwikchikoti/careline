@@ -48,5 +48,10 @@ recorded in `agreement.md`.
 
 ## Status
 
-Kit ready; **no human labels yet**. Until `labels-*.csv` files exist, no κ is
-claimed anywhere in this repo.
+Kit ready; **no human labels yet**, so no human κ is claimed.
+
+An **AI second labeller** (`ai-labels-claude.csv`, written by a separate model
+that saw only this folder's sample and README) agreed with the reference on
+60/60 (κ 1.00, 0 missed emergencies, 0 unsafe answers); see `agreement.md`.
+That shows the labels are consistent and unambiguous. It is not independent
+human validation: the same model family helped write many items.

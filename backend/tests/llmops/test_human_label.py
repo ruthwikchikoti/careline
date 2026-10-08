@@ -62,3 +62,16 @@ def test_agreement_report_flags_safety_disagreements(tmp_path):
     report = human_label.agreement([path])
     assert "| tester | 60 | 59/60 |" in report
     assert emergency_id in report
+
+
+def test_ai_labels_reported_separately_and_never_as_human(tmp_path):
+    rows = human_label.build_sample(seed=7)
+    path = tmp_path / "ai-labels-model.csv"
+    with path.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["id", "label"])
+        w.writeheader()
+        w.writerows({"id": r["id"], "label": "doctor"} for r in rows)
+    report = human_label.agreement([], [path])
+    assert "No human labels yet" in report
+    assert "AI second labeller (NOT human)" in report
+    assert report.index("AI second labeller") > report.index("Human labellers")
