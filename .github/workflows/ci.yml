@@ -15,7 +15,9 @@ on:
   pull_request:
     paths: ["backend/**", ".github/workflows/ci.yml", "render.yaml"]
   push:
-    branches: [main]
+    # demo/** runs the gate on push too, so a deliberately regressed branch
+    # shows the failing check without needing a PR first (docs/DEMO-RUNBOOK.md).
+    branches: [main, "demo/**"]
     paths: ["backend/**", ".github/workflows/ci.yml", "render.yaml"]
   workflow_dispatch:
 
