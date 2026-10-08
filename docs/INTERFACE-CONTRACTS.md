@@ -131,21 +131,23 @@ minute window, separate from the spend window.
 | Route | Request | Response |
 |---|---|---|
 | `GET /patient/me` | none | `CarePlanOut {patient_id, as_of, facts: [FactOut]}` |
-| `POST /patient/ask` | `{question}` (1–2000 chars) | `PatientAnswerOut {verdict, answer_text, escalation_reason, citations}`. Runs on the threadpool with a clarify budget of 0. Counted as a spend route by the budget guard |
-| `GET /patient/questions` | none | `[PatientQuestionOut {turn_id, asked_at, question, verdict, answer_text, escalated, doctor_reply, replied_at}]` |
+| `POST /patient/ask` | `{question}` (1–2000 chars) | `PatientAnswerOut {verdict, answer_text, escalation_reason, citations, patient_message, emergency}`. `patient_message` is `answer_text or escalation_reason`; `emergency` is true when the decision's scope is `red_flag` (the portal then shows the 112 banner). Runs on the threadpool with a clarify budget of 0. Counted as a spend route by the budget guard |
+| `GET /patient/questions` | none | `[PatientQuestionOut {turn_id, asked_at, question, verdict, answer_text, escalated, doctor_reply, replied_at, patient_message, emergency}]` |
 | `DELETE /patient/history` | none | `204` |
 
 ### Doctor console (`Bearer` doctor JWT; `doctor_id` always comes from the token)
 
 | Route | Purpose |
 |---|---|
-| `POST /patients` | Register `{patient_id, caller_id, pin}` (PIN 4–12 characters; the seed generates 6 digits). Registering `demo-patient` returns `400` (reserved) |
+| `POST /patients` | Register `{patient_id, caller_id, pin}`. The PIN must match `^[0-9]{6}$` (exactly 6 digits), else `422`. The seed prints one distinct 6-digit PIN per patient. Registering `demo-patient` returns `400` (reserved) |
 | `GET /patients`, `GET /patients/{id}`, `GET /patients/{id}/record` | Patient list, summary, and record (`PatientRecordOut {current, history}`) |
 | `DELETE /patients/{id}/data` | DPDP erasure → `ErasureOut {patient_id, layer1_nulled, layer2_dropped, audit_redacted}`. Audit redaction is scoped to the requesting doctor |
 | `POST /consultations`, `/{id}/consent`, `/{id}/extract`, `/{id}/approve`; `GET /consultations[/{id}]` | Extraction and approval workflow (HITL) |
-| `GET /audit`, `GET /audit/events`, `GET /escalations`, `POST /escalations/{turn_id}/resolve` | Audit and the escalation loop |
-| `GET /eval` | Live re-run of the eight T1–T8 gate-chain scenarios (not the 339-item gate) |
-| `GET /monitoring` | Online monitor snapshot: `{generated_at, operational, output, quality, drift, cost, alerts}`. Aggregate only, with no question text and no patient ids |
+| `GET /audit`, `GET /audit/events` | Audit. Each turn carries `scope`, `needs_review` and `review_reason` (defaults keep older Mongo rows loadable) |
+| `GET /escalations` | `EscalationsOut {…, waiting, patients_waiting, review_waiting, review: [AuditTurnOut]}`. `review` is this doctor's redirected (CLARIFY) turns flagged `needs_review`, newest first, tenant-scoped |
+| `POST /escalations/{turn_id}/resolve` | Reply to and close one of this doctor's escalated **or review-flagged** turns. Any other turn id (another tenant's, or an unflagged redirect) is `404` |
+| `GET /eval` | Live re-run of the eight T1–T8 gate-chain scenarios at production thresholds (not the 376-item gate) |
+| `GET /monitoring` | Online monitor snapshot: `{scope: "process-wide, aggregate, no PHI", generated_at, operational, output, quality, drift, cost, alerts}`. Aggregate only, with no question text and no patient ids. Process-wide: every doctor sees the deployment's aggregates, not a per-tenant slice |
 
 ### Internal and demo
 
@@ -153,8 +155,8 @@ minute window, separate from the spend window.
 |---|---|---|---|
 | `POST /internal/run-question` | `X-Internal-Key` (service principal) | `QuestionIn {doctor_id, patient_id, call_id, question}` | `AnswerOut {verdict, answer_text, escalation_reason, confidence, risk, citations, trace: [TraceStepOut]}` |
 | `POST /demo/ask` | none (an optional doctor JWT lets it use a real `patient_id`) | `{question, patient_id?}` | `{verdict, answer_text, escalation_reason, confidence, risk, citations, trace}` |
-| `GET /demo/patient` | none | the bundled fictional demo patient |
-| `GET /health`, `GET /api/meta` | none | liveness, and the fictional-data banner |
+| `GET /demo/patient` | none | — | the bundled fictional demo patient |
+| `GET /health`, `GET /api/meta` | none | — | liveness, and the fictional-data banner |
 
 `/demo/*` is mounted only when `CARELINE_ENVIRONMENT` is not `production`
 (public-demo mode keeps it).
@@ -201,6 +203,9 @@ patient_id)`.
 - Login failures get one generic **401**, so a response never reveals which ids
   exist.
 - No response DTO contains `pin_hmac` or raw secrets.
+- Every `422` validation error is reduced to a list of `{type, loc, msg}`: the
+  submitted `input` and `ctx` are dropped, so a PIN or password is never echoed
+  back. This applies to every route; the web client reads that list shape.
 - An unhandled error returns **500** with no traceback in the body.
   `ReasonerUnavailable` maps to **503** where it escapes the graph.
 - Spend routes (`/demo/ask`, `/internal/run-question`, `/patient/ask`) count

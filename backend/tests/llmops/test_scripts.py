@@ -75,7 +75,37 @@ def test_unknown_version_fails_loudly():
 def test_report_states_reproduction_scope():
     a = shadow_compare.run_variant(shadow_compare.build_rail("v1"))
     table = shadow_compare.render(a, a, "A", "B")
-    assert "Reproduction scope" in table and shadow_compare.BASELINE_V0_COMMIT in table
+    assert "Reproduction scope" in table and shadow_compare.BASELINE_V0_TAG in table
+
+
+# -- tags, not SHAs: history rewrites must not break the demo commands ----
+
+
+def test_baseline_v0_is_the_annotated_tag_resolving_to_the_original_commit():
+    assert shadow_compare.BASELINE_V0_TAG == "baseline-v0"
+    ref, note = shadow_compare.resolve_baseline_v0()
+    assert ref == "baseline-v0" and note is None
+    assert shadow_compare.resolve_ref("baseline-v0").startswith(
+        shadow_compare.BASELINE_V0_FALLBACK_SHA
+    )
+
+
+def test_baseline_v0_falls_back_to_the_sha_with_a_clear_message(monkeypatch):
+    monkeypatch.setattr(shadow_compare, "BASELINE_V0_TAG", "no-such-tag-xyz")
+    ref, note = shadow_compare.resolve_baseline_v0()
+    assert ref == shadow_compare.BASELINE_V0_FALLBACK_SHA
+    assert note is not None and "no-such-tag-xyz" in note and "falling back" in note
+
+
+@pytest.mark.parametrize("ref", ["baseline-v0", "release/red-flags-v4", "release/red-flags-v5"])
+def test_replay_refs_accept_release_tag_names(ref):
+    sha = shadow_compare.resolve_ref(ref)
+    assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha)
+
+
+def test_unknown_replay_ref_fails_with_a_clear_message():
+    with pytest.raises(SystemExit, match="not a tag or commit"):
+        shadow_compare.resolve_ref("release/red-flags-v404")
 
 
 # -- cost_report -------------------------------------------------------------------
@@ -168,3 +198,37 @@ def test_remote_target_and_headers():
         load_test._parse_headers(["no-colon"])
     r = load_test.run("http://127.0.0.1:9", total=1, duration_s=0.0, concurrency=1)
     assert r["errors"] == 1  # connection refused is an error, not a crash
+
+
+# -- demo runner + in-app eval rerun use production thresholds --
+
+
+def test_demo_runner_runs_clean_at_production_thresholds(capsys):
+    from careline.domain.thresholds import DEFAULT_THRESHOLDS
+    from careline.services import demo_runner
+
+    assert demo_runner.run_demo() == 0
+    out = capsys.readouterr().out
+    assert "UNEXPECTED" not in out
+    assert "Demo complete." in out
+    assert f"risk ceiling {DEFAULT_THRESHOLDS.risk_ceiling}" in out
+    assert "0.85" not in out
+    assert "PRD" not in out
+
+
+def test_demo_runner_accepts_clarify_or_escalate_for_a_discontinued_med():
+    from careline.domain.enums import Verdict
+    from careline.services import demo_runner
+
+    allowed = {title: ok for title, _q, _e, ok in demo_runner._DEMO_SCENARIOS}
+    assert allowed["Discontinued med"] == frozenset({Verdict.CLARIFY, Verdict.ESCALATE})
+
+
+def test_offline_eval_rerun_uses_default_thresholds():
+    import inspect
+
+    from careline.services import eval_rerun
+
+    assert "risk_ceiling=0.85" not in inspect.getsource(eval_rerun)
+    results, _digest = eval_rerun.rerun_offline_eval()
+    assert all(ok for _, _, ok in results), results

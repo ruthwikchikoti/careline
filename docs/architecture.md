@@ -32,7 +32,8 @@ production. The requirement ids (F*, N*) refer to the Requirements table in the
  │           ⑤ live: OpenAI Responses API, responses.parse + text_format (strict       │
  │             Pydantic schema), HTTPS/JSON, sync SDK call · keyless twins offline    │
  │           any SDK error / refusal → ReasonerUnavailable → ESCALATE                 │
- │ gate      run_gate_chain(): 5 gates + final danger-concept invariant → Decision    │
+ │ gate      run_gate_chain(): 5 gates, citation veto, answer-text grounding (v7),     │
+ │           final danger / body-state invariant                                      │
  └─ answer | clarify | escalate (terminal nodes record the route) ────────────────────┘
    │  ⑥ Decision (Pydantic: verdict, answer_text, citations, confidence, risk, trace)
    ▼
@@ -40,14 +41,16 @@ production. The requirement ids (F*, N*) refer to the Requirements table in the
    │  ⑦ ESCALATE → TelephonyPort.escalate(EscalationPayload)  ·  in-memory stub          [sync]
    │  ⑧ AuditService.log_turn → in-memory read model under a lock, then write-through
    │     to Mongo via pymongo replace_one; best effort (a storage error never fails
-   │     the turn)                                                                        [sync, same thread]
+   │     the turn). A CLARIFY that names a danger concept or a present symptom is
+   │     stored needs_review=True → doctor's review queue (GET /escalations → review)   [sync, same thread]
    │  ⑨ online_monitor.record(...) → bounded ring buffers; sampled ANSWER turns go on a
    │     bounded queue to a judge thread (LLM-as-judge or keyless twin)                  [async, background thread]
    │  ⑩ Langfuse record_turn (when keys + obs extra) → SDK batches and flushes on its
    │     own thread  ·  HTTPS/JSON  ·  patient id salted-hashed                          [async, background thread]
    │  usage_recorder: per-call tokens / latency / $ (+ JSONL if CARELINE_USAGE_LOG)     [sync, in-process]
    ▼
- FastAPI → PatientAnswerOut JSON {verdict, answer_text, escalation_reason, citations}    [sync response]
+ FastAPI → PatientAnswerOut JSON {verdict, answer_text, escalation_reason, citations,
+           patient_message, emergency}  (emergency=true → portal shows the 112 banner)   [sync response]
 ```
 
 | Hop | From → to | Sync / async | Protocol | Data format |
@@ -116,11 +119,11 @@ graph TD;
 
 | Node | What it does | Code |
 |---|---|---|
-| `triage` | Pre-LLM rails on every question, in this order: red-flag rail (literal + structural + lexical paraphrase, Hinglish, typo normalisation) → acute-concern net → structural symptom-report layer → multi-condition tripwire → hypothetical-only danger (CLARIFY with the 112 line) → small talk | `domain/brain/triage.py::run_triage`, `domain/rails/*` |
+| `triage` | Pre-LLM rails on every question, in this order: red-flag rail (literal + structural + lexical paraphrase, Hinglish, typo normalisation, since v6 de-obfuscation of spaced, hyphenated and leetspeak words plus generic distress phrases, and since v7 dropped-g / apostrophe-less repair ("havin fits", "Ive") plus the final red-team families) → acute-concern net → structural symptom-report layer → multi-condition tripwire → hypothetical-only danger (CLARIFY with the 112 line) → small talk. Every red-flag and multi-condition escalation text ends with the 112 line | `domain/brain/triage.py::run_triage`, `domain/rails/*` |
 | `retrieve` | Layer-1 valid slice at `now`, then a lexical relevance ranker that narrows the reasoner's grounding. The gate and verifier still see the full slice | `Patient.valid_slice`, `domain/retrieval/ranker.py` |
 | `reason` | Proposes a scope, an answer and citations; fails closed | `Reasoner` port (`adapters/llm/openai_backend.py`, `anthropic_backend.py`, `heuristic.py`) |
 | `verify` | Independent veto against the full valid slice. Runs only when the proposal is answerable | `Verifier` port |
-| `gate` | Five gates (scope, which re-checks every emergency net for every scope; risk; cross-condition; confidence/staleness; independent verification). Gates only downgrade. A final invariant re-scans the question with all context guards off, so no question containing a danger concept ends in ANSWER | `domain/gates/chain.py::run_gate_chain` |
+| `gate` | Five gates (scope, which re-checks every emergency net for every scope; risk; cross-condition; confidence/staleness; independent verification). Gates only downgrade. Then, before any ANSWER, three deterministic final invariants: a **citation veto** (v6: any cited id that is not an exact id in the valid slice, or a duplicate, gives CLARIFY); an **answer-text grounding check** (v7: every dose / strength / frequency / number token and every drug name in the answer text must appear in a CITED fact of the current valid slice — units, spacing, case, number and frequency words normalised, no unit conversion — so a superseded dose behind a current fact's id gives CLARIFY); and a re-scan of the question with all context guards off, so no question containing a danger concept or (v6) a present body-state report ends in ANSWER. The veto and grounding check ESCALATE instead of clarifying when a danger concept is present or the clarify budget is spent | `domain/gates/chain.py::run_gate_chain`, `domain/gates/grounding.py` | `domain/gates/chain.py::run_gate_chain` |
 | `answer` / `clarify` / `escalate` | Record the route and terminate. The escalation handoff itself runs in `QuestionService`, not in the node | `adapters/orchestration/graph.py` |
 
 **"Seven roles", stated precisely.** The graph has **5 agent nodes** (triage,
@@ -147,14 +150,22 @@ what makes the gate's numbers apply to production:
   route and early exit, including narrowing. Brain ≡ graph ≡ service.
 - The adversarial-review and blind-battery tests (`test_review_round2.py`,
   `test_blind1_battery.py`) assert Brain/graph parity on every probe.
-- A one-off check over all 339 eval items, run while writing this doc (it is not
-  a committed test), found 0 differences in verdict, citations or answer text.
+- `test_review_round4.py` (v6) asserts Brain/graph parity for the citation
+  veto (superseded, case-mangled, duplicate, unknown and whitespace-mangled ids)
+  and for the mixed-emergency template.
+- `test_answer_grounding.py` (v7) asserts Brain/graph parity for the
+  answer-text grounding check (superseded dose behind a current id, a reused
+  id, retired / not-yet-valid / uncited drugs and doses, faithful paraphrases),
+  and `test_final_redteam_v7.py` for the final red-team emergencies.
+- A one-off check over the 339 items of the v5 eval set (it is not a committed
+  test) found 0 differences in verdict, citations or answer text. On battery 3
+  with a worst-case stand-in reasoner, Brain and graph also agreed on every item.
 
 One known gap is configuration rather than code. The gate runs with a clarify
 budget of 2, while the web routes (`/patient/ask`, `/demo/ask`) use 0: a one-shot
 web turn goes to the doctor instead of asking the patient to rephrase. At budget
-0, 3 of 59 out-of-scope items escalate instead of redirecting (redirect accuracy
-0.949, still ≥ 0.90). The deviation is in the safe direction, and we disclose it
+0, 4 of 65 out-of-scope items escalate instead of redirecting (redirect accuracy
+0.938, still ≥ 0.90). The deviation is in the safe direction, and we disclose it
 instead of hiding it.
 
 ## 4. Two-layer data, stated honestly
@@ -181,24 +192,28 @@ instead of hiding it.
    ▼
  Pull request ──► GitHub Actions (ci.yml)
                     ├─ Suite (keyless)               pytest, no secrets
-                    ├─ Eval gate (deterministic)     339 items; 8 absolute gates; per-case regression
-                    │                                vs after-policy-v5.json on shared ids; split
-                    │                                floors; fails → red check
+                    ├─ Eval gate (deterministic)     381 items; 8 absolute gates; per-case regression
+                    │                                vs after-policy-v7.json on shared ids; split
+                    │                                floors; fails → red check (does not block yet)
                     └─ LLM slice (optional)          push / dispatch only; gpt-4o-mini + judge;
                                                      exit 2 = SKIPPED (no key), never a silent green
    ▼
- merge to main ──► Render blueprint (autoDeploy: true) builds backend/Dockerfile → /health check → live
+ push to main ──► Render blueprint (autoDeploy: true) builds backend/Dockerfile → /health check → live
+                  (runs in parallel with CI; a red check does not stop it)
    ▼
- rollback: Render "Rollback" to the previous deploy (immediate)  ·  git revert <release commit> → CI → redeploy
+ rollback: Render "Rollback" to the previous deploy (immediate)  ·  git revert <release commits> → CI → redeploy
 ```
 
 Gaps we disclose:
 
-- Branch protection on `main` is not enabled, so a red check does not physically
-  stop a merge yet.
-- Render's `autoDeploy: true` deploys on push without waiting for CI. The fix is
-  `autoDeployTrigger: checksPass` plus required checks.
-- No release tags exist yet. The README lists the exact commands.
+- **Deploy happens on push to `main`.** Render's `autoDeploy: true` does not
+  wait for CI, and `main` has no branch protection, so a red check stops neither
+  the merge nor the deploy. Pending team actions: `autoDeployTrigger:
+  checksPass` (Render's "deploy after checks pass") plus branch protection
+  requiring the two CI checks.
+- Release tags `baseline-v0`, `release/red-flags-v4` and `release/red-flags-v5`
+  exist; `release/red-flags-v2` and `release/red-flags-v3` are created on the v2
+  and v3 release commits, and `release/red-flags-v6` / `-v7` at their commits.
 - The YAML policy files mirror the code constants (a test enforces this), but
   they are not loaded at runtime. Rolling back means reverting the release
   commit, not editing the manifest pin.
@@ -207,8 +222,8 @@ Gaps we disclose:
 
 | Component | Choice | Requirement it serves | Why this and not the alternative |
 |---|---|---|---|
-| Pre-LLM rails | Deterministic regex, structural and lexical-paraphrase rules | F2, F3, N3, N6 | An emergency is caught before any model call, so it costs $0 and adds no model latency, and CI can measure it without a key. The ceiling (blind recall 84%) is disclosed |
-| Gate chain | 5 ordered gates that only downgrade, plus a final danger invariant | F3, F6, N8 | The model proposes and never routes. Every route is reviewable code that the gate can test |
+| Pre-LLM rails | Deterministic regex, structural and lexical-paraphrase rules | F2, F3, N3, N6 | An emergency is caught before any model call, so it costs $0 and adds no model latency, and CI can measure it without a key. The limit (blind recall 88% at v6, battery 3) is disclosed |
+| Gate chain | Citation veto, 5 ordered gates that only downgrade, and a final danger + body-state invariant | F3, F5, F6, N8 | The model proposes and never routes. Every route is reviewable code that the gate can test |
 | Orchestration | LangGraph `StateGraph` | observability | Explicit agent nodes and per-node traces. Parity tests keep it equal to the Brain |
 | Reasoner + separate Verifier | Two structured LLM calls | F6 (no ungrounded answers) | An independent veto against the full slice catches answers the reasoner over-reached on. It costs about +50% $ per answered request (estimate $0.000101 per verifier call) |
 | Model | gpt-4o-mini (claude-haiku-4-5 as the alternative) | N6, N7 | Budget-first. Answers are short and grounded, and the gate never trusts the model's routing |
@@ -217,7 +232,7 @@ Gaps we disclose:
 | API | FastAPI with the sync pipeline on the threadpool | N5 | Typed DTOs, and a slow LLM call never blocks the event loop |
 | Auth | Per-doctor pbkdf2 hashes; patient `{doctor_id, patient_id, pin}`; JWT `role` claim; login lockout | F4 | Fixes the review findings: password-less doctor tokens, cross-tenant portal login, PIN brute force |
 | Budget guard | Per-IP minute windows (spend and login separate), daily cap, rightmost-XFF client IP | N7 | Spend is capped by configuration, and a spoofed XFF cannot dodge the limit |
-| Eval gate | Keyless deterministic slice in CI | F2–F8, N1 | No secrets, so fork PRs are gated. Reproducible, and the 339 items run in seconds |
+| Eval gate | Keyless deterministic slice in CI | F2–F8, N1 | No secrets, so fork PRs are gated. Reproducible, and the 381 items run in about 1.7 s |
 | LLM slice | Live model + LLM-as-judge with an sqlite response cache | N2 | Measures what the keyless twin cannot (answer accuracy, faithfulness). Not run live yet |
 | Online monitor | In-process ring buffers and a sampled judge thread | N1, N4, N6 | Five monitoring categories with no extra infrastructure on a free tier. Per-process only |
 | Tracing | Langfuse (optional `obs` extra) | N4, N6 | Per-turn cost and latency traces. No project is configured yet |
@@ -227,7 +242,10 @@ Gaps we disclose:
 
 | Failure | Behaviour |
 |---|---|
-| Reasoner or verifier unavailable (no SDK, API error, refusal, parse failure) | `ReasonerUnavailable` → ESCALATE, counted as fail-closed in `/monitoring` |
+| Reasoner or verifier unavailable (no SDK, API error, refusal, parse failure, timeout) | `ReasonerUnavailable` → ESCALATE, counted as fail-closed in `/monitoring`. No explicit client timeout is set: the `openai` 2.43.0 SDK defaults apply (600 s read, 5 s connect, 2 retries), so a hung provider is a latency problem long before it is an error |
+| Cited fact id not in the valid slice (superseded, other patient, mangled, duplicate) | Citation veto → CLARIFY, or ESCALATE with a danger concept or a spent clarify budget (v6) |
+| Answer text carries a dose, number or drug name that is in no cited current fact (e.g. a superseded dose behind the current fact's id, a retired or not-yet-valid drug) | Answer-text grounding check → CLARIFY, or ESCALATE with a danger concept or a spent clarify budget (v7). Lexical, so a unit-changing paraphrase ("1 g" for "1000mg") also CLARIFIES; a wrong claim with no number or drug name is still the verifier's job |
+| Rail misses an emergency | CLARIFY redirect ending with the 112 line; if the question names a danger concept or a present symptom, the turn is also flagged `needs_review` for the doctor's review queue (no page) |
 | Unexpected exception in the pipeline | the error is counted in the monitor and traced, the exception propagates (HTTP 500 with no traceback in the body), and the patient is not answered |
 | Mongo audit write fails | the turn still returns (audit is best effort); the in-memory read model keeps the record |
 | Judge queue full or judge error | the sample is dropped and counted, never scored as faithful |

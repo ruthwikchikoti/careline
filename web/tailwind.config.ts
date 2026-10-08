@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss";
 
-// CareLine design tokens. The shared contract every member
+// CareLine design tokens. The shared contract every screen
 // builds against — change only by coordination.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],

@@ -48,7 +48,7 @@ def test_register_patient_happy_path(client: TestClient, authed_headers: dict[st
         json={
             "patient_id": "patient-new",
             "caller_id": "+919876543210",
-            "pin": "1234",
+            "pin": "123456",
         },
     )
     assert response.status_code == 201
@@ -69,7 +69,7 @@ def test_register_patient_rejects_doctor_id_in_body(
         json={
             "patient_id": "patient-new",
             "caller_id": "+919876543210",
-            "pin": "1234",
+            "pin": "123456",
             "doctor_id": "dr-evil",
         },
     )
@@ -82,7 +82,7 @@ def test_register_patient_without_auth_returns_401(client: TestClient):
         json={
             "patient_id": "patient-new",
             "caller_id": "+919876543210",
-            "pin": "1234",
+            "pin": "123456",
         },
     )
     assert response.status_code == 401
@@ -98,7 +98,7 @@ def test_get_patient_after_registration_returns_empty_record(
         json={
             "patient_id": "patient-reg",
             "caller_id": "+910000000001",
-            "pin": "9999",
+            "pin": "999999",
         },
     )
     assert register.status_code == 201

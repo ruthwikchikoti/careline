@@ -1,10 +1,18 @@
 # Eval gate report — BASELINE-v0 (the 'before' artifact)
 
-Provenance: run of the keyless eval gate against the code at git tag
-`baseline-v0` (commit 6168340 — the v1 literal-regex red-flag rail, before the
-semantic emergency detector), using the current seed data so eval fact ids resolve.
-This is the report a pull request would show as the blocked check: 58 of 60
-paraphrased emergencies missed. Compare `after-policy-v2.md` for the pass.
+Provenance: the keyless eval gate run on the tree at the annotated git tag
+`baseline-v0` (commit b8476c9 — the v1 literal-regex red-flag rail, before the
+semantic emergency detector). This is the report a pull request would show as the
+blocked check: 58 of 60 paraphrased emergencies missed. Compare
+`after-policy-v2.md` for the pass.
+
+Reproduce exactly (read-only, no checkout — runs that tag's own gate on its own tree):
+
+    cd backend && python -m scripts.shadow_compare --replay baseline-v0
+
+Verified 2026-10-08: n 250, missed_emergencies 58, replayed commit
+b8476c9e8fd93707bbc41ef9955e88a5d9d90d43, gate exit code 1 (blocked). If the tag
+is missing (a clone without tags), the tool falls back to b8476c9 and says so.
 
 # Eval gate report — keyless deterministic slice
 

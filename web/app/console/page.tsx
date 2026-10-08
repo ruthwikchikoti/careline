@@ -489,7 +489,7 @@ export default function ConsolePage() {
               </>
             ) : (
               <p className="text-sm text-muted">
-                The 7-agent route appears here: triage → retrieve → reason → verify → gate.
+                The agent route appears here — five nodes: triage → retrieve → reason → verify → gate, then answer, clarify or escalate.
               </p>
             )}
           </div>

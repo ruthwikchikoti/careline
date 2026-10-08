@@ -30,6 +30,7 @@ from careline.adapters.auth.principals import PatientPrincipal
 from careline.api.deps import get_current_patient
 from careline.api.dto.patients import FactOut
 from careline.api.login_throttle import guard_login, record_login
+from careline.domain.enums import ScopeCategory
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision
 from careline.services.auth_service import is_reserved_doctor_id, is_reserved_patient_id
@@ -75,12 +76,22 @@ class PatientAskIn(BaseModel):
 
 
 class PatientAnswerOut(BaseModel):
+    """The agent's reply to one portal question.
+
+    ``patient_message`` is the decision's patient-facing text (the answer, the
+    clarifying redirect, or the escalation notice) so the UI never has to guess
+    what to show; ``emergency`` is true for a RED_FLAG turn, which the portal
+    renders with a prominent call-112 banner.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     verdict: str
     answer_text: str | None = None
     escalation_reason: str | None = None
     citations: list[str] = Field(default_factory=list)
+    patient_message: str | None = None
+    emergency: bool = False
 
 
 class PatientQuestionOut(BaseModel):
@@ -96,6 +107,8 @@ class PatientQuestionOut(BaseModel):
     escalated: bool = False
     doctor_reply: str | None = None
     replied_at: datetime | None = None
+    patient_message: str | None = None
+    emergency: bool = False
 
 
 # --- routes ------------------------------------------------------------------
@@ -191,6 +204,8 @@ async def patient_ask(
         answer_text=decision.answer_text,
         escalation_reason=decision.escalation_reason,
         citations=list(decision.citations),
+        patient_message=decision.answer_text or decision.escalation_reason,
+        emergency=decision.scope is ScopeCategory.RED_FLAG,
     )
 
 
@@ -237,6 +252,8 @@ async def patient_questions(
                 escalated=t.verdict.value == "escalate",
                 doctor_reply=resolution.reply_text if resolution else None,
                 replied_at=resolution.resolved_at if resolution else None,
+                patient_message=t.answer_text or t.escalation_reason,
+                emergency=t.scope == ScopeCategory.RED_FLAG.value,
             )
         )
     return out

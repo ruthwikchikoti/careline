@@ -10,6 +10,7 @@ import sys
 import traceback
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -61,6 +62,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         _request: Request, _exc: ReasonerUnavailable
     ) -> JSONResponse:
         return _json(503, "reasoning service unavailable")
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's default 422 echoes each rejected value back ("input"), which
+        # would reflect a submitted PIN or password. Keep where/why, never what.
+        errors = [
+            {k: err[k] for k in ("type", "loc", "msg") if k in err} for err in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     @app.exception_handler(Exception)
     async def _internal_error(request: Request, exc: Exception) -> JSONResponse:

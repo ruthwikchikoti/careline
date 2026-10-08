@@ -38,6 +38,10 @@ class AuditTurnOut(BaseModel):
     resolved: bool = False
     reply: str | None = None
     resolved_at: datetime | None = None
+    # Doctor review queue: a redirected turn flagged for a human look.
+    scope: str | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
 
 
 class AuditCallOut(BaseModel):
@@ -98,6 +102,10 @@ class EscalationsOut(BaseModel):
 
     ``groups`` is the per-patient view (the primary shape the queue UI renders);
     ``escalations`` keeps the flat, newest-first list for any caller that wants it.
+    ``review`` is the separate "redirected — please review" list:
+    CLARIFY turns flagged because the question reads like a symptom report. They
+    did not page the doctor, so they are listed here, newest first, and can be
+    resolved exactly like an escalation.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -106,10 +114,12 @@ class EscalationsOut(BaseModel):
     patients_waiting: int = 0
     groups: list[EscalationGroupOut] = Field(default_factory=list)
     escalations: list[AuditTurnOut] = Field(default_factory=list)
+    review_waiting: int = 0
+    review: list[AuditTurnOut] = Field(default_factory=list)
 
 
 class EscalationResolveIn(BaseModel):
-    """A doctor's reply that closes an escalated turn."""
+    """A doctor's reply that closes an escalated (or review-flagged) turn."""
 
     model_config = ConfigDict(extra="forbid")
 
