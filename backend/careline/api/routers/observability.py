@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from careline.adapters.auth.principals import DoctorPrincipal
 from careline.api.deps import get_current_doctor
@@ -206,7 +207,8 @@ async def get_eval(
     safe and deterministic on every request — it does not touch the doctor's
     live audit log.
     """
-    results, digest = rerun_offline_eval()
+    # Synchronous scenario re-run → threadpool, so it never blocks the loop.
+    results, digest = await run_in_threadpool(rerun_offline_eval)
     passed = sum(1 for _, _, ok in results if ok)
     return EvalRunOut(
         passed=passed,

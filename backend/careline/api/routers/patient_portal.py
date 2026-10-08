@@ -24,6 +24,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from careline.adapters.auth.principals import PatientPrincipal
 from careline.api.deps import get_current_patient
@@ -176,8 +177,14 @@ async def patient_ask(
         doctor_id=principal.doctor_id,
         max_clarify_turns=0,
     )
-    decision: Decision = request.app.state.question_svc.run_question(
-        question=body.question, patient=patient, session=session, now=now
+    # The pipeline is synchronous (graph + possible blocking LLM call + audit
+    # write): run it on the threadpool so it never blocks the event loop.
+    decision: Decision = await run_in_threadpool(
+        request.app.state.question_svc.run_question,
+        question=body.question,
+        patient=patient,
+        session=session,
+        now=now,
     )
     return PatientAnswerOut(
         verdict=decision.verdict.value,

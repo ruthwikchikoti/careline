@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from careline.adapters.auth.principals import InternalPrincipal
 from careline.api.deps import get_internal_principal
@@ -59,7 +60,9 @@ async def run_question(
         doctor_id=body.doctor_id,
         max_clarify_turns=settings.max_clarify_turns,
     )
-    decision = request.app.state.question_svc.run_question(
+    # Synchronous pipeline → threadpool, so one question never blocks the loop.
+    decision = await run_in_threadpool(
+        request.app.state.question_svc.run_question,
         question=body.question,
         patient=patient,
         session=session,

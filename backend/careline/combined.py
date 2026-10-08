@@ -29,6 +29,7 @@ except Exception:
     pass
 
 from fastapi import Request
+from starlette.concurrency import run_in_threadpool
 
 from careline.api.app import create_app
 from careline.demo_server import AskIn, _NOW, _demo_patient, demo_patient
@@ -102,7 +103,9 @@ async def demo_ask(request: Request, body: AskIn) -> dict:
         doctor_id=doctor_id,
         max_clarify_turns=0,
     )
-    decision = request.app.state.question_svc.run_question(
+    # Synchronous pipeline → threadpool, so one question never blocks the loop.
+    decision = await run_in_threadpool(
+        request.app.state.question_svc.run_question,
         question=body.question,
         patient=patient,
         session=session,
