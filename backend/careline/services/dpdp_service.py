@@ -62,7 +62,7 @@ class DpdpService:
             patient_id=patient_id,
         )
         await self._memory.forget(doctor_id=doctor_id, patient_id=patient_id)
-        audit_redacted = self._audit.redact_patient(patient_id)
+        audit_redacted = self._audit.redact_patient(patient_id, doctor_id=doctor_id)
 
         self._audit.log_event(
             AuditEventKind.ERASURE,

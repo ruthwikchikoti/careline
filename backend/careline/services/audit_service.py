@@ -297,8 +297,16 @@ class AuditService:
     def turns_for_call(self, call_id: str) -> list[AuditTurnRecord]:
         return [t for t in self._turns if t.call_id == call_id]
 
-    def turns_for_patient(self, patient_id: str) -> list[AuditTurnRecord]:
-        return [t for t in self._turns if t.patient_id == patient_id]
+    def turns_for_patient(self, *, doctor_id: str, patient_id: str) -> list[AuditTurnRecord]:
+        """One patient's turns under one doctor — always tenant-keyed (REVIEW-1).
+
+        ``patient_id`` is only unique *within* a doctor, so a patient-scoped read
+        keyed by ``patient_id`` alone would cross tenants (sev-0). There is no
+        unscoped variant.
+        """
+        return [
+            t for t in self._turns if t.doctor_id == doctor_id and t.patient_id == patient_id
+        ]
 
     def turns_for_doctor(self, doctor_id: str) -> list[AuditTurnRecord]:
         """All logged turns for one doctor, newest first."""
@@ -348,38 +356,53 @@ class AuditService:
     def resolution_for(self, turn_id: str) -> AuditResolutionRecord | None:
         return self._resolutions.get(turn_id)
 
-    def resolutions_for_patient(self, patient_id: str) -> list[AuditResolutionRecord]:
-        return [r for r in self._resolutions.values() if r.patient_id == patient_id]
+    def resolutions_for_patient(
+        self, *, doctor_id: str, patient_id: str
+    ) -> list[AuditResolutionRecord]:
+        """One patient's doctor replies under one doctor — tenant-keyed (REVIEW-1)."""
+        return [
+            r
+            for r in self._resolutions.values()
+            if r.doctor_id == doctor_id and r.patient_id == patient_id
+        ]
 
-    def clear_patient(self, patient_id: str) -> int:
+    def clear_patient(self, *, doctor_id: str, patient_id: str) -> int:
         """Remove this patient's turns + doctor replies entirely (UI 'clear history').
 
         Distinct from :meth:`redact_patient` (DPDP — keeps a nulled skeleton for
         compliance): this fully drops the records so the patient's portal thread is
-        empty after a practice/demo run. Returns the number of turns removed.
+        empty after a practice/demo run. Keyed by ``(doctor_id, patient_id)`` so a
+        same-named patient under another doctor is never touched (REVIEW-1).
+        Returns the number of turns removed.
         """
+
+        def _mine(record: AuditTurnRecord | AuditResolutionRecord) -> bool:
+            return record.doctor_id == doctor_id and record.patient_id == patient_id
+
         before = len(self._turns)
-        self._turns = [t for t in self._turns if t.patient_id != patient_id]
-        self._resolutions = {
-            tid: r for tid, r in self._resolutions.items() if r.patient_id != patient_id
-        }
+        self._turns = [t for t in self._turns if not _mine(t)]
+        self._resolutions = {tid: r for tid, r in self._resolutions.items() if not _mine(r)}
         # Best-effort durable delete — keep the in-memory clear even if storage hiccups.
         if self._store is not None and hasattr(self._store, "delete_patient"):
             try:
-                self._store.delete_patient(patient_id)  # type: ignore[attr-defined]
+                self._store.delete_patient(  # type: ignore[attr-defined]
+                    doctor_id=doctor_id, patient_id=patient_id
+                )
             except Exception:  # noqa: BLE001
                 pass
         return before - len(self._turns)
 
-    def redact_patient(self, patient_id: str) -> int:
+    def redact_patient(self, patient_id: str, *, doctor_id: str) -> int:
         """DPDP erasure — null clinical text, keep audit skeleton.
 
+        Tenant-keyed: only this doctor's records for ``patient_id`` are redacted, so
+        one doctor's erasure request never rewrites another tenant's audit trail.
         Returns the number of records redacted (turns + calls).
         """
         count = 0
         redacted_turns: list[AuditTurnRecord] = []
         for turn in self._turns:
-            if turn.patient_id != patient_id or turn.redacted:
+            if turn.doctor_id != doctor_id or turn.patient_id != patient_id or turn.redacted:
                 redacted_turns.append(turn)
                 continue
             redacted = turn.model_copy(
@@ -396,7 +419,7 @@ class AuditService:
         self._turns = redacted_turns
 
         for call_id, call in list(self._calls.items()):
-            if call.patient_id == patient_id and not call.redacted:
+            if call.doctor_id == doctor_id and call.patient_id == patient_id and not call.redacted:
                 marked = call.model_copy(update={"redacted": True})
                 self._calls[call_id] = marked
                 self._persist_call(marked)
@@ -405,6 +428,7 @@ class AuditService:
         self.log_event(
             AuditEventKind.ERASURE,
             patient_id=patient_id,
+            doctor_id=doctor_id,
             detail=f"redacted {count} audit record(s) — clinical text nulled",
         )
         return count

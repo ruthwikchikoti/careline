@@ -1,14 +1,17 @@
 """Patient portal — the patient's own self-service surface (loop-closing UI).
 
 The web app's other routers are the *doctor's* console. This one is the
-**patient's**: they sign in with their patient id + PIN (the same caller-ID/PIN
-identity the voice line uses), then see their approved care plan, ask the agent a
-follow-up, and read the doctor's replies to anything that was escalated.
+**patient's**: they sign in with their clinic/doctor id + patient id + PIN (the
+same caller-ID/PIN identity the voice line uses), then see their approved care
+plan, ask the agent a follow-up, and read the doctor's replies to anything that
+was escalated.
 
 Every route is scoped by the authenticated :class:`PatientPrincipal`, so a patient
 can only ever reach *their own* record under *their own* doctor — the same
 one-patient isolation the rest of the system guarantees, enforced here by the JWT
-subject rather than a request-body id.
+subject rather than a request-body id. ``patient_id`` is only unique *within* a
+doctor, so login and every audit read are keyed by ``(doctor_id, patient_id)``
+(REVIEW-1): two doctors may both have a "p2" and neither can reach the other's.
 
 Owner: Ruthwik (integration) — closes the escalation loop on the patient side.
 """
@@ -27,6 +30,7 @@ from careline.api.deps import get_current_patient
 from careline.api.dto.patients import FactOut
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision
+from careline.services.auth_service import is_reserved_doctor_id, is_reserved_patient_id
 from careline.services.patient_lookup_service import hash_pin
 
 router = APIRouter(prefix="/patient", tags=["patient-portal"])
@@ -36,10 +40,13 @@ router = APIRouter(prefix="/patient", tags=["patient-portal"])
 
 
 class PatientLoginIn(BaseModel):
+    """Tenant-scoped portal login: clinic/doctor id + patient id + PIN."""
+
     model_config = ConfigDict(extra="forbid")
 
-    patient_id: str
-    pin: str
+    doctor_id: str = Field(min_length=1, max_length=128)
+    patient_id: str = Field(min_length=1, max_length=128)
+    pin: str = Field(min_length=1, max_length=32)
 
 
 class PatientLoginOut(BaseModel):
@@ -94,17 +101,20 @@ class PatientQuestionOut(BaseModel):
 
 @router.post("/login", response_model=PatientLoginOut)
 async def patient_login(body: PatientLoginIn, request: Request) -> PatientLoginOut:
-    """Authenticate a patient by patient id + PIN and issue a patient session token.
+    """Authenticate a patient by doctor id + patient id + PIN; issue a session token.
 
-    Unknown patient and wrong PIN are the same 401 — no oracle that distinguishes
-    "no such patient" from "wrong PIN".
+    Unknown doctor, unknown patient, reserved demo id and wrong PIN are the same
+    401 — no oracle that distinguishes them. The identity lookup is tenant-scoped,
+    so a PIN only ever opens the patient registered under the named doctor.
     """
     settings = request.app.state.settings
-    identity = await request.app.state.patient_repo.find_by_patient_id(
-        patient_id=body.patient_id
-    )
     unauthorized = HTTPException(status_code=401, detail="invalid patient id or PIN")
-    if identity is None:
+    if is_reserved_doctor_id(body.doctor_id) or is_reserved_patient_id(body.patient_id):
+        raise unauthorized
+    identity = await request.app.state.patient_repo.find_identity(
+        doctor_id=body.doctor_id, patient_id=body.patient_id
+    )
+    if identity is None or identity.doctor_id != body.doctor_id:
         raise unauthorized
     provided = hash_pin(pin=body.pin, secret=settings.pin_hmac_secret)
     if not hmac.compare_digest(provided, identity.pin_hmac):
@@ -174,11 +184,13 @@ async def clear_patient_history(
 ) -> None:
     """Clear the signed-in patient's own question history (after a practice run).
 
-    Scoped to the JWT subject, so a patient can only ever clear *their own* thread —
-    the same one-patient isolation every other route enforces. The care plan and the
-    patient's record are untouched; only the Q&A thread is removed.
+    Scoped to the JWT subject *and* its doctor, so a patient can only ever clear
+    *their own* thread — never a same-named patient under another doctor. The care
+    plan and the patient's record are untouched; only the Q&A thread is removed.
     """
-    request.app.state.audit.clear_patient(principal.patient_id)
+    request.app.state.audit.clear_patient(
+        doctor_id=principal.doctor_id, patient_id=principal.patient_id
+    )
 
 
 @router.get("/questions", response_model=list[PatientQuestionOut])
@@ -189,7 +201,9 @@ async def patient_questions(
     """The patient's past questions, newest first, with any doctor reply attached."""
     audit = request.app.state.audit
     turns = sorted(
-        audit.turns_for_patient(principal.patient_id),
+        audit.turns_for_patient(
+            doctor_id=principal.doctor_id, patient_id=principal.patient_id
+        ),
         key=lambda t: t.logged_at,
         reverse=True,
     )

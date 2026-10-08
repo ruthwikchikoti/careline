@@ -73,6 +73,17 @@ async def ensure_indexes(database: Any) -> None:
         unique=True,
         name="patients_doctor_caller_unique",
     )
+    # Portal login resolves (doctor_id, patient_id) — one identity per pair.
+    await patients.create_index(
+        [("doctor_id", 1), ("patient_id", 1)],
+        unique=True,
+        name="patients_doctor_patient_unique",
+    )
+
+    # Durable audit mirror: patient-scoped reads/clears are keyed by
+    # (doctor_id, patient_id) — tenant-leading like every other index.
+    await database["audit_turns"].create_index([("doctor_id", 1), ("patient_id", 1)])
+    await database["audit_resolutions"].create_index([("doctor_id", 1), ("patient_id", 1)])
 
 
 __all__ = [
