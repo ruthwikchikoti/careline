@@ -17,6 +17,10 @@ Usage::
     python -m careline.services.eval_gate --baseline evals/reports/baseline.json
     python -m careline.services.eval_gate --heldout-only      # final-report mode
     python -m careline.services.eval_gate --mode llm          # LLM slice (needs key; exit 2 = skipped)
+    python -m careline.services.eval_gate --mode llm --limit 10 --splits in_scope --judge-sample 0.2
+
+The LLM slice lives in :mod:`careline.services.llm_eval` (live reasoner +
+verifier + LLM-as-judge, on-disk response cache, accuracy/faithfulness gates).
 
 Owner: Naresh (scope ``services``).
 """
@@ -442,16 +446,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--markdown", dest="md_out", help="write the human report here")
     parser.add_argument("--baseline", help="previous metrics JSON; any enforced regression fails")
     parser.add_argument("--heldout-only", action="store_true", help="score the held-out split only")
+    # LLM-slice flags (ignored in keyless mode). Lazy import keeps the keyless
+    # gate free of the OpenAI adapter surface.
+    from careline.services import llm_eval
+
+    llm_eval.add_llm_arguments(parser)
     args = parser.parse_args(argv)
 
     if args.mode == "llm":
-        print(
-            "LLM slice: not wired yet (design target — see evals/RUBRIC.md); it "
-            "requires the API key, response cache, and judge. CI treats exit 2 "
-            "as skipped.",
-            file=sys.stderr,
-        )
-        return 2
+        # Exit 2 ONLY when no API key is configured; 1 on a gate trip.
+        return llm_eval.run_cli(args)
 
     patients, now = _load_seed()
     cases = load_cases(heldout_only=args.heldout_only)

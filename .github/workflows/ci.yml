@@ -52,6 +52,10 @@ jobs:
             --baseline evals/reports/after-policy-v3.json \
             --json evals/reports/ci.json \
             --markdown evals/reports/ci.md
+      - name: Publish gate report to the job summary
+        if: always()
+        run: |
+          if [ -f evals/reports/ci.md ]; then cat evals/reports/ci.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Upload gate report
         if: always()
         uses: actions/upload-artifact@v4
@@ -61,14 +65,21 @@ jobs:
             backend/evals/reports/ci.json
             backend/evals/reports/ci.md
 
-  # Optional LLM slice: only on pushes to our own repo (forks have no
-  # secrets). The entrypoint exits 2 = "skipped, no key/wiring" so this job
-  # stays green until the LLM runner is wired in the observability slice.
+  # Optional LLM slice: live gpt-4o-mini reasoner/verifier + LLM-as-judge
+  # (careline.services.llm_eval). Only on pushes to our own repo (forks have
+  # no secrets). Exit 2 = skipped because no OPENAI_API_KEY secret is
+  # configured — the job summary says so explicitly (a skip must never look
+  # like a silent green). 1 = gate BLOCKED, >2 = crash: both redden the job
+  # (continue-on-error keeps the optional slice from blocking the merge).
+  # The on-disk response cache is restored between runs so unchanged
+  # prompt/policy versions are never re-billed.
   llm-eval:
     name: Eval gate (LLM slice, optional)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     continue-on-error: true
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,11 +87,42 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
-      - run: pip install -e ".[dev]"
-      - run: |
+      - run: pip install -e ".[dev,llm]"
+      - name: Restore LLM response cache
+        uses: actions/cache@v4
+        with:
+          path: backend/evals/.cache
+          key: llm-eval-cache-${{ hashFiles('backend/prompts/**', 'backend/policies/**', 'backend/evals/cases/**') }}
+          restore-keys: llm-eval-cache-
+      - name: Run the LLM slice
+        run: |
           set +e
-          python -m careline.services.eval_gate --mode llm
+          python -m careline.services.eval_gate --mode llm \
+            --judge-sample 0.2 \
+            --json evals/reports/llm-ci.json \
+            --markdown evals/reports/llm-ci.md
           code=$?
-          # 0 = ran & passed, 2 = skipped (no key/wiring yet) — both fine.
-          # Anything else (1 = gate BLOCKED, >2 = crash) must redden the run.
-          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
+          if [ "$code" -eq 2 ]; then
+            {
+              echo "## LLM eval slice: SKIPPED (no OPENAI_API_KEY secret)"
+              echo ""
+              echo "The live-model slice did not run, so this job measured nothing."
+              echo "Add the OPENAI_API_KEY repository secret to enable it."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=LLM eval skipped::SKIPPED (no OPENAI_API_KEY secret)"
+            exit 0
+          fi
+          if [ -f evals/reports/llm-ci.md ]; then
+            cat evals/reports/llm-ci.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # 0 = ran & passed. 1 = gate BLOCKED, >2 = crash: redden the job.
+          exit "$code"
+      - name: Upload LLM slice report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-eval-report
+          if-no-files-found: ignore
+          path: |
+            backend/evals/reports/llm-ci.json
+            backend/evals/reports/llm-ci.md
