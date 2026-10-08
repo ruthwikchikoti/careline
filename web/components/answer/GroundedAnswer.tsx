@@ -43,7 +43,10 @@ export function GroundedAnswer({
   className?: string;
 }) {
   const isAnswer = result.verdict === "answer";
-  const body = result.answer_text ?? result.escalation_reason ?? "";
+  // The patient-facing line never shows the internal gate reason; the reason
+  // is kept below as a labelled doctor-view note.
+  const body = result.patient_message ?? result.answer_text ?? "";
+  const internal = !isAnswer ? result.escalation_reason : null;
 
   return (
     <div
@@ -58,6 +61,11 @@ export function GroundedAnswer({
       </div>
 
       <p className="text-sm leading-relaxed text-ink">{body}</p>
+      {internal && (
+        <p className="text-xs leading-relaxed text-muted">
+          <span className="font-semibold">Doctor view — internal reason:</span> {internal}
+        </p>
+      )}
 
       {isAnswer && (
         <>

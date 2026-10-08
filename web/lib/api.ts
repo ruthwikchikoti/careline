@@ -19,7 +19,10 @@ export interface TraceStep {
 export interface AnswerResult {
   verdict: Verdict;
   answer_text: string | null;
+  /** Internal gate reason — doctor / audit view only, never shown as the patient's text. */
   escalation_reason: string | null;
+  /** What the patient hears (plain text; never an internal reason or score). */
+  patient_message?: string | null;
   confidence: number;
   risk: number;
   citations: string[];

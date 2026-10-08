@@ -36,6 +36,7 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from careline.api.app import create_app
+from careline.api.patient_text import patient_message
 from careline.demo_server import AskIn, _NOW, _demo_patient, demo_patient
 from careline.domain.model.call_session import CallSession
 from careline.domain.model.decision import Decision
@@ -46,6 +47,11 @@ def _decision_payload(decision: Decision) -> dict:
         "verdict": decision.verdict.value,
         "answer_text": decision.answer_text,
         "escalation_reason": decision.escalation_reason,
+        # What the patient hears: never the internal gate reason above (which
+        # stays for the console's doctor view and the audit).
+        "patient_message": patient_message(
+            decision.verdict, decision.answer_text, decision.escalation_reason, decision.scope
+        ),
         "confidence": decision.confidence,
         "risk": decision.risk,
         "citations": list(decision.citations),
