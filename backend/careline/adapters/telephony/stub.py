@@ -1,9 +1,9 @@
 """Telephony escalation sink — stub for the MVP (VI-6).
 
-The port a real telephony adapter (Twilio/Exotel) would implement.  Here
-this is an in-memory stub that records transfers; the important thing
-is that the *interface* is defined so ``QuestionService`` can escalate without
-knowing the transport.
+The port a real telephony adapter (Twilio/Exotel) would implement. Voice is not
+wired in this repository: this is an in-memory stub that records transfers. What
+matters is that the *interface* is defined, so ``QuestionService`` can escalate
+without knowing the transport.
 
 Owner: Priyanshu (scope ``safety``).
 """

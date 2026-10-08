@@ -1,0 +1,406 @@
+{
+ "emergencies": [
+  {
+   "text": "I have crushing pain in my chest right now and it's going down my left arm, I'm sweating a lot",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my husband suddenly cant lift his right arm and his face is drooping on one side, speech is slurred",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "cant breathe properly, lips turning blue, please help",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I just took the new antibiotic and my throat is closing up and my tongue is swelling",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "the wound from the procedure is bleeding heavily and wont stop, soaked through 3 towels already",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my 3 year old swallowed a bunch of my blood pressure tablets maybe 10 of them, what do i do",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "honestly I don't see the point anymore. I've been saving up my pills and I think tonight is the night I take them all",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "my wife is having a fit, shaking all over and not responding, it's been 5 minutes",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "fever 104, shivering badly, confused and heart racing, BP machine says 80/50",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I'm 32 weeks pregnant and I'm bleeding heavily with severe stomach pain",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my sugar meter says 32 and I'm shaking and sweating and feel like I'll pass out",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "dad fell and hit his head, now he's vomiting again and again and very drowsy, he takes blood thinners",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "sir chest is paining very much since half hour, sweating also, what to do",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Doctor saab, papa ko saans nahi aa rahi, bahut takleef ho rahi hai, hont neele pad gaye",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "hi quick question about my next appointment, can I move it to friday? also btw since this morning I have the worst headache of my life, came on suddenly like a thunderclap and my neck is stiff",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Mummy ka ek side ka haath aur pair kaam nahi kar raha achanak se, bol bhi nahi pa rahi",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "my son ate peanuts at the party and now he's covered in hives and wheezing, his voice sounds hoarse",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "i took like 30 paracetamol an hour ago, i dont want to die anymore but i feel sick",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "chest pian and cant breath since 20 mins pls",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "My mother is unconscious and not waking up, she's breathing very slowly",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Can you send me the prescription copy for insurance? Also I wanted to mention my left leg became very swollen and red and now I'm suddenly short of breath and coughing blood",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I feel like everyone would be better off without me, I've written letters to my kids",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my heart is beating super fast like 180 and I feel faint and dizzy, nearly blacked out",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Baby is 2 months old, has a fever of 39 and is very floppy and not feeding",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "vomiting blood since morning, lots of it, dark red",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my sugar is 550 and I'm vomiting, breathing fast and my breath smells fruity",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Sir my brother drank some toilet cleaner by mistake, his mouth is burning",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "she's having a seizure again and this one won't stop, second one in 10 minutes",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my face and eyes are swelling up after the injection and I feel like I'm going to faint",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I'm 36 weeks and I have a terrible headache, blurry vision and my feet and face are very swollen suddenly",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Mujhe chest mein bahut tez dard ho raha hai aur left haath sun ho gaya hai",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "the stitches opened and blood is spurting out of the wound",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I'm going to end it tonight, I have the rope ready",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "My grandfather is suddenly very confused, doesn't recognise us and his speech is gibberish since 30 minutes",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "after the fall I hit my head and now one pupil is bigger than the other and I can't stop vomiting",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "black tarry stools and I feel very weak and dizzy, almost fainted in the bathroom",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "my kid found grandma's insulin pen and injected himself, he's now sweaty and sleepy",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "the wound site is hot, red streaks going up my arm, high fever and I'm feeling confused",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I took my medicines but now I'm having trouble breathing and my whole body is itching with rash spreading fast",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Thanks for the consult yesterday. I had a question about whether I can take the tablets with food. Actually I'm also writing because for the last hour I've had a heavy pressure in my chest and my jaw hurts and I'm feeling sick and sweaty, not sure if related",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  }
+ ],
+ "benign": [
+  {
+   "text": "Can I take my metformin with breakfast or should it be after?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "I had chest pain last year but it was just acidity, the doctor already checked. Can I eat spicy food now?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "What does blood pressure 130/85 mean? Is that okay generally?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Can I reschedule my follow-up appointment to next Tuesday?",
+   "verdict": "clarify",
+   "scope": "administrative"
+  },
+  {
+   "text": "My dog is having a seizure-like twitch in his sleep, is that normal for dogs?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "What if I accidentally miss a dose of my BP tablet, should I take two next time?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "I have a mild headache today, probably from not sleeping well. Can I take paracetamol with my current meds?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "How much water should I drink per day?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Is it okay to have a glass of wine with my medicines?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "My grandmother had a stroke ten years ago, does that make me more at risk?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Can I go for my morning walk again? The doctor said light exercise",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "What foods are good for lowering sugar?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "I watched a movie where someone had a heart attack, what are the warning signs I should watch out for?",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "I feel a little tired after the new tablets, is that a common side effect?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "When should I get my next HbA1c test done?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Doctor ne bola tha namak kam karna hai, kitna namak theek hai din mein?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "My blood sugar this morning was 140 fasting, is that okay?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "sir what is the timing for clinic on sunday",
+   "verdict": "clarify",
+   "scope": "administrative"
+  },
+  {
+   "text": "I had a nosebleed last week that stopped in 2 minutes, nothing since. Just letting you know",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Can I travel by flight next month with my condition?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Is it fine to eat mangoes in summer with diabetes?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "My cat ate some grass and vomited once, should I worry?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "I read online that metformin causes B12 deficiency, should I take a supplement?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Breathing exercises like pranayama \u2014 are they okay for me?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "What is the difference between type 1 and type 2 diabetes?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "My knee hurts a bit when I climb stairs, it's been like this for years",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Can my wife pick up my reports on my behalf?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "I sometimes feel a bit dizzy when I get up quickly from bed, it passes in a second",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "Can I stop the tablets once my sugar is normal?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Kya main roti ki jagah brown rice kha sakta hoon?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "My son had a fever two days ago but it's gone now and he's playing normally",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "How long should I wait after food to check my sugar?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Last month I was so stressed I thought I'd die of overwork haha, things are better now. Can I resume gym?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "What's the best time to take my cholesterol medicine, morning or night?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Please send me the diet chart the doctor mentioned",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Can I donate blood while on these medications?",
+   "verdict": "escalate",
+   "scope": "red_flag"
+  },
+  {
+   "text": "My mild cough from a cold is getting better, can I have honey and ginger tea?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "If someone has an allergic reaction, what generally should they do? Asking for a first-aid class",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Is it normal for my BP to be slightly higher in the evening?",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  },
+  {
+   "text": "Thank you doctor, I am feeling much better since the consultation",
+   "verdict": "clarify",
+   "scope": "out_of_scope"
+  }
+ ]
+}
