@@ -54,6 +54,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from careline.adapters.llm import usage as usage_recorder
+from careline.adapters.llm.openai_backend import openai_client_kwargs
 from careline.adapters.llm.judge import (
     DEFAULT_JUDGE_MODEL,
     JudgeUnavailable,
@@ -463,7 +464,7 @@ def run_cli(args: argparse.Namespace, *, client=None) -> int:
         except ImportError:
             client = _MissingSDK()  # every call fails → counted, fail closed
         else:
-            client = OpenAI(api_key=os.environ["OPENAI_API_KEY"].strip())
+            client = OpenAI(**openai_client_kwargs(api_key=os.environ["OPENAI_API_KEY"].strip()))
 
     patients, now = eval_gate._load_seed()
     all_cases = eval_gate.load_cases(heldout_only=getattr(args, "heldout_only", False))

@@ -10,6 +10,8 @@ Owner: Naresh (scope ``api``).
 
 from __future__ import annotations
 
+import os
+
 from enum import Enum
 
 from pydantic import Field, field_validator
@@ -246,6 +248,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "risk_ceiling cannot be above the safe default "
                 f"({DEFAULT_THRESHOLDS.risk_ceiling}) in production"
+            )
+
+        # Langfuse traces carry a salted patient hash; the public default salt
+        # would make those hashes reversible by anyone who reads the repo.
+        if os.environ.get("CARELINE_LANGFUSE_PUBLIC_KEY") and os.environ.get(
+            "CARELINE_TRACE_SALT", "careline-trace"
+        ) in ("", "careline-trace"):
+            raise ValueError(
+                "CARELINE_TRACE_SALT must be set to a deployment secret when Langfuse "
+                "tracing is enabled in production/public-demo mode"
             )
 
         if self.jwt_secret == _DEFAULT_JWT_SECRET:

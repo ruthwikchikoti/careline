@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, Field
 
 from careline.adapters.llm import prompt_registry
+from careline.adapters.llm.openai_backend import openai_client_kwargs
 from careline.adapters.llm import usage as usage_recorder
 
 DEFAULT_JUDGE_MODEL = "gpt-4o-mini"
@@ -186,7 +187,7 @@ class OpenAIJudge:
             from openai import OpenAI  # lazy: optional dependency
         except ImportError as exc:  # pragma: no cover - only without the SDK
             raise JudgeUnavailable("openai SDK is not installed") from exc
-        self._client = OpenAI(api_key=self._api_key)
+        self._client = OpenAI(**openai_client_kwargs(api_key=self._api_key))
         return self._client
 
     def judge(self, *, answer: str, facts: Sequence[tuple[str, str]]) -> JudgeVerdict:
