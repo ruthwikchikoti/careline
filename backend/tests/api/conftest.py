@@ -33,8 +33,14 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _doctor_password_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every API test runs with a known doctor credential configured."""
+    """Every API test runs with a known doctor credential configured.
+
+    Also offline by construction (claims-02): a blank ``CARELINE_MONGO_URI`` in the
+    process env outranks ``backend/.env``, so a developer's Atlas URI is never
+    used (or printed) by the API suite — it is green with or without a .env.
+    """
     monkeypatch.setenv("CARELINE_DOCTOR_PASSWORD", TEST_DOCTOR_PASSWORD)
+    monkeypatch.setenv("CARELINE_MONGO_URI", "")
 
 
 def doctor_headers(client: TestClient, doctor_id: str) -> dict[str, str]:

@@ -58,6 +58,9 @@ def _turn_out(turn: AuditTurnRecord, audit: AuditService | None = None) -> Audit
         resolved=resolution is not None,
         reply=resolution.reply_text if resolution else None,
         resolved_at=resolution.resolved_at if resolution else None,
+        scope=turn.scope,
+        needs_review=turn.needs_review,
+        review_reason=turn.review_reason,
     )
 
 
@@ -133,6 +136,9 @@ async def get_escalations(
     The flat list (newest first) is preserved; ``groups`` bundles those same turns
     per patient so the doctor triages by *who* is waiting rather than scanning
     row-by-row. Patients are ordered by their most recent escalation.
+
+    ``review`` lists this doctor's redirected (CLARIFY) turns flagged for review,
+    newest first, tenant-scoped like everything else here.
     """
     audit: AuditService = request.app.state.audit
     escalations = audit.escalations_for_doctor(principal.doctor_id)
@@ -155,11 +161,14 @@ async def get_escalations(
     groups.sort(key=lambda g: g.latest_at, reverse=True)
 
     waiting = sum(1 for t in flat if not t.resolved)
+    review = [_turn_out(t, audit) for t in audit.reviews_for_doctor(principal.doctor_id)]
     return EscalationsOut(
         waiting=waiting,
         patients_waiting=sum(1 for g in groups if g.count > 0),
         groups=groups,
         escalations=flat,
+        review_waiting=sum(1 for t in review if not t.resolved),
+        review=review,
     )
 
 
@@ -172,15 +181,17 @@ async def resolve_escalation(
 ) -> EscalationResolveOut:
     """Close an escalated turn with the doctor's reply (the human-in-the-loop answer).
 
-    Tenant-scoped: a doctor can only resolve escalations raised under their own
-    account. The reply is persisted and surfaced back to the patient (their
+    Tenant-scoped: a doctor can only resolve escalations — or review-flagged
+    redirects — raised under their own account. Any other turn id is a
+    404. The reply is persisted and surfaced back to the patient (their
     "answered" view), closing the escalation loop.
     """
     audit: AuditService = request.app.state.audit
-    turn = next(
-        (t for t in audit.escalations_for_doctor(principal.doctor_id) if t.turn_id == turn_id),
-        None,
+    resolvable = (
+        *audit.escalations_for_doctor(principal.doctor_id),
+        *audit.reviews_for_doctor(principal.doctor_id),
     )
+    turn = next((t for t in resolvable if t.turn_id == turn_id), None)
     if turn is None:
         raise HTTPException(status_code=404, detail="escalation not found")
     record = audit.resolve_escalation(

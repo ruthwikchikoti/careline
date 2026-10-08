@@ -6,11 +6,20 @@ necessary.  :meth:`AuditService.redact_patient` implements DPDP erasure: clinica
 text is nulled but the audit skeleton (ids, timestamps, verdicts, trace steps)
 is retained for compliance.
 
+Doctor REVIEW queue: only ESCALATE pages the doctor, so a CLARIFY
+redirect on a real emergency (8/50 on blind battery 2) never reached a human.
+:func:`review_reason` flags a CLARIFY turn whose question mentions a danger
+concept, reads as a current symptom report, or is OUT_OF_SCOPE with a
+first-person / carer subject plus body-or-symptom words. Flagged turns carry
+``needs_review=True`` and surface in the doctor's queue. This never changes a
+verdict — it is a second, human net on top of the spine.
+
 Owner: Priyanshu (scope ``eval``).
 """
 
 from __future__ import annotations
 
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -19,8 +28,75 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from careline.domain.enums import Verdict
+from careline.domain.enums import ScopeCategory, Verdict
 from careline.domain.model.decision import Decision, ReasoningTrace
+from careline.domain.rails.symptom_report import (
+    check_symptom_report,
+    mentions_danger_concept,
+)
+
+# --- doctor review flag -------------------------------------------------------
+# Deliberately broad: a false flag costs the doctor a glance; a missed one leaves
+# a redirected emergency unseen. Subject = the caller or someone they care for
+# (English + transliterated Hindi). Body/symptom = a wide lexicon, not a danger
+# list — the danger lists are the rails, and these turns already slipped past them.
+_REVIEW_SUBJECT_RE = re.compile(
+    r"\b(?:i|i'?m|im|i'?ve|ive|i'?d|me|my|myself|we|our|us|"
+    r"he|he'?s|she|she'?s|his|her|him|they|their|"
+    r"son'?s?|daughter'?s?|baby'?s?|child'?s?|kid'?s?|infant|toddler|newborn|"
+    r"wife'?s?|husband'?s?|mum'?s?|mom'?s?|mother'?s?|dad'?s?|father'?s?|"
+    r"grandma'?s?|grandmother'?s?|grandpa'?s?|grandfather'?s?|granny|nani|dadi|"
+    r"brother'?s?|sister'?s?|parent'?s?|patient|"
+    r"mujhe|mujh|mera|meri|mere|main|maine|hum|humara|hamara|"
+    r"bachh?a|bachh?e|bachh?i|beta|beti|papa|mummy|maa)\b",
+    re.IGNORECASE,
+)
+_REVIEW_BODY_RE = re.compile(
+    r"\b(?:pain\w*|hurt\w*|ach(?:e|es|ing|y)|sore|swell\w*|swollen|bleed\w*|blood\w*|"
+    r"fever\w*|temperature|hot to (?:the )?touch|rash\w*|itch\w*|hives|"
+    r"vomit\w*|nause\w*|diarr?h\w*|dizz\w*|faint\w*|light-?headed|"
+    r"breath\w*|wheez\w*|cough\w*|chok\w*|asthma|puffs?|inhaler|"
+    r"chest|heart\w*|palpitat\w*|head\w*|stomach|belly|tummy|abdom\w*|"
+    r"sleepy|drows\w*|confus\w*|floppy|limp|weak\w*|numb\w*|tingl\w*|"
+    r"seiz\w*|fits?|unconscious|passed out|collaps\w*|wak(?:e|ing)|"
+    r"feed\w*|not eating|sting\w*|bit(?:e|ten)|allerg\w*|tongue|throat|lips?|"
+    r"swallow\w*|vision|blurr\w*|eyes?|fell|fall(?:en)?|banged|injur\w*|burn\w*|"
+    r"wound|stitch\w*|incision|pills?|tablets?|overdos\w*|drinks?|drank|poison\w*|"
+    r"kerosene|bleach|swallowed|weird|slow|"
+    r"suicid\w*|kill (?:my|him|her)sel\w*|end (?:it|my life)|die|dying|"
+    r"jeen[ae]|marn[ae]|khatam|dard|bukhar|chakkar|saans|ulti|khoon|behosh|"
+    r"pi liya|kha liya|nigal)\b",
+    re.IGNORECASE,
+)
+
+# No explicit subject but a present-tense report ("Bee sting ... now dizzy").
+_REVIEW_PRESENT_RE = re.compile(r"\b(?:now|right now|abhi|since)\b", re.IGNORECASE)
+
+
+def review_reason(question: str | None, decision: Decision) -> str | None:
+    """Why a redirected (CLARIFY) turn needs a doctor's eyes, or ``None``.
+
+    Only CLARIFY turns are review items: ESCALATE already reaches the doctor and
+    ANSWER is not a redirect. Fails toward flagging — a rail error flags the turn.
+    """
+    if decision.verdict is not Verdict.CLARIFY or not question:
+        return None
+    try:
+        danger = mentions_danger_concept(question)
+        if danger is not None:
+            return f"danger concept: {danger}"
+        symptom = check_symptom_report(question, context=False)
+        if symptom is not None:
+            return f"symptom report: {symptom}"
+    except Exception:  # noqa: BLE001 - fail closed: a broken rail flags, never hides
+        return "review rail error"
+    if decision.scope in (ScopeCategory.OUT_OF_SCOPE, None) and (
+        _REVIEW_SUBJECT_RE.search(question) or _REVIEW_PRESENT_RE.search(question)
+    ):
+        body = _REVIEW_BODY_RE.search(question)
+        if body is not None:
+            return f"redirected symptom words: {body.group(0).lower()}"
+    return None
 
 
 class AuditEventKind(str, Enum):
@@ -51,6 +127,10 @@ class AuditTurnRecord(BaseModel):
     risk: float = Field(default=0.0, ge=0.0, le=1.0)
     trace_steps: list[dict[str, Any]] = Field(default_factory=list)
     redacted: bool = False
+    # Defaults keep rows written before the review queue loadable (Mongo hydrate).
+    scope: str | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
 
 
 class AuditCallRecord(BaseModel):
@@ -214,6 +294,7 @@ class AuditService:
         logged_at: datetime | None = None,
     ) -> AuditTurnRecord:
         """Record one question turn and its terminal decision."""
+        reason = review_reason(question, decision)
         record = AuditTurnRecord(
             turn_id=str(uuid.uuid4()),
             call_id=call_id,
@@ -227,6 +308,9 @@ class AuditService:
             confidence=decision.confidence,
             risk=decision.risk,
             trace_steps=_trace_to_skeleton(decision.trace),
+            scope=decision.scope.value if decision.scope else None,
+            needs_review=reason is not None,
+            review_reason=reason,
         )
         updated: AuditCallRecord | None = None
         with self._lock:
@@ -335,6 +419,10 @@ class AuditService:
         """Doctor-scoped turns that terminated in ESCALATE, newest first."""
         return [t for t in self.turns_for_doctor(doctor_id) if t.verdict is Verdict.ESCALATE]
 
+    def reviews_for_doctor(self, doctor_id: str) -> list[AuditTurnRecord]:
+        """Doctor-scoped redirected turns flagged for review, newest first."""
+        return [t for t in self.turns_for_doctor(doctor_id) if t.needs_review]
+
     def calls_for_doctor(self, doctor_id: str) -> list[AuditCallRecord]:
         with self._lock:
             calls = list(self._calls.values())
@@ -441,6 +529,7 @@ class AuditService:
                         "question": None,
                         "answer_text": None,
                         "escalation_reason": None,
+                        "review_reason": None,  # derived from the question text
                         "redacted": True,
                     }
                 )
@@ -481,4 +570,5 @@ __all__ = [
     "AuditEventRecord",
     "AuditResolutionRecord",
     "AuditService",
+    "review_reason",
 ]

@@ -155,6 +155,27 @@ export interface PatientRecord {
   history: FactRecord[];
 }
 
+/**
+ * A FastAPI error ``detail`` is a string, or (for a 422) a list of
+ * ``{loc, msg, type}`` objects — never the rejected value itself. Flatten either
+ * into one human-readable line.
+ */
+function detailText(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        if (!d || typeof d !== "object") return null;
+        const { loc, msg } = d as { loc?: unknown[]; msg?: string };
+        const field = Array.isArray(loc) ? loc[loc.length - 1] : undefined;
+        return msg ? (field ? `${String(field)}: ${msg}` : msg) : null;
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join("; ") : null;
+  }
+  return null;
+}
+
 async function authFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   if (!token) throw new AuthError();
@@ -171,8 +192,9 @@ async function authFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let detail = `API error ${res.status}`;
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      const body = (await res.json()) as { detail?: unknown };
+      const text = detailText(body.detail);
+      if (text) detail = text;
     } catch {
       // ignore parse errors
     }
@@ -192,8 +214,9 @@ export async function login(doctorId: string, password: string): Promise<TokenRe
   if (!res.ok) {
     let detail = `Login failed (${res.status})`;
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      const body = (await res.json()) as { detail?: unknown };
+      const text = detailText(body.detail);
+      if (text) detail = text;
     } catch {
       // ignore
     }
@@ -275,6 +298,10 @@ export interface AuditTurn {
   resolved: boolean;
   reply: string | null;
   resolved_at: string | null;
+  /** Doctor review queue: a redirected (CLARIFY) turn flagged for a human look. */
+  scope?: string | null;
+  needs_review?: boolean;
+  review_reason?: string | null;
 }
 
 export interface AuditCall {
@@ -305,6 +332,9 @@ export interface EscalationsQueue {
   patients_waiting: number;
   groups: EscalationGroup[];
   escalations: AuditTurn[];
+  /** Redirected turns flagged for review (did not page the doctor), newest first. */
+  review_waiting?: number;
+  review?: AuditTurn[];
 }
 
 export interface EvalScenarioResult {
@@ -366,6 +396,10 @@ export interface PatientAnswer {
   answer_text: string | null;
   escalation_reason: string | null;
   citations: string[];
+  /** The agent's patient-facing text for this turn (answer, redirect or notice). */
+  patient_message: string | null;
+  /** True for a red-flag turn — the portal shows the call-112 banner. */
+  emergency: boolean;
 }
 
 export interface PatientQuestion {
@@ -377,6 +411,8 @@ export interface PatientQuestion {
   escalated: boolean;
   doctor_reply: string | null;
   replied_at: string | null;
+  patient_message: string | null;
+  emergency: boolean;
 }
 
 async function patientFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -391,8 +427,9 @@ async function patientFetch<T>(path: string, init: RequestInit = {}): Promise<T>
   if (!res.ok) {
     let detail = `API error ${res.status}`;
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      const body = (await res.json()) as { detail?: unknown };
+      const text = detailText(body.detail);
+      if (text) detail = text;
     } catch {
       // ignore
     }
@@ -415,8 +452,9 @@ export async function patientLogin(
   if (!res.ok) {
     let detail = `Sign in failed (${res.status})`;
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      const body = (await res.json()) as { detail?: unknown };
+      const text = detailText(body.detail);
+      if (text) detail = text;
     } catch {
       // ignore
     }

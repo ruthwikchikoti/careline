@@ -12,6 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from careline.domain.model.fact import Fact
 
 
+#: New registrations: exactly six ASCII digits (1M combinations, matching the
+#: portal's 6-digit field). Login still accepts whatever an existing identity was
+#: registered with, so pre-policy identities keep working.
+PIN_PATTERN = r"^[0-9]{6}$"
+
+
 class PatientRegisterIn(BaseModel):
     """Register a patient identity — plain PIN is hashed server-side, never stored."""
 
@@ -19,7 +25,7 @@ class PatientRegisterIn(BaseModel):
 
     patient_id: str
     caller_id: str
-    pin: str = Field(min_length=4, max_length=12)
+    pin: str = Field(pattern=PIN_PATTERN, description="Exactly 6 digits.")
 
 
 class PatientOut(BaseModel):

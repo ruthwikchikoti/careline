@@ -18,6 +18,7 @@ from a superseded fact — can be exercised for any of them.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import re
 import secrets
@@ -56,13 +57,14 @@ _DEMO_PIN_RE = re.compile(r"[0-9]{4,6}")
 
 
 def _demo_pin() -> tuple[str, bool]:
-    """Demo PIN: fixed via ``CARELINE_DEMO_PIN``, else freshly random per seed run.
+    """Base demo PIN: ``CARELINE_DEMO_PIN`` (the per-patient seed), else random.
 
     A hardcoded default published in the repo means anyone could log in as any
     seeded patient on a public deployment — so there is no default. A generated
     PIN is 6 random digits (1M combinations, matching the portal's 6-digit
     field); an explicit ``CARELINE_DEMO_PIN`` must be 4–6 digits, else the seed
-    refuses to run rather than register an unusable PIN.
+    refuses to run. Patients never share it: :func:`_patient_pins` derives one
+    distinct 6-digit PIN per patient from this value.
     """
     pin = os.environ.get("CARELINE_DEMO_PIN", "").strip()
     if pin:
@@ -71,6 +73,34 @@ def _demo_pin() -> tuple[str, bool]:
         return pin, True
     bound = 10**_GENERATED_PIN_DIGITS
     return f"{secrets.randbelow(bound):0{_GENERATED_PIN_DIGITS}d}", False
+
+
+def _patient_pins(patient_ids: list[str]) -> tuple[dict[str, str], bool]:
+    """One distinct 6-digit PIN per patient — a PIN never opens another patient.
+
+    Without ``CARELINE_DEMO_PIN`` each PIN is freshly random. With it, the value
+    is a *seed*: each patient's PIN is derived from ``sha256(seed:patient_id)``,
+    so a rehearsed demo gets the same table every run while every patient still
+    has their own PIN. Collisions are re-drawn, so the table is always distinct.
+    """
+    base, from_env = _demo_pin()
+    pins: dict[str, str] = {}
+    used: set[str] = set()
+    bound = 10**_GENERATED_PIN_DIGITS
+    for patient_id in patient_ids:
+        attempt = 0
+        while True:
+            if from_env:
+                digest = hashlib.sha256(f"{base}:{patient_id}:{attempt}".encode()).digest()
+                pin = f"{int.from_bytes(digest[:8], 'big') % bound:0{_GENERATED_PIN_DIGITS}d}"
+            else:
+                pin = f"{secrets.randbelow(bound):0{_GENERATED_PIN_DIGITS}d}"
+            if pin not in used:
+                break
+            attempt += 1
+        used.add(pin)
+        pins[patient_id] = pin
+    return pins, from_env
 
 
 def _approved(**kw: object) -> dict[str, object]:
@@ -208,19 +238,20 @@ async def main() -> None:
     for col in (FACTS, PATIENTS, CONSULTATIONS):
         res = await db[col].delete_many({"doctor_id": DOCTOR_ID})
         print(f"cleared {res.deleted_count:>3} from {col}")
-    # wipe the audit trail entirely — a clean slate for a fresh demo/practice run
-    # (questions, calls, events, doctor replies). Restart the API afterwards so its
-    # in-memory read model re-hydrates from the now-empty collections.
+    # wipe the demo tenant's audit trail — a clean slate for a fresh demo/practice
+    # run (questions, calls, events, doctor replies). Scoped to DOCTOR_ID: another
+    # doctor's audit trail is never touched. Restart the API afterwards so its
+    # in-memory read model re-hydrates from the collections.
     for col in (TURNS, CALLS, EVENTS, RESOLUTIONS):
-        res = await db[col].delete_many({})
+        res = await db[col].delete_many({"doctor_id": DOCTOR_ID})
         print(f"cleared {res.deleted_count:>3} from {col}")
 
     total_facts = 0
-    pin, pin_from_env = _demo_pin()
+    pins, pin_from_env = _patient_pins(list(PATIENTS_SEED))
     for patient_id, (caller_id, facts) in PATIENTS_SEED.items():
         await repo.upsert_identity(identity=PatientIdentity(
             patient_id=patient_id, doctor_id=DOCTOR_ID, caller_id=caller_id,
-            pin_hmac=hash_pin(pin=pin, secret=settings.pin_hmac_secret),
+            pin_hmac=hash_pin(pin=pins[patient_id], secret=settings.pin_hmac_secret),
         ))
         await repo.add_facts(doctor_id=DOCTOR_ID, patient_id=patient_id, facts=tuple(facts))
         current = sum(1 for f in facts if f.validity.superseded_at is None)
@@ -228,12 +259,15 @@ async def main() -> None:
         print(f"  seeded {patient_id:14} caller {caller_id}  ·  {current} current / {len(facts)} total facts")
 
     pin_note = (
-        "from CARELINE_DEMO_PIN"
+        "derived per patient from CARELINE_DEMO_PIN — same table every run"
         if pin_from_env
-        else "generated for this run — set CARELINE_DEMO_PIN to fix it for demos"
+        else "generated for this run — set CARELINE_DEMO_PIN to make the table repeatable"
     )
     print(f"\nDone. {len(PATIENTS_SEED)} patients, {total_facts} facts under '{DOCTOR_ID}'.")
-    print(f"Patient PIN for this seed: {pin} ({pin_note}). Log in as 'dr-asha' in the web UI.")
+    print(f"Patient portal PINs, one per patient ({pin_note}):")
+    for patient_id, pin in pins.items():
+        print(f"  {patient_id:14} {pin}")
+    print("Log in as 'dr-asha' in the web UI; each PIN opens only its own patient.")
     client.close()
 
 

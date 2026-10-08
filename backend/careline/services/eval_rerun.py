@@ -38,14 +38,16 @@ from careline.domain.model.fact import Instruction, Medication
 from careline.domain.model.patient import Patient, ValidSlice
 from careline.domain.model.proposal import ClassifierProposal, VerificationResult
 from careline.domain.model.temporal import Validity
-from careline.domain.thresholds import Thresholds
+from careline.domain.thresholds import DEFAULT_THRESHOLDS
 from careline.services.audit_service import AuditEventKind, AuditService
 from careline.services.digest_service import DigestService
 
 _NOW = datetime(2026, 6, 15, 10, 0, tzinfo=timezone.utc)
 _PAST = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _SUPERSEDED = datetime(2026, 6, 1, tzinfo=timezone.utc)  # before _NOW
-_HAPPY = Thresholds(risk_ceiling=0.85)
+# Production thresholds — no relaxed eval ceiling. The answerable
+# scenarios (T4/T5/T8) carry risk <= 0.2, well inside the 0.75 ceiling.
+_THRESHOLDS = DEFAULT_THRESHOLDS
 
 
 def _session() -> CallSession:
@@ -152,7 +154,7 @@ def _scenarios(now: datetime) -> list[tuple[str, Verdict, bool]]:
             citations=("instr-1",), confidence=0.9, risk=0.2, scope=ScopeCategory.IN_SCOPE,
         ),
         verification=VerificationResult.affirm(confidence=0.9),
-        valid_slice=vs, thresholds=_HAPPY, now=now, call_session=_session(),
+        valid_slice=vs, thresholds=_THRESHOLDS, now=now, call_session=_session(),
     ))
     t4_ok = d.verdict is Verdict.ANSWER and "instr-1" in d.citations and "instr-2" not in d.citations
     results.append(("T4-current-vs-historical", d.verdict, t4_ok))
@@ -165,7 +167,7 @@ def _scenarios(now: datetime) -> list[tuple[str, Verdict, bool]]:
             citations=("med-1",), confidence=0.95, risk=0.1, scope=ScopeCategory.IN_SCOPE,
         ),
         verification=VerificationResult.affirm(confidence=0.92),
-        valid_slice=vs, thresholds=_HAPPY, now=now, call_session=_session(),
+        valid_slice=vs, thresholds=_THRESHOLDS, now=now, call_session=_session(),
     ))
     results.append(("T5-happy-path", d.verdict, d.verdict is Verdict.ANSWER))
 
@@ -207,7 +209,7 @@ def _scenarios(now: datetime) -> list[tuple[str, Verdict, bool]]:
         last = _run(GateContext(
             question="What's my painkiller dose?",
             proposal=proposal, verification=verification, valid_slice=vs,
-            thresholds=_HAPPY, now=now, call_session=_session(), trace=ReasoningTrace(),
+            thresholds=_THRESHOLDS, now=now, call_session=_session(), trace=ReasoningTrace(),
         ))
     elapsed = time.perf_counter() - start
     t8_verdict = last.verdict if last is not None else Verdict.ESCALATE

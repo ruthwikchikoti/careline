@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Eye,
   PhoneForwarded,
   Send,
   ServerOff,
@@ -34,6 +35,7 @@ export default function EscalationsPage() {
   }, [load]);
 
   const groups = queue?.groups ?? [];
+  const review = queue?.review ?? [];
 
   return (
     <AppShell>
@@ -117,12 +119,50 @@ export default function EscalationsPage() {
             )}
           </CardBody>
         </Card>
+
+        {/* Redirected turns that read like a symptom report. They did NOT page the
+            doctor (the patient was redirected with the 112 line), so a human
+            reviews them here — newest first. */}
+        <Card>
+          <CardHeader
+            title="Redirected — please review"
+            subtitle={
+              queue
+                ? `${queue.review_waiting ?? 0} waiting · questions the agent redirected that mention symptoms or danger signs`
+                : "Questions the agent redirected that mention symptoms or danger signs"
+            }
+          />
+          <CardBody>
+            {review.length > 0 ? (
+              <ul className="space-y-2">
+                {review.map((turn) => (
+                  <li key={turn.turn_id}>
+                    <EscalationItem turn={turn} onResolved={load} kind="review" />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="flex items-center gap-2 px-1 py-4 text-sm text-muted">
+                <Eye className="h-4 w-4" />
+                {loading ? "Loading…" : "No redirected symptom questions waiting for review."}
+              </p>
+            )}
+          </CardBody>
+        </Card>
       </div>
     </AppShell>
   );
 }
 
-function EscalationItem({ turn, onResolved }: { turn: AuditTurn; onResolved: () => void }) {
+function EscalationItem({
+  turn,
+  onResolved,
+  kind = "escalation",
+}: {
+  turn: AuditTurn;
+  onResolved: () => void;
+  kind?: "escalation" | "review";
+}) {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -145,7 +185,9 @@ function EscalationItem({ turn, onResolved }: { turn: AuditTurn; onResolved: () 
     <div className="rounded-xl border border-border bg-surface px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm leading-6 text-ink">
-          {turn.escalation_reason ?? "Escalated to the doctor."}
+          {kind === "review"
+            ? `Redirected, not escalated${turn.review_reason ? ` · ${turn.review_reason}` : ""}`
+            : (turn.escalation_reason ?? "Escalated to the doctor.")}
         </p>
         <span className="whitespace-nowrap text-xs text-muted">
           {new Date(turn.logged_at).toLocaleTimeString()}

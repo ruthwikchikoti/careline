@@ -100,9 +100,9 @@ export default function LandingPage() {
           Fictional demo data — doctor: <span className="font-medium text-ink">dr-asha</span>{" "}
           (password from your deployment&apos;s credentials) · patient: clinic{" "}
           <span className="font-medium text-ink">dr-asha</span> /{" "}
-          <span className="font-medium text-ink">ravi-kumar</span> / 6-digit PIN{" "}
-          <span className="font-medium text-ink">printed by your seed run</span> (set{" "}
-          <code>CARELINE_DEMO_PIN</code> before seeding to fix it)
+          <span className="font-medium text-ink">ravi-kumar</span> / that patient&apos;s 6-digit PIN{" "}
+          <span className="font-medium text-ink">from the table your seed run prints</span> (one PIN
+          per patient; set <code>CARELINE_DEMO_PIN</code> before seeding to make the table repeatable)
         </p>
       </section>
 

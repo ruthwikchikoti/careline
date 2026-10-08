@@ -77,15 +77,19 @@ export default function RegisterPatientPage() {
               </div>
 
               <div>
-                <Label htmlFor="pin">PIN (4–12 characters)</Label>
+                <Label htmlFor="pin">PIN (exactly 6 digits)</Label>
                 <Input
                   id="pin"
                   type="password"
                   required
-                  minLength={4}
-                  maxLength={12}
+                  inputMode="numeric"
+                  autoComplete="new-password"
+                  pattern="[0-9]{6}"
+                  title="Exactly 6 digits"
+                  minLength={6}
+                  maxLength={6}
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 />
               </div>
 

@@ -28,7 +28,7 @@ _ASHA = "dr-asha"
 _EVIL = "dr-evil"
 _PID = "p2"
 _ASHA_PIN = "246810"
-_EVIL_PIN = "1111"
+_EVIL_PIN = "111111"
 _ASHA_QUESTION = "Can I take my tablet with food?"
 
 
@@ -57,7 +57,7 @@ def _portal_headers(client: TestClient, *, doctor_id: str, pid: str, pin: str) -
 
 @pytest.fixture()
 def two_tenants(client: TestClient) -> dict[str, dict[str, str]]:
-    """dr-evil registers p2/1111 FIRST, then dr-asha registers her own p2."""
+    """dr-evil registers p2/111111 FIRST, then dr-asha registers her own p2."""
     evil = doctor_headers(client, _EVIL)
     asha = doctor_headers(client, _ASHA)
     assert _register(client, evil, pid=_PID, pin=_EVIL_PIN, caller="+910000000001").status_code == 201

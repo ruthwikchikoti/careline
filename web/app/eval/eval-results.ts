@@ -10,7 +10,7 @@ export interface EvalScenario {
   catches: string;
 }
 
-// Static eval JSON is an allowed source. This snapshot is
+// Static fallback shown until a live GET /eval re-run returns. This snapshot is
 // updated only after running backend/tests/brain/test_bakeoff_safety.py.
 export const EVAL_SNAPSHOT: {
   generatedAt: string;

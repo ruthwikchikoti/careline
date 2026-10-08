@@ -29,11 +29,15 @@ grown, so a full-set count is not comparable), the v1 arm reproduces
 baseline-v0's 58/60 missed emergencies exactly; its in-scope accuracy / over-escalation differ because
 the gates and retrieval improved since. To reproduce a historical report
 byte-for-byte, replay the gate on the tree of the commit that produced it —
-``--replay <commit>`` does this read-only (``git archive`` into a temp dir,
-run that commit's own eval gate); the committed ``baseline-v0`` came from
-``b8476c9`` and replays exactly. Manual equivalent::
+``--replay <tag|commit>`` does this read-only (``git archive`` into a temp
+dir, run that ref's own eval gate). Releases are named by annotated tags, not
+SHAs, so a history rewrite cannot break the commands: ``baseline-v0`` (the
+commit that produced the committed baseline-v0 report, which replays exactly),
+``release/red-flags-v4`` and ``release/red-flags-v5``. If the ``baseline-v0``
+tag is missing (e.g. a clone without tags) the tool falls back to the original
+SHA and says so. Manual equivalent::
 
-    git worktree add /tmp/careline-v0 b8476c9
+    git worktree add /tmp/careline-v0 baseline-v0
     cd /tmp/careline-v0/backend && python -m careline.services.eval_gate
 
 Usage::
@@ -42,7 +46,8 @@ Usage::
     python -m scripts.shadow_compare --a v1 --b v3 --markdown evals/reports/shadow-v1-vs-v3.md
     python -m scripts.shadow_compare --a v2 --b v4 --json out.json
     python -m scripts.shadow_compare --a v1 --case-ids evals/reports/baseline-v0.case_ids.txt
-    python -m scripts.shadow_compare --replay b8476c9              # exact historical replay
+    python -m scripts.shadow_compare --replay baseline-v0          # exact historical replay
+    python -m scripts.shadow_compare --replay release/red-flags-v4
 
 Owner: Naresh (scope ``services``).
 """
@@ -68,9 +73,42 @@ from careline.services.eval_gate import _load_seed, load_case_ids, load_cases, r
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _POLICY_DIR = _BACKEND_ROOT / "policies"
-BASELINE_V0_COMMIT = "b8476c9"
+#: The annotated tag naming the baseline-v0 release (tags, not SHAs).
+BASELINE_V0_TAG = "baseline-v0"
+#: Only used when the tag is absent (a clone fetched without tags).
+BASELINE_V0_FALLBACK_SHA = "b8476c9"
 # The 250 case ids that existed at baseline-v0 (frozen; the set has grown since).
 BASELINE_V0_CASE_IDS = _BACKEND_ROOT / "evals" / "reports" / "baseline-v0.case_ids.txt"
+
+
+def resolve_ref(ref: str) -> str:
+    """Resolve a tag name or commit-ish to a full commit SHA (read-only git)."""
+    import subprocess
+
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        cwd=_BACKEND_ROOT.parent, capture_output=True, text=True,
+    )
+    sha = proc.stdout.strip()
+    if proc.returncode != 0 or not sha:
+        raise SystemExit(
+            f"{ref!r} is not a tag or commit in this repository "
+            "(try `git fetch --tags`; release tags: baseline-v0, "
+            "release/red-flags-v4, release/red-flags-v5)"
+        )
+    return sha
+
+
+def resolve_baseline_v0() -> tuple[str, str | None]:
+    """The ref to use for baseline-v0: the tag, else the original SHA + a note."""
+    try:
+        resolve_ref(BASELINE_V0_TAG)
+    except SystemExit:
+        return BASELINE_V0_FALLBACK_SHA, (
+            f"tag {BASELINE_V0_TAG!r} not found — falling back to commit "
+            f"{BASELINE_V0_FALLBACK_SHA} (run `git fetch --tags` to restore the tag)"
+        )
+    return BASELINE_V0_TAG, None
 
 
 @dataclass(frozen=True)
@@ -259,8 +297,8 @@ def render(a: dict, b: dict, a_label: str, b_label: str) -> str:
         "rebuilt from each version's policy artifact. Gates, retrieval, the keyless "
         "reasoner and the eval labels are today's code, so a historical report is "
         "reproduced only as far as those are unchanged. For a byte-for-byte replay "
-        f"run the gate in a git worktree at the producing commit (baseline-v0: "
-        f"`git worktree add /tmp/careline-v0 {BASELINE_V0_COMMIT}`).",
+        f"run the gate at the producing release tag (`--replay {BASELINE_V0_TAG}`, or "
+        f"`git worktree add /tmp/careline-v0 {BASELINE_V0_TAG}`).",
         "",
         "Verdict: promote B iff every safety metric is B-or-equal and the",
         "eval gate passes on B — see evals/reports/ for the gate run.",
@@ -268,12 +306,15 @@ def render(a: dict, b: dict, a_label: str, b_label: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def replay_commit(commit: str) -> dict:
-    """Run ``commit``'s own eval gate on its own tree (read-only; no checkout).
+def replay_commit(ref: str) -> dict:
+    """Run ``ref``'s own eval gate on its own tree (read-only; no checkout).
 
-    ``git archive <commit> backend`` → temp dir → ``python -m
-    careline.services.eval_gate --json`` there with that tree on PYTHONPATH.
-    Returns its metrics JSON (the gate's exit code is reported, not raised).
+    ``ref`` is a release tag (``baseline-v0``, ``release/red-flags-v5``) or any
+    commit-ish; it is resolved with ``git rev-parse`` first so an unknown name
+    fails with a clear message. ``git archive <sha> backend`` → temp dir →
+    ``python -m careline.services.eval_gate --json`` there with that tree on
+    PYTHONPATH. Returns its metrics JSON (the gate's exit code is reported, not
+    raised).
     """
     import io
     import os
@@ -282,11 +323,17 @@ def replay_commit(commit: str) -> dict:
     import tarfile
     import tempfile
 
+    note = None
+    if ref == BASELINE_V0_TAG:
+        ref, note = resolve_baseline_v0()
+        if note:
+            print(note, file=sys.stderr)
+    commit = resolve_ref(ref)
     repo_root = _BACKEND_ROOT.parent
     archive = subprocess.run(
         ["git", "archive", commit, "backend"], cwd=repo_root, check=True, capture_output=True
     ).stdout
-    with tempfile.TemporaryDirectory(prefix=f"careline-{commit}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"careline-{commit[:12]}-") as tmp:
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
             tar.extractall(tmp, filter="data")
         backend = Path(tmp) / "backend"
@@ -297,9 +344,12 @@ def replay_commit(commit: str) -> dict:
             cwd=backend, env=env, capture_output=True, text=True,
         )
         if not out.is_file():
-            raise SystemExit(f"replay of {commit} produced no metrics:\n{proc.stderr[-2000:]}")
+            raise SystemExit(f"replay of {ref} produced no metrics:\n{proc.stderr[-2000:]}")
         metrics = json.loads(out.read_text(encoding="utf-8"))
+    metrics["replayed_ref"] = ref
     metrics["replayed_commit"] = commit
+    if note:
+        metrics["replay_note"] = note
     metrics["replay_gate_exit_code"] = proc.returncode
     return metrics
 
@@ -307,8 +357,9 @@ def replay_commit(commit: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--replay", metavar="COMMIT",
-        help="exact historical replay: run COMMIT's own eval gate on its own tree",
+        "--replay", metavar="REF",
+        help="exact historical replay: run REF's own eval gate on its own tree "
+        "(a release tag such as baseline-v0 / release/red-flags-v5, or a commit)",
     )
     parser.add_argument("--a", default="v1", help="incumbent policy version (default v1)")
     parser.add_argument("--b", default=None, help="candidate policy version (default: active)")

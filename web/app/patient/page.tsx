@@ -39,6 +39,9 @@ const KIND_LABEL: Record<string, string> = {
 // Order care-plan groups by clinical salience, not arrival order.
 const KIND_ORDER = ["medication", "allergy", "diagnosis", "instruction", "follow_up", "observation"];
 
+const EMERGENCY_LINE =
+  "If this is an emergency, call 112 (India) or your local emergency number now.";
+
 const SUGGESTIONS = [
   "What is my dose?",
   "When is my follow-up?",
@@ -63,6 +66,7 @@ export default function PatientPortalPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [emergency, setEmergency] = useState(false);
   const [ready, setReady] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -106,7 +110,8 @@ export default function PatientPortalPage() {
     setPending(q); // optimistic: show the question immediately
     setInput("");
     try {
-      await patientAsk(q);
+      const reply = await patientAsk(q);
+      if (reply.emergency) setEmergency(true); // stays up until dismissed
       await loadQuestions(); // refresh thread (answers + escalations land here)
     } finally {
       setPending(null);
@@ -195,6 +200,22 @@ export default function PatientPortalPage() {
               <span className="h-1.5 w-1.5 rounded-full bg-answer" /> Secure
             </span>
           </div>
+
+          {emergency && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 border-b-2 border-escalate bg-escalate px-5 py-3 text-primary-fg"
+            >
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
+              <p className="flex-1 text-sm font-semibold leading-6">{EMERGENCY_LINE}</p>
+              <button
+                onClick={() => setEmergency(false)}
+                className="rounded-md px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-fg/60"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* thread */}
           <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-5">
@@ -321,19 +342,30 @@ function EmptyState({
 
 /** One question + its resolution, rendered as a chat exchange. */
 function Exchange({ q }: { q: PatientQuestion }) {
+  const message = q.patient_message ?? q.answer_text;
   return (
     <div className="space-y-2.5">
       <PatientBubble meta={relTime(q.asked_at)}>{q.question ?? "—"}</PatientBubble>
 
-      {q.verdict === "answer" && q.answer_text && (
-        <AgentBubble>{q.answer_text}</AgentBubble>
+      {q.emergency && (
+        <div
+          role="alert"
+          className="ml-9 flex max-w-[88%] items-start gap-2 rounded-2xl rounded-bl-md bg-escalate px-4 py-3 text-sm font-semibold leading-6 text-primary-fg"
+        >
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          {EMERGENCY_LINE}
+        </div>
       )}
+
+      {q.verdict === "answer" && message && <AgentBubble>{message}</AgentBubble>}
 
       {q.verdict === "clarify" && (
         <AgentBubble tone="clarify">
-          {q.answer_text ?? "Could you share a bit more detail so I can answer safely?"}
+          {message ?? "Could you share a bit more detail so I can answer safely?"}
         </AgentBubble>
       )}
+
+      {q.escalated && message && <AgentBubble tone="clarify">{message}</AgentBubble>}
 
       {q.escalated && q.doctor_reply && (
         <div className="ml-9 max-w-[88%]">
