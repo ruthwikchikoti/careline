@@ -25,9 +25,24 @@ Normalisation is deliberately small and symmetric (applied to the answer and
 to the fact): case, spacing between number and unit, thousands commas,
 trailing decimal zeros, unit spellings (``milligrams`` → ``mg``), number words
 before a unit (``two weeks`` → ``2 week``) and frequency words (``twice`` →
-``2 times``). Nothing is converted between units (``1 g`` is not ``1000 mg``)
-and bare number words are ignored ("one of your medicines" is not a claim):
-the check is conservative — an unmatched token never ANSWERS.
+``2 times``). At v7 nothing was converted between units; v8 compares mass and
+volume by value (below). Bare small number words are ignored ("one of your
+medicines" is not a claim): the check is conservative — an unmatched token
+never ANSWERS.
+
+**v8 hardening** (final evaluator red team): compound number words
+(``one thousand``, ``five hundred``, ``half a gram``, ``a gram``) are read as
+numbers; mass and volume are compared by VALUE (``1 g`` == ``1000 mg``,
+``500 mcg`` == ``0.5 mg``, ``1 l`` == ``1000 ml``) so a converted superseded
+dose is caught; a count word next to a drug (``two Metformin tablets``) is a
+count claim; dose-change words (``double``, ``twice the dose``, ``triple``,
+``half``, ``increase``, ``extra``, ``more than prescribed``) are claims that a
+cited fact must also make; common brands map to their generic before matching
+(``Coumadin`` -> warfarin); any other word sitting right next to a dose
+(``Zyxor 500mg``) is treated as a drug claim; and :func:`polarity_conflicts`
+refuses an answer whose take/stop direction for a drug contradicts the cited
+facts (or a non-current fact, when no cited fact states the answer's
+direction).
 
 Pure, keyless, deterministic. Owner: Priyanshu (scope ``safety``).
 """
@@ -36,6 +51,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 from careline.domain.enums import FactKind
@@ -71,12 +87,44 @@ UNIT_CANONICAL: dict[str, str] = {
     **dict.fromkeys(("%", "percent", "per cent"), "percent"),
 }
 
-#: Number words, read only when a unit follows ("two weeks"), never bare.
+#: Number words. A small number word is read only when a unit follows
+#: ("two weeks"), never bare ("one of your medicines"); a compound with
+#: ``hundred`` / ``thousand`` ("one thousand") is a claim even without a unit.
 NUMBER_WORDS: dict[str, str] = {
-    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
     "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12",
-    "fourteen": "14", "fifteen": "15", "twenty": "20", "thirty": "30",
+    "thirteen": "13", "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40",
+    "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80", "ninety": "90",
 }
+_SCALE_WORDS: dict[str, int] = {"hundred": 100, "thousand": 1000}
+
+#: Value conversions: compared by value in one canonical unit.
+_UNIT_SCALE: dict[str, tuple[str, Decimal]] = {
+    "g": ("mg", Decimal(1000)),
+    "mcg": ("mg", Decimal("0.001")),
+    "l": ("ml", Decimal(1000)),
+}
+#: Units a bare "a"/"an" counts as one of ("a gram"), and the units whose
+#: neighbouring word is read as a drug claim ("Zyxor 500mg").
+_DOSE_UNITS = frozenset({"mg", "mcg", "g", "ml", "l", "unit"})
+#: Count units a number word may reach across one drug word ("two Metformin tablets").
+_COUNT_UNITS = frozenset({"tablet", "drop", "puff", "spoon"})
+
+#: Dose-change words -> claim token. An ANSWER may only use one if a cited
+#: fact uses the same one ("double your dose" is never inferred).
+CHANGE_WORDS: dict[str, str] = {
+    **dict.fromkeys(("double", "doubled", "doubles", "doubling"), "double"),
+    **dict.fromkeys(("triple", "tripled", "triples", "tripling"), "triple"),
+    **dict.fromkeys(("quadruple", "quadrupled", "quadrupling"), "multiply"),
+    **dict.fromkeys(("half", "halve", "halved", "halves", "halving"), "half"),
+    **dict.fromkeys(("increase", "increased", "increases", "increasing"), "increase"),
+    **dict.fromkeys(("extra", "additional"), "extra"),
+}
+_DOSE_NOUNS = frozenset({"dose", "doses", "dosage", "amount", "usual", "normal", "prescribed"})
+_POSSESSIVE = frozenset({"the", "your", "my", "his", "her", "their", "that", "this"})
+_MORE_THAN = frozenset({"prescribed", "recommended", "directed", "advised", "instructed",
+                        "told", "your", "the", "usual", "normal"})
 
 #: Frequency words / shorthands -> "N times".
 FREQUENCY_WORDS: dict[str, str] = {
@@ -122,6 +170,64 @@ DRUG_SYNONYMS: dict[str, str] = {
     "acetaminophen": "paracetamol",
     "albuterol": "salbutamol",
     "thyroxine": "levothyroxine",
+    # v8: common brand -> generic (India / UK / US). A brand is read as its
+    # generic on both sides, so "Coumadin" in an answer is "warfarin".
+    **dict.fromkeys(("crocin", "dolo", "calpol", "tylenol", "panadol", "metacin", "pacimol",
+                     "febrex"), "paracetamol"),
+    **dict.fromkeys(("coumadin", "jantoven", "uniwarfin"), "warfarin"),
+    **dict.fromkeys(("glucophage", "glycomet", "obimet", "gluconorm", "riomet"), "metformin"),
+    **dict.fromkeys(("augmentin", "amoxil", "novamox", "clavam", "amoxiclav"),
+                    "amoxicillin"),
+    **dict.fromkeys(("ecosprin", "disprin", "loprin"), "aspirin"),
+    **dict.fromkeys(("lasix", "frusemide", "frusenex"), "furosemide"),
+    **dict.fromkeys(("lipitor", "atorva", "storvas", "tonact"), "atorvastatin"),
+    **dict.fromkeys(("crestor", "rosuvas", "rozavel"), "rosuvastatin"),
+    **dict.fromkeys(("brufen", "advil", "motrin", "nurofen", "ibugesic"), "ibuprofen"),
+    **dict.fromkeys(("voveran", "voltaren", "voltarol"), "diclofenac"),
+    **dict.fromkeys(("eliquis",), "apixaban"),
+    **dict.fromkeys(("xarelto",), "rivaroxaban"),
+    **dict.fromkeys(("pradaxa",), "dabigatran"),
+    **dict.fromkeys(("plavix", "clopilet", "deplatt"), "clopidogrel"),
+    **dict.fromkeys(("norvasc", "amlong", "stamlo", "amlodac"), "amlodipine"),
+    **dict.fromkeys(("telma", "micardis"), "telmisartan"),
+    **dict.fromkeys(("losar", "cozaar", "repace"), "losartan"),
+    **dict.fromkeys(("zestril", "prinivil"), "lisinopril"),
+    **dict.fromkeys(("lopressor", "toprol", "metolar"), "metoprolol"),
+    **dict.fromkeys(("tenormin",), "atenolol"),
+    **dict.fromkeys(("prilosec", "omez"), "omeprazole"),
+    **dict.fromkeys(("protonix", "pantocid"), "pantoprazole"),
+    **dict.fromkeys(("nexium",), "esomeprazole"),
+    **dict.fromkeys(("zofran", "emeset", "vomikind"), "ondansetron"),
+    **dict.fromkeys(("thyronorm", "eltroxin", "synthroid", "levoxyl"), "levothyroxine"),
+    **dict.fromkeys(("asthalin", "ventolin"), "salbutamol"),
+    **dict.fromkeys(("zithromax", "azithral", "azee"), "azithromycin"),
+    **dict.fromkeys(("cipro", "ciplox"), "ciprofloxacin"),
+    **dict.fromkeys(("flagyl", "metrogyl"), "metronidazole"),
+    **dict.fromkeys(("taxim",), "cefixime"),
+    **dict.fromkeys(("zoloft",), "sertraline"),
+    **dict.fromkeys(("prozac",), "fluoxetine"),
+    **dict.fromkeys(("lexapro", "nexito"), "escitalopram"),
+    **dict.fromkeys(("xanax", "alprax"), "alprazolam"),
+    **dict.fromkeys(("ativan",), "lorazepam"),
+    **dict.fromkeys(("valium",), "diazepam"),
+    **dict.fromkeys(("lyrica",), "pregabalin"),
+    **dict.fromkeys(("neurontin",), "gabapentin"),
+    **dict.fromkeys(("lantus", "humalog", "novorapid", "mixtard", "actrapid"), "insulin"),
+    **dict.fromkeys(("januvia", "istavel"), "sitagliptin"),
+    **dict.fromkeys(("amaryl",), "glimepiride"),
+    **dict.fromkeys(("zyrtec", "cetzine", "okacet"), "cetirizine"),
+    **dict.fromkeys(("allegra",), "fexofenadine"),
+    **dict.fromkeys(("benadryl",), "diphenhydramine"),
+    **dict.fromkeys(("wysolone", "omnacortil"), "prednisolone"),
+    **dict.fromkeys(("zyloric",), "allopurinol"),
+    **dict.fromkeys(("dilantin", "eptoin"), "phenytoin"),
+    **dict.fromkeys(("tegretol",), "carbamazepine"),
+    **dict.fromkeys(("keppra", "levipil"), "levetiracetam"),
+    **dict.fromkeys(("lanoxin",), "digoxin"),
+    **dict.fromkeys(("zantac", "aciloc", "rantac"), "ranitidine"),
+    **dict.fromkeys(("imodium",), "loperamide"),
+    **dict.fromkeys(("tamiflu",), "oseltamivir"),
+    **dict.fromkeys(("zovirax",), "acyclovir"),
 }
 
 #: Drug-class suffix families (word >= 7 letters). Chosen so no everyday
@@ -182,33 +288,201 @@ def _is_drug(word: str, extra: frozenset[str]) -> str | None:
     return None
 
 
+#: Words that commonly sit right next to a dose and are NOT a drug name.
+#: Any other word of >= 4 letters directly before a dose ("Zyxor 500mg") or
+#: right after "<dose> of" ("500mg of Zyxor") is read as a drug claim.
+_DOSE_NEIGHBOUR_STOP = frozenset({
+    "take", "takes", "taking", "took", "given", "give", "giving", "use", "using", "used",
+    "continue", "continuing", "keep", "keeping", "start", "starting", "resume", "restart",
+    "your", "their", "this", "that", "these", "those", "them", "with", "without", "plus",
+    "then", "also", "only", "just", "about", "around", "approximately", "exactly", "least",
+    "most", "than", "upto", "under", "over", "below", "above", "between", "within",
+    "dose", "doses", "dosage", "strength", "total", "maximum", "minimum", "daily", "each",
+    "every", "once", "twice", "thrice", "times", "usual", "normal", "same", "full", "single",
+    "first", "second", "third", "next", "last", "morning", "evening", "night", "nightly",
+    "bedtime", "noon", "afternoon", "prescribed", "prescribing", "prescription",
+    "current", "currently", "now", "still", "instead", "another", "remaining", "more",
+    "less", "much", "many", "have", "having", "need", "needs", "should", "will", "would",
+    "could", "must", "shall", "were", "been", "being", "into", "onto", "from", "after",
+    "before", "until", "till", "while", "when", "where", "which", "what", "medicine",
+    "medicines", "medication", "medications", "drug", "drugs", "tablet", "tablets", "pill",
+    "pills", "capsule", "capsules", "syrup", "injection", "injections", "liquid", "water",
+    "milk", "juice", "food", "meal", "meals", "glass", "cup", "spoon", "teaspoon", "dissolved",
+    "mixed", "contains", "containing", "reduced", "lowered", "changed", "switched",
+    "doctor", "doctors", "advised", "says", "said", "per", "please", "make", "sure",
+    "already", "today", "tonight", "tomorrow", "week", "weeks", "days", "hours", "dosed",
+})
+
+
+def _dec(raw: str) -> Decimal:
+    try:
+        return Decimal(raw)
+    except InvalidOperation:  # pragma: no cover - _norm_number output is numeric
+        return Decimal(0)
+
+
+def _fmt(value: Decimal) -> str:
+    text = format(value.normalize(), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _quantity(value: Decimal, unit: str) -> str:
+    """'1 g' -> '1000 mg'; '500 mcg' -> '0.5 mg'; '1 l' -> '1000 ml'."""
+    if unit in _UNIT_SCALE:
+        unit, factor = _UNIT_SCALE[unit]
+        value = value * factor
+    return f"{_fmt(value)} {unit}"
+
+
+def _number_words(words: list[str], i: int) -> tuple[Decimal, int, bool] | None:
+    """Parse a number-word phrase at ``i``: (value, next index, has a scale word).
+
+    "one thousand" -> 1000; "two hundred and fifty" -> 250; "thousand" -> 1000;
+    "a thousand" -> 1000; "a gram" -> 1 (only before a dose unit);
+    "half a gram" / "half an hour" -> 0.5. None if no number phrase starts here.
+    """
+    n = len(words)
+    w = words[i]
+    nxt = words[i + 1] if i + 1 < n else ""
+    if w == "half" and nxt in ("a", "an") and i + 2 < n and words[i + 2] in UNIT_CANONICAL:
+        return Decimal("0.5"), i + 2, False
+    if w in ("a", "an"):
+        if nxt in _SCALE_WORDS:
+            i += 1  # "a thousand" == "one thousand"
+        elif UNIT_CANONICAL.get(nxt) in _DOSE_UNITS:
+            return Decimal(1), i + 1, False
+        else:
+            return None
+    elif w not in NUMBER_WORDS and w not in _SCALE_WORDS:
+        return None
+    total, current, big, k, seen = 0, 0, False, i, False
+    while k < n:
+        t = words[k]
+        if t in NUMBER_WORDS:
+            current += int(NUMBER_WORDS[t])
+        elif t in _SCALE_WORDS:
+            big = True
+            if _SCALE_WORDS[t] == 1000:
+                total += (current or 1) * 1000
+                current = 0
+            else:
+                current = (current or 1) * 100
+        elif (t == "and" and seen and k + 1 < n
+              and (words[k + 1] in NUMBER_WORDS or words[k + 1] in _SCALE_WORDS)):
+            pass
+        else:
+            break
+        seen = True
+        k += 1
+    return Decimal(total + current), k, big
+
+
+def _neighbour_drug(word: str, extra: frozenset[str]) -> str | None:
+    """A word right next to a dose that may name an (unknown) drug."""
+    if (len(word) < 4 or not word.isalpha() or word in _DOSE_NEIGHBOUR_STOP
+            or word in NUMBER_WORDS or word in _SCALE_WORDS or word in UNIT_CANONICAL
+            or word in CHANGE_WORDS or word in FREQUENCY_WORDS):
+        return None
+    if _is_drug(word, extra) is not None:
+        return None  # emitted by the ordinary drug branch
+    return word
+
+
 def _scan(text: str, extra_drugs: frozenset[str]) -> tuple[list[str], frozenset[str]]:
     """(claim tokens in order, every plain word) for ``text``."""
-    words = _TOKEN.findall((text or "").lower().replace("µg", "mcg").replace("per cent", "percent"))
+    words = _TOKEN.findall((text or "").lower().replace("µg", "mcg").replace("μg", "mcg")
+                           .replace("per cent", "percent"))
+    n = len(words)
     tokens: list[str] = []
+
+    def at(k: int) -> str:
+        return words[k] if 0 <= k < n else ""
+
+    def emit_quantity(value: Decimal, unit: str, start: int, j: int) -> int:
+        """Emit '<value> <unit>' for the number at ``start`` whose unit is at
+        ``j``; returns the next index. Handles 'N times the dose' (a change
+        claim) and the drug-neighbour rule for dose units."""
+        if unit == "times" and at(j + 1) in _POSSESSIVE and (
+            at(j + 2) in _DOSE_NOUNS or at(j + 3) in _DOSE_NOUNS
+        ):
+            tokens.append("change:" + {"2": "double", "3": "triple"}.get(_fmt(value), "multiply"))
+            return j + 1
+        tokens.append(_quantity(value, unit))
+        if unit in _DOSE_UNITS:
+            for cand in (at(start - 1), at(j + 2) if at(j + 1) == "of" else ""):
+                name = _neighbour_drug(cand, extra_drugs) if cand else None
+                if name is not None:
+                    tokens.append(f"drug:{name}")
+        return j + 1
+
     i = 0
-    while i < len(words):
+    while i < n:
         w = words[i]
-        nxt = words[i + 1] if i + 1 < len(words) else ""
-        if w[0].isdigit():
+        nxt = at(i + 1)
+        if w[0].isdigit() or w == "%":
+            if w == "%":
+                i += 1
+                continue
             nums = _norm_number(w)
-            unit = UNIT_CANONICAL.get(nxt)
-            for n in nums[:-1]:
-                tokens.append(n)
+            for num in nums[:-1]:
+                tokens.append(num)
+            value, j = _dec(nums[-1]), i + 1
+            if at(j) == "and" and at(j + 1) == "a" and at(j + 2) == "half":
+                value, j = value + Decimal("0.5"), j + 3
+            unit = UNIT_CANONICAL.get(at(j))
             if unit is not None:
-                tokens.append(f"{nums[-1]} {unit}")
-                i += 2
+                i = emit_quantity(value, unit, i, j)
+                continue
+            drug = _is_drug(at(j), extra_drugs) if at(j) else None
+            if drug is not None and UNIT_CANONICAL.get(at(j + 1)) in _COUNT_UNITS:
+                tokens.append(f"drug:{drug}")
+                tokens.append(_quantity(value, UNIT_CANONICAL[at(j + 1)]))
+                i = j + 2
                 continue
             tokens.append(nums[-1])
-        elif w in NUMBER_WORDS and UNIT_CANONICAL.get(nxt):
-            # "two weeks", "three times" ("a day" / "an hour" are rates, not counts).
-            tokens.append(f"{NUMBER_WORDS[w]} {UNIT_CANONICAL[nxt]}")
-            i += 2
+            i += 1
             continue
-        elif w in FREQUENCY_WORDS:
+        if w == "twice" and nxt in _POSSESSIVE and (
+            at(i + 2) in _DOSE_NOUNS or at(i + 3) in _DOSE_NOUNS
+        ):
+            tokens.append("change:double")
+            i += 1
+            continue
+        parsed = _number_words(words, i)
+        if parsed is not None:
+            value, j, big = parsed
+            if at(j) == "and" and at(j + 1) == "a" and at(j + 2) == "half":
+                value, j = value + Decimal("0.5"), j + 3
+            unit = UNIT_CANONICAL.get(at(j))
+            if unit is not None:
+                i = emit_quantity(value, unit, i, j)
+                continue
+            drug = _is_drug(at(j), extra_drugs) if at(j) else None
+            if drug is not None and UNIT_CANONICAL.get(at(j + 1)) in _COUNT_UNITS:
+                tokens.append(f"drug:{drug}")
+                tokens.append(_quantity(value, UNIT_CANONICAL[at(j + 1)]))
+                i = j + 2
+                continue
+            if big:
+                # "one thousand" with no unit is still a number claim.
+                tokens.append(_fmt(value))
+                i = j
+                continue
+            if w not in ("a", "an", "half"):
+                i = j  # a bare small number word is not a claim ("one of them")
+                continue
+        if w in FREQUENCY_WORDS:
             tokens.append(f"{FREQUENCY_WORDS[w]} times")
         elif w == "once" and nxt in _ONCE_FRAME:
             tokens.append("1 times")
+        elif w in CHANGE_WORDS and not (w.startswith("doubl") and nxt.startswith("check")):
+            tokens.append(f"change:{CHANGE_WORDS[w]}")
+        elif w == "more" and nxt == "than" and at(i + 2) in _MORE_THAN and (
+            at(i + 2) not in _POSSESSIVE or at(i + 3) in _DOSE_NOUNS
+        ):
+            tokens.append("change:more")
         else:
             drug = _is_drug(w, extra_drugs)
             if drug is not None:
@@ -307,6 +581,155 @@ def facts_containing(token: str, facts: Iterable[Fact], extra_drugs: Iterable[st
     return out
 
 
+# -- take / stop polarity (v8) -------------------------------------------------
+
+_STOP_CUES = frozenset({
+    "stop", "stops", "stopped", "stopping", "discontinue", "discontinued", "discontinuing",
+    "cease", "ceased", "quit", "avoid", "avoids", "avoided", "avoiding", "withhold",
+    "withheld", "hold", "halt", "halted", "suspend", "suspended", "cancel", "cancelled",
+    "skip", "omit",
+})
+_TAKE_CUES = frozenset({
+    "take", "takes", "taking", "took", "continue", "continued", "continues", "continuing",
+    "keep", "resume", "resumed", "resuming", "restart", "restarted", "start", "started",
+    "starting", "use", "using", "prescribed", "prescribing", "prescribe", "carry",
+})
+_NEGATIONS = frozenset({"not", "never", "no", "t", "cannot", "dont", "nor"})
+#: Words a negation reaches across ("do not ever take", "should not be taking").
+_NEG_FILLER = frozenset({
+    "ever", "to", "be", "you", "it", "any", "longer", "more", "again", "still", "need",
+    "should", "must", "can", "do", "does", "please", "further", "yet",
+})
+_INSTEAD = (("instead", "of"), ("rather", "than"))
+#: After a negated take verb these make it a LIMIT ("do not take over 4 a day").
+_LIMIT_WORDS = frozenset({"over", "beyond", "above", "exceeding"})
+#: A drug mention that names OTHER products, not a direction about this drug.
+_OTHER_PRODUCT = frozenset({"other", "another", "containing"})
+_PRODUCT_SUFFIX = frozenset({"containing", "based", "products", "product", "combination",
+                             "combinations"})
+_CLAUSE_SPLIT = re.compile(r"(?<!\d)\.(?!\d)|[;!?\n\u2014]|\bbut\b|\bhowever\b|\bwhereas\b")
+_WORD = re.compile(r"[a-z]+")
+
+
+def _clause_polarity(clause: str, extra: frozenset[str], dose_in_clause: bool) -> dict[str, set[str]]:
+    words = _WORD.findall(clause)
+    out: dict[str, set[str]] = {}
+    mode: str | None = None
+    neg = False
+    after_stop = False
+    pending: list[str] = []  # drugs seen before any cue in this clause
+    k = 0
+    while k < len(words):
+        w = words[k]
+        if (w, words[k + 1] if k + 1 < len(words) else "") in _INSTEAD:
+            mode, neg, after_stop = "stop", False, False
+            k += 2
+            continue
+        if w in _NEGATIONS:
+            neg = True
+        elif w in _STOP_CUES:
+            mode = "take" if neg else "stop"
+            neg, after_stop = False, mode == "stop"
+        elif w in _TAKE_CUES:
+            if not after_stop:
+                nxt = words[k + 1:k + 3]
+                limit = nxt[:2] == ["more", "than"] or (nxt[:1] and nxt[0] in _LIMIT_WORDS)
+                # "do not take more than 3 a day" is a dose LIMIT, not a stop.
+                mode = "stop" if neg and not limit else "take"
+            neg = False
+        else:
+            drug = _is_drug(w, extra)
+            prev = words[k - 1] if k > 0 else ""
+            nxt_w = words[k + 1] if k + 1 < len(words) else ""
+            if drug is not None and (prev in _OTHER_PRODUCT or nxt_w in _PRODUCT_SUFFIX):
+                drug = None  # "other paracetamol-containing products": not this drug
+            if drug is not None:
+                if mode is None:
+                    pending.append(drug)
+                else:
+                    out.setdefault(drug, set()).add(mode)
+            if w not in _NEG_FILLER:
+                neg = False
+            after_stop = False
+        if mode is not None and pending:
+            for d in pending:
+                out.setdefault(d, set()).add(mode)
+            pending = []
+        k += 1
+    if pending and dose_in_clause:
+        for d in pending:  # "Metformin 500mg twice daily." is an instruction to take
+            out.setdefault(d, set()).add("take")
+    return out
+
+
+def drug_polarity(text: str, extra_drugs: Iterable[str] = ()) -> dict[str, set[str]]:
+    """{canonical drug: {"take", "stop"}} as the text directs, clause by clause.
+
+    The cue nearest before a drug in its clause sets the direction ("do not
+    take X" -> stop; "do not stop X" -> take; "X instead of Y" -> Y stop);
+    with no cue before it, the first cue after it in the clause ("warfarin
+    stopped"); with no cue at all, a clause carrying a dose/frequency is an
+    instruction to take; otherwise the drug is merely mentioned.
+    """
+    extra = frozenset(extra_drugs)
+    out: dict[str, set[str]] = {}
+    for clause in _CLAUSE_SPLIT.split((text or "").lower()):
+        if not clause or not clause.strip():
+            continue
+        toks, _ = _scan(clause, extra)
+        dose = any(not t.startswith(("drug:", "change:")) for t in toks)
+        for d, pol in _clause_polarity(clause, extra, dose).items():
+            out.setdefault(d, set()).update(pol)
+    return out
+
+
+def _facts_polarity(facts: Iterable[Fact], extra: frozenset[str]) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for f in facts:
+        for d, pol in drug_polarity(fact_text(f), extra).items():
+            out.setdefault(d, set()).update(pol)
+    return out
+
+
+def polarity_conflicts(
+    answer: str,
+    cited: Iterable[Fact],
+    non_current: Iterable[Fact] = (),
+    extra_drugs: Iterable[str] = (),
+) -> list[str]:
+    """Drugs whose take/stop direction in ``answer`` is contradicted.
+
+    For a drug the answer says to take (or to stop):
+
+    * a CITED fact directs the opposite and no cited fact directs the same
+      ("Take ibuprofen" while the cited fact says "Stop ibuprofen"); or
+    * a NON-CURRENT fact directs the opposite and no cited fact directs the
+      same — the only explicit direction on record is the other way.
+
+    Returns human-readable conflict tokens (empty = consistent).
+    """
+    cited = list(cited)
+    non_current = list(non_current)
+    extra = frozenset(extra_drugs) | medication_names(cited) | medication_names(non_current)
+    ans = drug_polarity(answer, extra)
+    if not ans:
+        return []
+    cited_pol = _facts_polarity(cited, extra)
+    old_pol = _facts_polarity(non_current, extra)
+    out: list[str] = []
+    for drug, pols in ans.items():
+        for pol in sorted(pols):
+            opp = "stop" if pol == "take" else "take"
+            here = cited_pol.get(drug, set())
+            if pol in here:
+                continue
+            if opp in here:
+                out.append(f"polarity:{pol} {drug} (cited fact says {opp})")
+            elif opp in old_pol.get(drug, set()):
+                out.append(f"polarity:{pol} {drug} (non-current fact says {opp})")
+    return out
+
+
 def non_current_facts(patient: Patient, now: datetime) -> tuple[Fact, ...]:
     """This patient's facts that are NOT current at ``now`` — superseded, not
     yet valid, or unapproved. Never answer material; used only to recognise a
@@ -322,10 +745,13 @@ __all__ = [
     "FREQUENCY_WORDS",
     "NUMBER_WORDS",
     "UNIT_CANONICAL",
+    "CHANGE_WORDS",
     "answer_tokens",
+    "drug_polarity",
     "fact_text",
     "facts_containing",
     "medication_names",
     "non_current_facts",
+    "polarity_conflicts",
     "ungrounded_tokens",
 ]

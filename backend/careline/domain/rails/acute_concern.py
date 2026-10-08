@@ -44,7 +44,7 @@ mode, and the red team measured 19% benign FPs without them):
   now." restores the history clause the anaphor points at.
 
 Deterministic, keyless, pure — mirrored into ``backend/policies/
-red-flags.v7.yaml`` and enforced in sync by ``tests/llm/test_prompt_registry.py``.
+red-flags.v8.yaml`` and enforced in sync by ``tests/llm/test_prompt_registry.py``.
 
 Owner: Priyanshu (scope ``safety``).
 """

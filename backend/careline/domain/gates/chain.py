@@ -38,6 +38,11 @@ symptom). Every RED_FLAG and cross-condition escalation text carries the
 number token and every drug name in the answer text must appear in a CITED
 fact of the current valid slice — a superseded dose behind a current fact's id
 is never ANSWERED (CLARIFY, or ESCALATE with a danger concept / spent budget).
+v8 hardens that check (number words, value-equal unit conversion, dose-change
+words, brand -> generic, unknown words next to a dose) and adds a take/stop
+**polarity check**: an answer whose direction for a drug contradicts the cited
+facts (or a non-current fact, when no cited fact states the answer's
+direction) is never ANSWERED.
 
 Owner: Priyanshu (scope ``safety``).
 """
@@ -53,6 +58,7 @@ from careline.domain.enums import ScopeCategory, TraceStatus, Verdict
 from careline.domain.gates.grounding import (
     facts_containing,
     medication_names,
+    polarity_conflicts,
     ungrounded_tokens,
 )
 from careline.domain.model.call_session import CallSession
@@ -534,13 +540,18 @@ def _grounding_veto(ctx: GateContext, danger: str | None) -> Decision | None:
     cited_ids = set(ctx.proposal.citations)
     cited = [f for f in ctx.valid_slice.facts if f.id in cited_ids]
     known = medication_names((*ctx.valid_slice.facts, *ctx.non_current_facts))
-    missing = ungrounded_tokens(ctx.proposal.candidate_answer or "", cited, known)
-    if not missing:
+    answer = ctx.proposal.candidate_answer or ""
+    missing = ungrounded_tokens(answer, cited, known)
+    conflicts = polarity_conflicts(answer, cited, ctx.non_current_facts, known)
+    if not missing and not conflicts:
         ctx.trace.record(
             "answer_grounding",
             TraceStatus.PASS,
             spec_section="§5.5",
-            detail=f"every dose/number/drug token grounded in {len(cited)} cited fact(s)",
+            detail=(
+                f"every dose/number/drug/dose-change token grounded in {len(cited)} cited "
+                "fact(s); no take/stop contradiction"
+            ),
         )
         return None
     notes = []
@@ -555,6 +566,7 @@ def _grounding_veto(ctx: GateContext, danger: str | None) -> Decision | None:
             else "in no fact"
         )
         notes.append(f"{token!r} {where}")
+    notes.extend(conflicts)
     problem = "; ".join(notes)
     budget_spent = ctx.call_session is not None and not ctx.call_session.can_clarify()
     if danger is not None or budget_spent:
