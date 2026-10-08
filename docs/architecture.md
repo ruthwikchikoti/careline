@@ -242,7 +242,7 @@ Gaps we disclose:
 
 | Failure | Behaviour |
 |---|---|
-| Reasoner or verifier unavailable (no SDK, API error, refusal, parse failure, timeout) | `ReasonerUnavailable` → ESCALATE, counted as fail-closed in `/monitoring`. No explicit client timeout is set: the `openai` 2.43.0 SDK defaults apply (600 s read, 5 s connect, 2 retries), so a hung provider is a latency problem long before it is an error |
+| Reasoner or verifier unavailable (no SDK, API error, refusal, parse failure, timeout) | `ReasonerUnavailable` → ESCALATE, counted as fail-closed in `/monitoring`. Every client has a 20 s timeout and one retry (`openai_client_kwargs`), so a hung provider fails closed in ≤ ~40 s |
 | Cited fact id not in the valid slice (superseded, other patient, mangled, duplicate) | Citation veto → CLARIFY, or ESCALATE with a danger concept or a spent clarify budget (v6) |
 | Answer text carries a dose, number or drug name that is in no cited current fact (e.g. a superseded dose behind the current fact's id, a retired or not-yet-valid drug) | Answer-text grounding check → CLARIFY, or ESCALATE with a danger concept or a spent clarify budget (v7). Lexical, so a unit-changing paraphrase ("1 g" for "1000mg") also CLARIFIES; a wrong claim with no number or drug name is still the verifier's job |
 | Rail misses an emergency | CLARIFY redirect ending with the 112 line; if the question names a danger concept or a present symptom, the turn is also flagged `needs_review` for the doctor's review queue (no page) |
