@@ -484,9 +484,8 @@ RED_FLAG_PATTERNS = (
     RED_FLAG_PATTERNS
     + tuple(p for _, p in _V4_PATTERNS)
     + tuple(p for _, p in _V5_PATTERNS)
-    + tuple(p for _, p in _V6_PATTERNS)
-    + tuple(p for _, p in _V7_PATTERNS)
-    + tuple(p for _, p in _V8_PATTERNS)
+    # DEMO REGRESSION (do not merge): "simplify" the rail by dropping the
+    # v6-v8 families. The eval gate must block this change.
 )
 
 # Concept map for the literal patterns — used by the v3 context suppression
